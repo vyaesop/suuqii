@@ -1,0 +1,54 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/ios/Flutter/.last_build_id
+**/ios/Pods/
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.*
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/android/app/google-services.json
+**/*.g.dart.generated
+**/.fvm/
+**/coverage/
+
+# Generated
+**/*.g.dart
+**/*.freezed.dart
+mobile/lib/l10n/app_localizations*.dart
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+.env.*
+!.env.example
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel/
+
+# Logs / dumps
+*.log
+*.dump
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

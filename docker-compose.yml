@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: suuqii_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: suuqii
+      POSTGRES_PASSWORD: suuqii
+      POSTGRES_DB: suuqii
+    ports:
+      - "5432:5432"
+    volumes:
+      - suuqii_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U suuqii -d suuqii"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  suuqii_pgdata:

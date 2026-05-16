@@ -1,0 +1,44 @@
+{
+  "@@locale": "om",
+  "appTitle": "Suuqii",
+  "navSell": "Gurguri",
+  "navInventory": "Meeshaa",
+  "navDebts": "Liqii",
+  "navShift": "Soorama",
+  "navDashboard": "Daashboordii",
+  "navSettings": "Qindaaʼinaalee",
+
+  "login": "Seeni",
+  "phone": "Bilbila",
+  "password": "Jecha darbii",
+  "createNewShop": "Suuqa haaraa uumi",
+  "joinShopWithCode": "Lakkoofsa waliin makaa",
+
+  "checkout": "Bittaa xumuri",
+  "paymentCash": "Kaash",
+  "paymentMobile": "Mobaayilii",
+  "paymentCredit": "Liqii",
+  "total": "Walumaagalaa",
+  "change": "Deebii",
+  "tendered": "Kennanii",
+
+  "lowStock": "Meeshaa xiqqaate",
+  "outstandingDebt": "Liqii hin kaffalamne",
+  "revenue": "Galii",
+  "profit": "Bu'aa",
+  "expenses": "Baasii",
+  "netProfit": "Bu'aa qulqulluu",
+
+  "ownerPinRequired": "PIN abbaa qabeenyaa barbaachisa",
+  "wrongPin": "PIN dogoggora",
+
+  "syncOffline": "Toora ala",
+  "syncPending": "Jijjiirama {n} eegaa jiru",
+  "@syncPending": { "placeholders": { "n": { "type": "int" } } },
+
+  "shiftOpeningCash": "Maallaqa eegalaa",
+  "shiftDeclaredCash": "Maallaqa ibsame",
+  "shiftExpectedCash": "Maallaqa eegamu",
+  "shiftVariance": "Garaagarummaa",
+  "shiftEnd": "Soorama xumuri"
+}
