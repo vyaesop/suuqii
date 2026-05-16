@@ -6,9 +6,9 @@ subsequent revisions use the normal autogenerate flow.
 from logging.config import fileConfig
 from pathlib import Path
 
-from alembic import context
 from sqlalchemy import create_engine, pool, text
 
+from alembic import context
 from app.core.config import settings
 from app.db.base import Base  # noqa: F401 — registers metadata
 
@@ -30,8 +30,14 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 
-# Use the sync URL for alembic (psycopg/postgresql://) if set, else strip +asyncpg.
-sync_url = settings.database_url_sync or settings.database_url.replace("+asyncpg", "")
+def psycopg_url(url: str) -> str:
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
+# Use the sync URL for alembic if set, else strip +asyncpg and use psycopg.
+sync_url = psycopg_url(settings.database_url_sync or settings.database_url.replace("+asyncpg", ""))
 config.set_main_option("sqlalchemy.url", sync_url)
 
 target_metadata = Base.metadata

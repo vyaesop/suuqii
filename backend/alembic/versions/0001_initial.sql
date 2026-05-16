@@ -367,7 +367,7 @@ DECLARE
 BEGIN
     FOR t IN
         SELECT unnest(ARRAY[
-            'products','sales','sale_items','inventory_logs','debts',
+            'products','sales','inventory_logs','debts',
             'debt_payments','expenses','shifts','audit_logs','sync_events'
         ])
     LOOP
@@ -377,6 +377,15 @@ BEGIN
         );
     END LOOP;
 END $$;
+
+CREATE POLICY tenant_isolation ON sale_items USING (
+    EXISTS (
+        SELECT 1
+        FROM sales
+        WHERE sales.id = sale_items.sale_id
+          AND sales.shop_id = current_setting('app.current_shop_id', true)::UUID
+    )
+);
 
 -- Prevent any UPDATE/DELETE on audit_logs (insert-only)
 REVOKE UPDATE, DELETE ON audit_logs FROM PUBLIC;
