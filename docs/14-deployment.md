@@ -78,13 +78,13 @@ Set `API_BASE_URL` per flavor:
 // mobile/lib/core/env/env.dart
 class Env {
   static const apiBaseUrl = String.fromEnvironment('API_BASE_URL',
-      defaultValue: 'https://api.suuqii.app');
+      defaultValue: 'https://suuqii.vercel.app');
 }
 ```
 Build commands:
 ```bash
 flutter build apk --release \
-  --dart-define=API_BASE_URL=https://api.suuqii.app \
+  --dart-define=API_BASE_URL=https://suuqii.vercel.app \
   --dart-define=SENTRY_DSN=...
 ```
 
@@ -133,7 +133,7 @@ Cron job alerts on:
 
 ## Domain & TLS
 
-- API: `api.suuqii.app` → Vercel.
+- API: `suuqii.vercel.app` → Vercel.
 - Web admin (future): `admin.suuqii.app` → Vercel.
 - Mobile: not applicable (deep links use `suuqii://` custom scheme).
 - TLS via Vercel automatic.

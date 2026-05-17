@@ -4,18 +4,16 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../device/device_id.dart';
-import '../env/env.dart';
-import '../storage/secure_storage.dart';
+import 'package:suuqii/core/device/device_id.dart';
+import 'package:suuqii/core/env/env.dart';
+import 'package:suuqii/core/storage/secure_storage.dart';
 
 part 'dio_client.g.dart';
 
 /// Holds the current access token in memory (RAM only).
 /// Refresh token lives in [SecureStorage]; access never persists.
 class TokenStore {
-  String? _access;
-  String? get access => _access;
-  set access(String? v) => _access = v;
+  String? access;
 }
 
 @Riverpod(keepAlive: true)
@@ -23,14 +21,16 @@ TokenStore tokenStore(TokenStoreRef ref) => TokenStore();
 
 @Riverpod(keepAlive: true)
 Dio dio(DioRef ref) {
-  final d = Dio(BaseOptions(
-    baseUrl: Env.apiBaseUrl,
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 30),
-    sendTimeout: const Duration(seconds: 30),
-    headers: {'Accept': 'application/json'},
-    validateStatus: (s) => s != null && s < 500,
-  ));
+  final d = Dio(
+    BaseOptions(
+      baseUrl: Env.apiBaseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 30),
+      headers: {'Accept': 'application/json'},
+      validateStatus: (s) => s != null && s < 500,
+    ),
+  );
 
   d.interceptors.addAll([
     _DeviceInterceptor(ref),
@@ -65,7 +65,8 @@ class _AuthInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final tok = ref.read(tokenStoreProvider).access;
-    if (tok != null && !options.path.contains('/auth/login') &&
+    if (tok != null &&
+        !options.path.contains('/auth/login') &&
         !options.path.contains('/auth/refresh') &&
         !options.path.contains('/auth/register-shop') &&
         !options.path.contains('/auth/accept-invite')) {
@@ -75,11 +76,14 @@ class _AuthInterceptor extends Interceptor {
   }
 
   @override
-  Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
+  Future<void> onError(
+      DioException err, ErrorInterceptorHandler handler,) async {
     final status = err.response?.statusCode;
     final path = err.requestOptions.path;
     final isAuthEndpoint = path.contains('/auth/');
-    if (status != 401 || isAuthEndpoint || err.requestOptions.extra['retried'] == true) {
+    if (status != 401 ||
+        isAuthEndpoint ||
+        err.requestOptions.extra['retried'] == true) {
       return handler.next(err);
     }
 

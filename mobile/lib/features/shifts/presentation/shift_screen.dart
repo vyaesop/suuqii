@@ -1,10 +1,16 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/utils/money.dart';
-import '../../../l10n/app_localizations.dart';
-import '../data/shifts_repository.dart';
+import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/shifts/data/shifts_repository.dart';
+import 'package:suuqii/l10n/app_localizations.dart';
+import 'package:suuqii/shared/widgets/empty_state.dart';
+import 'package:suuqii/shared/widgets/section_card.dart';
+import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 class ShiftScreen extends ConsumerWidget {
   const ShiftScreen({super.key});
@@ -17,13 +23,20 @@ class ShiftScreen extends ConsumerWidget {
     return Scaffold(
       body: shiftAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
+        error: (e, _) => EmptyState(
+          icon: Icons.error_outline,
+          title: 'Failed to load shift',
+          message: '$e',
+        ),
         data: (shift) {
           if (shift == null) {
             return _OpenShiftView(label: l.shiftOpeningCash);
           }
-          return _ActiveShiftView(shiftId: shift.id, opened: shift.openedAt,
-              openingCash: shift.openingCash);
+          return _ActiveShiftView(
+            shiftId: shift.id,
+            opened: shift.openedAt,
+            openingCash: shift.openingCash,
+          );
         },
       ),
     );
@@ -49,26 +62,79 @@ class _OpenShiftViewState extends ConsumerState<_OpenShiftView> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(widget.label, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _ctrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(prefixText: 'ETB  '),
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _busy ? null : _open,
-            child: const Text('Start shift'),
-          ),
-        ],
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(
+          horizontal: SuuqSpacing.lg,
+          vertical: SuuqSpacing.md,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: SuuqSpacing.xl),
+            Icon(
+              Icons.timelapse_rounded,
+              size: 48,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(height: SuuqSpacing.md),
+            Text(
+              'Start your shift',
+              style: theme.textTheme.displaySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: SuuqSpacing.xs),
+            Text(
+              'Count the cash in the till before you start selling.',
+              style: theme.textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: SuuqSpacing.xl),
+            SectionCard(
+              padding: const EdgeInsets.all(SuuqSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    widget.label.toUpperCase(),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(letterSpacing: 1.2),
+                  ),
+                  const SizedBox(height: SuuqSpacing.xs),
+                  TextField(
+                    controller: _ctrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      prefixText: 'ETB  ',
+                    ),
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: SuuqSpacing.lg),
+            FilledButton.icon(
+              icon: _busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.play_arrow_rounded),
+              onPressed: _busy ? null : _open,
+              label: const Text('Start shift'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -82,12 +148,11 @@ class _OpenShiftViewState extends ConsumerState<_OpenShiftView> {
       return;
     }
     setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shiftsRepositoryProvider).open(openingCash: amount);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -106,31 +171,110 @@ class _ActiveShiftView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     final l = AppLocalizations.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(20),
+    final scheme = theme.colorScheme;
+    final elapsed = DateTime.now().difference(opened);
+
+    return SafeArea(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Shift open',
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 4),
-          Text('Since ${opened.toLocal()}'),
-          const SizedBox(height: 24),
-          _StatRow(label: l.shiftOpeningCash, value: formatMoney(openingCash)),
-          const Spacer(),
-          FilledButton.icon(
-            icon: const Icon(Icons.flag),
-            onPressed: () => _closeShift(context, ref),
-            label: Text(l.shiftEnd),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(SuuqSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SectionCard(
+                    padding: const EdgeInsets.all(SuuqSpacing.lg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: scheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: SuuqSpacing.xs),
+                            Text(
+                              'SHIFT OPEN',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                letterSpacing: 1.4,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: SuuqSpacing.sm),
+                        Text(
+                          _humanDuration(elapsed),
+                          style: theme.textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          'Since ${_clock(opened.toLocal())}',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        const Divider(height: SuuqSpacing.xl),
+                        InfoRow(
+                          label: l.shiftOpeningCash,
+                          value: formatMoney(openingCash),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: SuuqSpacing.md),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      'When you finish your shift, count the cash drawer. '
+                      'We compare it with expected cash and surface any variance.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              SuuqSpacing.md, 0, SuuqSpacing.md, SuuqSpacing.md,
+            ),
+            child: FilledButton.icon(
+              icon: const Icon(Icons.flag_rounded),
+              onPressed: () => _closeShift(context, ref),
+              label: Text(l.shiftEnd),
+            ),
           ),
         ],
       ),
     );
   }
 
+  String _clock(DateTime d) =>
+      '${_pad(d.hour)}:${_pad(d.minute)}';
+  String _pad(int n) => n < 10 ? '0$n' : '$n';
+
+  String _humanDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
   Future<void> _closeShift(BuildContext context, WidgetRef ref) async {
-    final result = await showModalBottomSheet<({Decimal declared, String? note})>(
+    final messenger = ScaffoldMessenger.of(context);
+    final result =
+        await showModalBottomSheet<({Decimal declared, String? note})>(
       context: context,
       isScrollControlled: true,
       builder: (_) => const _CloseSheet(),
@@ -142,52 +286,51 @@ class _ActiveShiftView extends ConsumerWidget {
             declaredCash: result.declared,
             note: result.note,
           );
-      if (context.mounted) {
+      if (!context.mounted) return;
+      unawaited(
         showDialog<void>(
           context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Shift closed'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Expected: ${formatMoney(r.expected)}'),
-                Text('Declared: ${formatMoney(result.declared)}'),
-                Text('Variance: ${formatMoney(r.shift.variance ?? Decimal.zero)}'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
+          builder: (_) {
+            final variance = r.shift.variance ?? Decimal.zero;
+            final isShort = variance < Decimal.zero;
+            final isOver = variance > Decimal.zero;
+            return AlertDialog(
+              title: const Text('Shift closed'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  InfoRow(label: 'Expected', value: formatMoney(r.expected)),
+                  InfoRow(
+                    label: 'Declared',
+                    value: formatMoney(result.declared),
+                  ),
+                  const Divider(),
+                  InfoRow(
+                    label: 'Variance',
+                    value: formatMoney(variance),
+                    emphasize: true,
+                    intent: isShort
+                        ? Theme.of(context).colorScheme.error
+                        : isOver
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-      }
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Done'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
-  }
-}
-
-class _StatRow extends StatelessWidget {
-  const _StatRow({required this.label, required this.value});
-  final String label;
-  final String value;
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(child: Text(label)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
   }
 }
 
@@ -201,53 +344,68 @@ class _CloseSheetState extends State<_CloseSheet> {
   final _amount = TextEditingController();
   final _note = TextEditingController();
   @override
-  void dispose() { _amount.dispose(); _note.dispose(); super.dispose(); }
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Declared cash', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _amount,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(prefixText: 'ETB  '),
-                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _note,
-                decoration: const InputDecoration(labelText: 'Note (optional)'),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  final dec = Decimal.tryParse(_amount.text.trim());
-                  if (dec == null || dec < Decimal.zero) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Enter a valid amount')),
-                    );
-                    return;
-                  }
-                  Navigator.pop(context, (
-                    declared: dec,
-                    note: _note.text.trim().isEmpty ? null : _note.text.trim(),
-                  ));
-                },
-                child: const Text('Close shift'),
-              ),
-            ],
+    final theme = Theme.of(context);
+    return SuuqSheet(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Close shift', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            'Count the cash in the drawer.',
+            style: theme.textTheme.bodyMedium,
           ),
-        ),
+          const SizedBox(height: SuuqSpacing.md),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Declared cash',
+              prefixText: 'ETB  ',
+            ),
+            style: theme.textTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+          TextField(
+            controller: _note,
+            decoration: const InputDecoration(
+              labelText: 'Note (optional)',
+              helperText: 'e.g. gave too much change to a customer',
+            ),
+            maxLines: 2,
+          ),
+          const SizedBox(height: SuuqSpacing.lg),
+          FilledButton(
+            onPressed: () {
+              final dec = Decimal.tryParse(_amount.text.trim());
+              if (dec == null || dec < Decimal.zero) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid amount')),
+                );
+                return;
+              }
+              Navigator.pop(
+                context,
+                (
+                  declared: dec,
+                  note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+                ),
+              );
+            },
+            child: const Text('Close shift'),
+          ),
+        ],
       ),
     );
   }

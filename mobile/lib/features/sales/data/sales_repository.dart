@@ -3,19 +3,14 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/shifts/data/shifts_repository.dart';
+import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/storage/app_database.dart';
-import '../../../core/storage/tables/debts_table.dart';
-import '../../../core/storage/tables/inventory_logs_table.dart';
-import '../../../core/storage/tables/sales_tables.dart';
-import '../../auth/domain/entities/auth_state.dart';
-import '../../auth/presentation/controllers/auth_controller.dart';
-import '../../shifts/data/shifts_repository.dart';
-import '../../sync/data/sync_worker.dart';
-import '../domain/entities/sale.dart';
 
 part 'sales_repository.g.dart';
 
@@ -46,11 +41,14 @@ class SalesRepository {
     if (cart.isEmpty) {
       throw StateError('Cart is empty');
     }
-    if (paymentMethod == PaymentMethod.credit && (customerName == null || customerName.isEmpty)) {
+    if (paymentMethod == PaymentMethod.credit &&
+        (customerName == null || customerName.isEmpty)) {
       throw StateError('Credit sale needs a customer name');
     }
     for (final l in cart.lines) {
-      if (l.qty <= Decimal.zero) throw StateError('Invalid quantity for ${l.product.name}');
+      if (l.qty <= Decimal.zero) {
+        throw StateError('Invalid quantity for ${l.product.name}');
+      }
       if (l.product.stock < l.qty) {
         throw StateError('Insufficient stock for ${l.product.name}');
       }
@@ -67,46 +65,52 @@ class SalesRepository {
     final itemsPayload = <Map<String, dynamic>>[];
 
     await db.transaction(() async {
-      await db.into(db.salesTable).insert(SalesTableCompanion.insert(
-            id: saleId,
-            shopId: currentShopId,
-            shiftId: Value(shift),
-            userId: currentUserId,
-            subtotal: subtotal.toDouble(),
-            total: total.toDouble(),
-            costTotal: costTotal.toDouble(),
-            paymentMethod: method,
-            occurredAt: now,
-            synced: const Value(false),
-          ));
+      await db.into(db.salesTable).insert(
+            SalesTableCompanion.insert(
+              id: saleId,
+              shopId: currentShopId,
+              shiftId: Value(shift),
+              userId: currentUserId,
+              subtotal: subtotal.toDouble(),
+              total: total.toDouble(),
+              costTotal: costTotal.toDouble(),
+              paymentMethod: method,
+              occurredAt: now,
+              synced: const Value(false),
+            ),
+          );
 
       for (final line in cart.lines) {
         final itemId = const Uuid().v4();
-        await db.into(db.saleItemsTable).insert(SaleItemsTableCompanion.insert(
-              id: itemId,
-              saleId: saleId,
-              productId: line.product.id,
-              productNameSnapshot: line.product.name,
-              quantity: line.qty.toDouble(),
-              unitPrice: line.product.sellingPrice.toDouble(),
-              unitCost: line.product.purchasePrice.toDouble(),
-            ));
+        await db.into(db.saleItemsTable).insert(
+              SaleItemsTableCompanion.insert(
+                id: itemId,
+                saleId: saleId,
+                productId: line.product.id,
+                productNameSnapshot: line.product.name,
+                quantity: line.qty.toDouble(),
+                unitPrice: line.product.sellingPrice.toDouble(),
+                unitCost: line.product.purchasePrice.toDouble(),
+              ),
+            );
 
         // stock delta + ledger
         await db.customStatement(
           'UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?',
           [line.qty.toDouble(), now.toIso8601String(), line.product.id],
         );
-        await db.into(db.inventoryLogsTable).insert(InventoryLogsTableCompanion.insert(
-              id: const Uuid().v4(),
-              shopId: currentShopId,
-              productId: line.product.id,
-              movement: 'sale',
-              quantityDelta: -line.qty.toDouble(),
-              referenceType: const Value('sale'),
-              referenceId: Value(saleId),
-              userId: Value(currentUserId),
-            ));
+        await db.into(db.inventoryLogsTable).insert(
+              InventoryLogsTableCompanion.insert(
+                id: const Uuid().v4(),
+                shopId: currentShopId,
+                productId: line.product.id,
+                movement: 'sale',
+                quantityDelta: -line.qty.toDouble(),
+                referenceType: const Value('sale'),
+                referenceId: Value(saleId),
+                userId: Value(currentUserId),
+              ),
+            );
 
         itemsPayload.add({
           'id': itemId,
@@ -121,40 +125,45 @@ class SalesRepository {
       String? debtId;
       if (paymentMethod == PaymentMethod.credit) {
         debtId = const Uuid().v4();
-        await db.into(db.debtsTable).insert(DebtsTableCompanion.insert(
-              id: debtId,
-              shopId: currentShopId,
-              saleId: Value(saleId),
-              customerName: customerName!,
-              customerPhone: Value(customerPhone),
-              amountOwed: total.toDouble(),
-              dueDate: Value(dueDate),
-            ));
+        await db.into(db.debtsTable).insert(
+              DebtsTableCompanion.insert(
+                id: debtId,
+                shopId: currentShopId,
+                saleId: Value(saleId),
+                customerName: customerName!,
+                customerPhone: Value(customerPhone),
+                amountOwed: total.toDouble(),
+                dueDate: Value(dueDate),
+              ),
+            );
       }
 
       // enqueue the sync event in the same transaction
-      await db.into(db.syncEventsTable).insert(SyncEventsTableCompanion.insert(
-            clientEventId: const Uuid().v4(),
-            op: 'sale.create',
-            occurredAt: now,
-            payload: jsonEncode({
-              'id': saleId,
-              'shift_id': shift,
-              'subtotal': subtotal.toString(),
-              'total': total.toString(),
-              'cost_total': costTotal.toString(),
-              'payment_method': method,
-              'occurred_at': now.toIso8601String(),
-              'items': itemsPayload,
-              if (debtId != null) 'debt_id': debtId,
-              if (paymentMethod == PaymentMethod.credit)
-                'customer': {
-                  'name': customerName,
-                  if (customerPhone != null) 'phone': customerPhone,
-                  if (dueDate != null) 'due_date': dueDate.toIso8601String().split('T').first,
-                },
-            }),
-          ));
+      await db.into(db.syncEventsTable).insert(
+            SyncEventsTableCompanion.insert(
+              clientEventId: const Uuid().v4(),
+              op: 'sale.create',
+              occurredAt: now,
+              payload: jsonEncode({
+                'id': saleId,
+                'shift_id': shift,
+                'subtotal': subtotal.toString(),
+                'total': total.toString(),
+                'cost_total': costTotal.toString(),
+                'payment_method': method,
+                'occurred_at': now.toIso8601String(),
+                'items': itemsPayload,
+                if (debtId != null) 'debt_id': debtId,
+                if (paymentMethod == PaymentMethod.credit)
+                  'customer': {
+                    'name': customerName,
+                    if (customerPhone != null) 'phone': customerPhone,
+                    if (dueDate != null)
+                      'due_date': dueDate.toIso8601String().split('T').first,
+                  },
+              }),
+            ),
+          );
     });
 
     // fire-and-forget — sync runs in background

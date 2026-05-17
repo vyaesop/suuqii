@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -18,7 +17,8 @@ class SecureStorage {
   static const _kDeviceFp = 'device.fingerprint';
 
   Future<String?> readRefresh() => _raw.read(key: _kRefresh);
-  Future<void> writeRefresh(String value) => _raw.write(key: _kRefresh, value: value);
+  Future<void> writeRefresh(String value) =>
+      _raw.write(key: _kRefresh, value: value);
   Future<void> clearRefresh() => _raw.delete(key: _kRefresh);
 
   Future<String?> readDeviceFingerprint() => _raw.read(key: _kDeviceFp);

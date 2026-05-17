@@ -40,10 +40,20 @@ async def db_session(
     device_id: str = Depends(current_device),
 ) -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
-        # Stamp session-local context for RLS + audit triggers
-        await session.execute(text("SET LOCAL app.current_user_id = :v"), {"v": payload["sub"]})
-        await session.execute(text("SET LOCAL app.current_shop_id = :v"), {"v": payload["shop_id"]})
-        await session.execute(text("SET LOCAL app.current_device_id = :v"), {"v": device_id})
+        # Stamp session-local context for RLS + audit triggers.
+        # SET LOCAL doesn't accept bind params; set_config(name, value, is_local) does.
+        await session.execute(
+            text("SELECT set_config('app.current_user_id', :v, true)"),
+            {"v": payload["sub"]},
+        )
+        await session.execute(
+            text("SELECT set_config('app.current_shop_id', :v, true)"),
+            {"v": payload["shop_id"]},
+        )
+        await session.execute(
+            text("SELECT set_config('app.current_device_id', :v, true)"),
+            {"v": device_id},
+        )
         request.state.user_id = UUID(payload["sub"])
         request.state.shop_id = UUID(payload["shop_id"])
         request.state.role = payload["role"]

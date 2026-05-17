@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../core/storage/secure_storage.dart';
+import 'package:suuqii/core/storage/secure_storage.dart';
 
 /// Local persistence for the auth state across app restarts.
 /// - Refresh token → secure storage (Keychain / EncryptedSharedPreferences)
@@ -36,7 +36,13 @@ class AuthLocalDataSource {
     if (shopName != null) await _prefs.setString(_kShopName, shopName);
   }
 
-  ({String userId, String shopId, String role, String userName, String shopName})? readProfile() {
+  ({
+    String userId,
+    String shopId,
+    String role,
+    String userName,
+    String shopName
+  })? readProfile() {
     final uid = _prefs.getString(_kUserId);
     final sid = _prefs.getString(_kShopId);
     final role = _prefs.getString(_kRole);

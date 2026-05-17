@@ -4,12 +4,12 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
-import 'app/app.dart';
-import 'core/env/env.dart';
-import 'core/storage/app_database.dart';
-import 'features/auth/domain/entities/auth_state.dart';
-import 'features/auth/presentation/controllers/auth_controller.dart';
-import 'features/sync/data/sync_worker.dart';
+import 'package:suuqii/app/app.dart';
+import 'package:suuqii/core/env/env.dart';
+import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/sync/data/sync_worker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,9 +18,11 @@ Future<void> main() async {
   final dbFile = p.join(dir.path, 'suuqii.sqlite');
   final db = AppDatabase.openOn(dbFile);
 
-  final container = ProviderContainer(overrides: [
-    appDatabaseProvider.overrideWithValue(db),
-  ]);
+  final container = ProviderContainer(
+    overrides: [
+      appDatabaseProvider.overrideWithValue(db),
+    ],
+  );
 
   // Kick the sync worker whenever auth transitions to Authenticated.
   container.listen<AsyncValue<AuthState>>(
@@ -44,5 +46,6 @@ Future<void> main() async {
 }
 
 void _runApp(ProviderContainer container) {
-  runApp(UncontrolledProviderScope(container: container, child: const SuuqiiApp()));
+  runApp(UncontrolledProviderScope(
+      container: container, child: const SuuqiiApp(),),);
 }

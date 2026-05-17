@@ -1,6 +1,6 @@
 import 'package:decimal/decimal.dart';
 
-import '../../../inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
 
 enum PaymentMethod { cash, mobileMoney, credit }
 
@@ -25,7 +25,8 @@ class Cart {
   Decimal get costTotal => lines.fold(Decimal.zero, (a, b) => a + b.lineCost);
 
   Cart add(Product p, {Decimal? qty}) {
-    final next = lines.map((l) => CartLine(product: l.product, qty: l.qty)).toList();
+    final next =
+        lines.map((l) => CartLine(product: l.product, qty: l.qty)).toList();
     final i = next.indexWhere((l) => l.product.id == p.id);
     final addQty = qty ?? Decimal.one;
     if (i >= 0) {

@@ -44,7 +44,7 @@ async def main() -> None:
     async with AsyncSessionLocal() as db:
         existing = (await db.execute(select(User).where(User.phone == OWNER_PHONE))).scalar_one_or_none()
         if existing:
-            print(f"✓ Seed already present (user {OWNER_PHONE} exists, shop {existing.shop_id}). Skipping.")
+            print(f"OK Seed already present (user {OWNER_PHONE} exists, shop {existing.shop_id}). Skipping.")
             print(f"  Login with: phone={OWNER_PHONE}  password={OWNER_PASSWORD}  pin={OWNER_PIN}")
             return
 
@@ -78,7 +78,7 @@ async def main() -> None:
 
         await db.commit()
 
-        print(f'✓ Seeded shop "{SHOP_NAME}" (id={shop.id}) with {len(PRODUCTS)} products.')
+        print(f'OK Seeded shop "{SHOP_NAME}" (id={shop.id}) with {len(PRODUCTS)} products.')
         print("  Login with:")
         print(f"      phone:      {OWNER_PHONE}")
         print(f"      password:   {OWNER_PASSWORD}")

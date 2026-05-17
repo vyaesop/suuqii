@@ -8,11 +8,11 @@ from hashlib import sha256
 from secrets import token_hex
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_token_payload, current_user, db_session
+from app.core.deps import current_user, db_session
 from app.core.errors import DomainError
 from app.core.security import (
     decode_token,
@@ -103,7 +103,12 @@ async def register_shop(req: RegisterShopRequest) -> TokenBundle:
         db.add(owner)
         await db.flush()
 
-        bundle = await _issue_token_bundle(db, owner, device_fingerprint=token_hex(16), device_label=None)
+        bundle = await _issue_token_bundle(
+            db,
+            owner,
+            device_fingerprint=req.device_fingerprint,
+            device_label=req.device_label,
+        )
         await db.commit()
         return bundle
 

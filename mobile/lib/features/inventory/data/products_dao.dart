@@ -1,14 +1,15 @@
 import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 
-import '../../../core/storage/app_database.dart';
-import '../../../core/storage/tables/products_table.dart';
-import '../domain/entities/product.dart';
+import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/storage/tables/products_table.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
 
 part 'products_dao.g.dart';
 
 @DriftAccessor(tables: [ProductsTable])
-class ProductsDao extends DatabaseAccessor<AppDatabase> with _$ProductsDaoMixin {
+class ProductsDao extends DatabaseAccessor<AppDatabase>
+    with _$ProductsDaoMixin {
   ProductsDao(super.db);
 
   Stream<List<Product>> watchAll({String? query}) {
@@ -22,7 +23,8 @@ class ProductsDao extends DatabaseAccessor<AppDatabase> with _$ProductsDaoMixin 
   }
 
   Future<Product?> getById(String id) async {
-    final r = await (select(productsTable)..where((t) => t.id.equals(id))).getSingleOrNull();
+    final r = await (select(productsTable)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
     return r == null ? null : _toDomain(r);
   }
 

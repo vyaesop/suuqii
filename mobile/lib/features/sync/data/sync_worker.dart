@@ -4,13 +4,12 @@ import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../../core/connectivity/connectivity_provider.dart';
-import '../../../core/device/device_id.dart';
-import '../../../core/http/dio_client.dart';
-import '../../../core/storage/app_database.dart';
+import 'package:suuqii/core/connectivity/connectivity_provider.dart';
+import 'package:suuqii/core/device/device_id.dart';
+import 'package:suuqii/core/http/dio_client.dart';
+import 'package:suuqii/core/storage/app_database.dart';
 
 part 'sync_worker.g.dart';
 
@@ -47,7 +46,7 @@ class SyncWorker {
           await _waitForOnline();
           continue;
         }
-        final batch = await db.syncQueueDao.takePending(limit: 50);
+        final batch = await db.syncQueueDao.takePending();
         if (batch.isEmpty) break;
 
         try {
@@ -57,12 +56,14 @@ class SyncWorker {
             data: {
               'device_id': deviceId,
               'events': batch
-                  .map((e) => {
-                        'client_event_id': e.clientEventId,
-                        'op': e.op,
-                        'occurred_at': e.occurredAt.toIso8601String(),
-                        'payload': jsonDecode(e.payload),
-                      })
+                  .map(
+                    (e) => {
+                      'client_event_id': e.clientEventId,
+                      'op': e.op,
+                      'occurred_at': e.occurredAt.toIso8601String(),
+                      'payload': jsonDecode(e.payload),
+                    },
+                  )
                   .toList(),
             },
           );
@@ -74,7 +75,9 @@ class SyncWorker {
             await _backoff(batch.first.attempts + 1);
             continue;
           }
-          await _applyResults(response.data!['results'] as List, batch);
+          final results = (response.data!['results'] as List<dynamic>)
+              .cast<Map<String, dynamic>>();
+          await _applyResults(results, batch);
         } on DioException catch (e) {
           await db.syncQueueDao.bumpAttempts(
             batch.map((b) => b.id).toList(),
@@ -99,7 +102,10 @@ class SyncWorker {
     }
   }
 
-  Future<void> _applyResults(List results, List<SyncEventRow> batch) async {
+  Future<void> _applyResults(
+    List<Map<String, dynamic>> results,
+    List<SyncEventRow> batch,
+  ) async {
     final byClientId = {
       for (final r in results) r['client_event_id'] as String: r,
     };
@@ -107,7 +113,9 @@ class SyncWorker {
       final r = byClientId[ev.clientEventId];
       if (r == null) continue;
       final status = r['status'] as String;
-      if (status == 'applied' || status == 'duplicate' || status == 'conflict') {
+      if (status == 'applied' ||
+          status == 'duplicate' ||
+          status == 'conflict') {
         await db.syncQueueDao.markSynced(ev.id);
       } else if (status == 'rejected') {
         await db.syncQueueDao.markRejected(

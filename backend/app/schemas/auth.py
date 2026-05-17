@@ -9,6 +9,8 @@ class RegisterShopRequest(BaseModel):
     phone: str
     password: str = Field(min_length=8)
     owner_pin: str = Field(min_length=4, max_length=8)
+    device_fingerprint: str
+    device_label: str | None = None
     locale: str = "en"
 
 

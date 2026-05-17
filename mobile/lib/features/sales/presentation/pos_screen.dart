@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/utils/money.dart';
-import '../../../l10n/app_localizations.dart';
-import '../../inventory/data/products_repository.dart';
-import '../../inventory/domain/entities/product.dart';
-import '../domain/entities/sale.dart';
-import 'cart_controller.dart';
-import 'checkout_sheet.dart';
+import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/sales/presentation/cart_controller.dart';
+import 'package:suuqii/features/sales/presentation/checkout_sheet.dart';
+import 'package:suuqii/shared/widgets/empty_state.dart';
+import 'package:suuqii/shared/widgets/product_image.dart';
 
 class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
@@ -40,119 +42,88 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
     final productsAsync = ref.watch(watchProductsProvider(query: _query));
     final cart = ref.watch(cartControllerProvider);
-    final theme = Theme.of(context);
 
     return Scaffold(
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: TextField(
-              controller: _search,
-              onChanged: (v) => setState(() => _query = v),
-              decoration: InputDecoration(
-                hintText: 'Search products',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _search.clear();
-                          setState(() => _query = '');
-                        },
-                      ),
-                filled: true,
-                isDense: true,
-              ),
-            ),
+          _SearchField(
+            controller: _search,
+            onChanged: (v) => setState(() => _query = v),
+            onClear: _query.isEmpty
+                ? null
+                : () {
+                    _search.clear();
+                    setState(() => _query = '');
+                  },
           ),
           Expanded(
             child: productsAsync.when(
               data: (products) => products.isEmpty
-                  ? _Empty(query: _query)
+                  ? EmptyState(
+                      icon: Icons.inventory_2_outlined,
+                      title: _query.isEmpty
+                          ? 'No products yet'
+                          : 'No matches for "$_query"',
+                      message: _query.isEmpty
+                          ? 'Add your first product to start selling.'
+                          : null,
+                    )
                   : RefreshIndicator(
-                      onRefresh: () =>
-                          ref.read(productsSyncProvider.notifier).refresh(),
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(12),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 1.4,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                        ),
-                        itemCount: products.length,
-                        itemBuilder: (ctx, i) => _ProductTile(product: products[i]),
+                      onRefresh: () => ref
+                          .read(productsSyncProvider.notifier)
+                          .refresh(),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          // Two columns on phones, three on wide screens.
+                          final crossAxisCount =
+                              constraints.maxWidth >= 600 ? 3 : 2;
+                          return GridView.builder(
+                            padding: EdgeInsets.fromLTRB(
+                              SuuqSpacing.md,
+                              SuuqSpacing.xs,
+                              SuuqSpacing.md,
+                              cart.isNotEmpty ? 132 : SuuqSpacing.md,
+                            ),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              childAspectRatio: 0.72,
+                              crossAxisSpacing: SuuqSpacing.sm,
+                              mainAxisSpacing: SuuqSpacing.sm,
+                            ),
+                            itemCount: products.length,
+                            itemBuilder: (_, i) =>
+                                _ProductTile(product: products[i]),
+                          );
+                        },
                       ),
                     ),
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('$e')),
-            ),
-          ),
-          if (cart.isNotEmpty)
-            Material(
-              elevation: 8,
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('${cart.itemCount} items',
-                                style: theme.textTheme.bodySmall),
-                            Text(formatMoney(cart.total),
-                                style: theme.textTheme.titleLarge),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      OutlinedButton.icon(
-                        onPressed: () => _openCart(context),
-                        icon: const Icon(Icons.shopping_cart_outlined),
-                        label: const Text('Cart'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.shopping_cart_checkout),
-                        onPressed: () => _checkout(context),
-                        label: Text(l.checkout),
-                      ),
-                    ],
-                  ),
-                ),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (e, _) => EmptyState(
+                icon: Icons.error_outline,
+                title: "Couldn't load products",
+                message: '$e',
               ),
             ),
+          ),
         ],
       ),
+      bottomSheet:
+          cart.isEmpty ? null : _CartBar(cart: cart, onCheckout: _checkout),
     );
   }
 
-  void _openCart(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _CartSheet(),
-    );
-  }
-
-  Future<void> _checkout(BuildContext context) async {
+  Future<void> _checkout() async {
+    final messenger = ScaffoldMessenger.of(context);
     final result = await showModalBottomSheet<CheckoutResult>(
       context: context,
       isScrollControlled: true,
       builder: (_) => const CheckoutSheet(),
     );
     if (result == null) return;
-
     try {
       await ref.read(cartControllerProvider.notifier).checkout(
             paymentMethod: result.paymentMethod,
@@ -160,18 +131,75 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             customerPhone: result.customerPhone,
             dueDate: result.dueDate,
           );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sale recorded')),
-        );
-      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Sale recorded')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sale failed: $e')),
-        );
-      }
+      messenger.showSnackBar(SnackBar(content: Text('Sale failed: $e')));
     }
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  const _SearchField({
+    required this.controller,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        SuuqSpacing.md,
+        SuuqSpacing.xs,
+        SuuqSpacing.md,
+        SuuqSpacing.sm,
+      ),
+      child: SizedBox(
+        height: 56,
+        child: TextField(
+          controller: controller,
+          onChanged: onChanged,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          decoration: InputDecoration(
+            hintText: 'Search products',
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 24,
+              color: scheme.onSurfaceVariant,
+            ),
+            suffixIcon: onClear == null
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.clear_rounded, size: 20),
+                    onPressed: onClear,
+                  ),
+            fillColor: scheme.surfaceContainer,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: SuuqSpacing.md,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(999),
+              borderSide: BorderSide(color: scheme.outlineVariant),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(999),
+              borderSide: BorderSide(color: scheme.outlineVariant),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(999),
+              borderSide: BorderSide(color: scheme.primary, width: 1.5),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -181,138 +209,308 @@ class _ProductTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
-    final isLow = product.isLowStock;
-    return InkWell(
-      onTap: () => ref.read(cartControllerProvider.notifier).addProduct(product),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              product.name,
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+    final inCart = ref.watch(
+      cartControllerProvider.select(
+        (c) => c.lines.any((l) => l.product.id == product.id),
+      ),
+    );
+    final qty = ref.watch(
+      cartControllerProvider.select((c) {
+        for (final l in c.lines) {
+          if (l.product.id == product.id) return l.qty;
+        }
+        return null;
+      }),
+    );
+
+    return Material(
+      color: scheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(SuuqRadius.lg),
+      child: InkWell(
+        onTap: () =>
+            ref.read(cartControllerProvider.notifier).addProduct(product),
+        borderRadius: BorderRadius.circular(SuuqRadius.lg),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(SuuqRadius.lg),
+            border: Border.all(
+              color: inCart ? scheme.primary : scheme.outlineVariant,
+              width: inCart ? 1.5 : 1,
             ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    formatMoney(product.sellingPrice),
-                    style: theme.textTheme.titleLarge,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Image area
+              Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.all(SuuqSpacing.xs),
+                      child: ProductImage(
+                        name: product.name,
+                        imageUrl: product.imageUrl,
+                      ),
+                    ),
                   ),
+                  if (product.isLowStock)
+                    Positioned(
+                      top: SuuqSpacing.sm,
+                      left: SuuqSpacing.sm,
+                      child: _StockBadge(
+                        label: 'LOW',
+                        color: scheme.error,
+                      ),
+                    ),
+                  if (qty != null)
+                    Positioned(
+                      top: SuuqSpacing.sm,
+                      right: SuuqSpacing.sm,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '$qty',
+                          style: TextStyle(
+                            color: scheme.onPrimary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              // Text area
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  SuuqSpacing.sm,
+                  SuuqSpacing.xs,
+                  SuuqSpacing.sm,
+                  SuuqSpacing.sm,
                 ),
-                if (isLow)
-                  Chip(
-                    label: Text('${product.stock} ${product.unit}'),
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: theme.colorScheme.errorContainer,
-                  )
-                else
-                  Text('${product.stock} ${product.unit}',
-                      style: theme.textTheme.bodyMedium),
-              ],
-            ),
-          ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      product.name,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formatMoney(product.sellingPrice),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_fmtStock(product.stock.toDouble())} ${product.unit}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: product.isLowStock
+                            ? scheme.error
+                            : scheme.onSurfaceVariant,
+                        fontWeight:
+                            product.isLowStock ? FontWeight.w600 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
-}
 
-class _CartSheet extends ConsumerWidget {
-  const _CartSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cart = ref.watch(cartControllerProvider);
-    final controller = ref.read(cartControllerProvider.notifier);
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      maxChildSize: 0.95,
-      builder: (ctx, scroll) => Column(
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 40, height: 4,
-            decoration: BoxDecoration(
-              color: Theme.of(ctx).colorScheme.outlineVariant,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(child: Text('Cart', style: Theme.of(ctx).textTheme.titleLarge)),
-                TextButton(
-                  onPressed: () { controller.clear(); Navigator.pop(ctx); },
-                  child: const Text('Clear'),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              controller: scroll,
-              itemCount: cart.lines.length,
-              itemBuilder: (_, i) {
-                final line = cart.lines[i];
-                return ListTile(
-                  title: Text(line.product.name),
-                  subtitle: Text(
-                    '${line.qty} ${line.product.unit} × ${formatMoney(line.product.sellingPrice)}',
-                  ),
-                  trailing: Text(formatMoney(line.lineTotal)),
-                  onTap: () => controller.remove(line.product.id),
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16, 8, 16, MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Total ${formatMoney(cart.total)}',
-                    style: Theme.of(ctx).textTheme.titleLarge,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+  String _fmtStock(double n) {
+    if (n == n.roundToDouble()) return n.toInt().toString();
+    return n.toStringAsFixed(1);
   }
 }
 
-class _Empty extends StatelessWidget {
-  const _Empty({required this.query});
-  final String query;
+class _StockBadge extends StatelessWidget {
+  const _StockBadge({required this.label, required this.color});
+  final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.inventory_2_outlined, size: 48),
-          const SizedBox(height: 8),
-          Text(query.isEmpty ? 'No products yet' : 'No matches for "$query"'),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 10,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
+class _CartBar extends StatelessWidget {
+  const _CartBar({required this.cart, required this.onCheckout});
+  final Cart cart;
+  final VoidCallback onCheckout;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.primary,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(SuuqRadius.lg),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, -4),
+          ),
         ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            SuuqSpacing.md,
+            SuuqSpacing.md,
+            SuuqSpacing.md,
+            SuuqSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: scheme.onPrimary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(SuuqRadius.md),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.shopping_basket_rounded,
+                      color: scheme.onPrimary,
+                      size: 24,
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.onPrimary,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${cart.itemCount}',
+                          style: TextStyle(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 10,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: SuuqSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      cart.itemCount == 1
+                          ? '1 item in cart'
+                          : '${cart.itemCount} items in cart',
+                      style: TextStyle(
+                        color: scheme.onPrimary.withValues(alpha: 0.85),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      formatMoney(cart.total),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: scheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: SuuqSpacing.sm),
+              SizedBox(
+                height: 56,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.onPrimary,
+                    foregroundColor: scheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: SuuqSpacing.lg,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(SuuqRadius.md),
+                    ),
+                  ),
+                  onPressed: onCheckout,
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Checkout',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Icon(Icons.arrow_forward_rounded, size: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

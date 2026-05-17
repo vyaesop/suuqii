@@ -1,12 +1,11 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../core/http/dio_client.dart';
-import '../../../core/storage/secure_storage.dart';
-import '../data/auth_local_data_source.dart';
-import '../data/auth_remote_data_source.dart';
-import '../data/auth_repository_impl.dart';
+import 'package:suuqii/core/http/dio_client.dart';
+import 'package:suuqii/core/storage/secure_storage.dart';
+import 'package:suuqii/features/auth/data/auth_local_data_source.dart';
+import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
+import 'package:suuqii/features/auth/data/auth_repository_impl.dart';
 
 part 'providers.g.dart';
 

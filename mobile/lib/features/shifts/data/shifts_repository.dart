@@ -3,15 +3,13 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/shifts/domain/entities/shift.dart';
+import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/storage/app_database.dart';
-import '../../auth/domain/entities/auth_state.dart';
-import '../../auth/presentation/controllers/auth_controller.dart';
-import '../../sync/data/sync_worker.dart';
-import '../domain/entities/shift.dart';
 
 part 'shifts_repository.g.dart';
 
@@ -32,7 +30,9 @@ class ShiftsRepository {
     final q = db.select(db.shiftsTable)
       ..where((t) => t.userId.equals(userId) & t.closedAt.isNull())
       ..limit(1);
-    return q.watchSingleOrNull().map((row) => row == null ? null : _toDomain(row));
+    return q
+        .watchSingleOrNull()
+        .map((row) => row == null ? null : _toDomain(row));
   }
 
   Future<Shift> open({required Decimal openingCash}) async {
@@ -45,26 +45,31 @@ class ShiftsRepository {
     final id = const Uuid().v4();
     final openedAt = DateTime.now().toUtc();
     await db.transaction(() async {
-      await db.into(db.shiftsTable).insert(ShiftsTableCompanion.insert(
-            id: id,
-            shopId: shopId,
-            userId: userId,
-            openedAt: openedAt,
-            openingCash: openingCash.toDouble(),
-          ));
-      await db.into(db.syncEventsTable).insert(SyncEventsTableCompanion.insert(
-            clientEventId: const Uuid().v4(),
-            op: 'shift.open',
-            occurredAt: openedAt,
-            payload: jsonEncode({
-              'id': id,
-              'opened_at': openedAt.toIso8601String(),
-              'opening_cash': openingCash.toString(),
-            }),
-          ));
+      await db.into(db.shiftsTable).insert(
+            ShiftsTableCompanion.insert(
+              id: id,
+              shopId: shopId,
+              userId: userId,
+              openedAt: openedAt,
+              openingCash: openingCash.toDouble(),
+            ),
+          );
+      await db.into(db.syncEventsTable).insert(
+            SyncEventsTableCompanion.insert(
+              clientEventId: const Uuid().v4(),
+              op: 'shift.open',
+              occurredAt: openedAt,
+              payload: jsonEncode({
+                'id': id,
+                'opened_at': openedAt.toIso8601String(),
+                'opening_cash': openingCash.toString(),
+              }),
+            ),
+          );
     });
     unawaited(kickSync());
-    final row = await (db.select(db.shiftsTable)..where((t) => t.id.equals(id))).getSingle();
+    final row = await (db.select(db.shiftsTable)..where((t) => t.id.equals(id)))
+        .getSingle();
     return _toDomain(row);
   }
 
@@ -73,15 +78,19 @@ class ShiftsRepository {
     required Decimal declaredCash,
     String? note,
   }) async {
-    final row = await (db.select(db.shiftsTable)..where((t) => t.id.equals(shiftId))).getSingleOrNull();
+    final row = await (db.select(db.shiftsTable)
+          ..where((t) => t.id.equals(shiftId)))
+        .getSingleOrNull();
     if (row == null) throw StateError('Shift not found');
     if (row.closedAt != null) throw StateError('Shift already closed');
 
-    final expected = await _computeExpectedCash(shiftId, Decimal.parse(row.openingCash.toString()));
+    final expected = await _computeExpectedCash(
+        shiftId, Decimal.parse(row.openingCash.toString()),);
     final now = DateTime.now().toUtc();
 
     await db.transaction(() async {
-      await (db.update(db.shiftsTable)..where((t) => t.id.equals(shiftId))).write(
+      await (db.update(db.shiftsTable)..where((t) => t.id.equals(shiftId)))
+          .write(
         ShiftsTableCompanion(
           declaredClosingCash: Value(declaredCash.toDouble()),
           expectedClosingCash: Value(expected.toDouble()),
@@ -90,52 +99,57 @@ class ShiftsRepository {
           updatedAt: Value(now),
         ),
       );
-      await db.into(db.syncEventsTable).insert(SyncEventsTableCompanion.insert(
-            clientEventId: const Uuid().v4(),
-            op: 'shift.close',
-            occurredAt: now,
-            payload: jsonEncode({
-              'id': shiftId,
-              'declared_closing_cash': declaredCash.toString(),
-              if (note != null) 'note': note,
-            }),
-          ));
+      await db.into(db.syncEventsTable).insert(
+            SyncEventsTableCompanion.insert(
+              clientEventId: const Uuid().v4(),
+              op: 'shift.close',
+              occurredAt: now,
+              payload: jsonEncode({
+                'id': shiftId,
+                'declared_closing_cash': declaredCash.toString(),
+                if (note != null) 'note': note,
+              }),
+            ),
+          );
     });
     unawaited(kickSync());
-    final updated = await (db.select(db.shiftsTable)..where((t) => t.id.equals(shiftId))).getSingle();
+    final updated = await (db.select(db.shiftsTable)
+          ..where((t) => t.id.equals(shiftId)))
+        .getSingle();
     return (expected: expected, shift: _toDomain(updated));
   }
 
-  Future<Decimal> _computeExpectedCash(String shiftId, Decimal openingCash) async {
+  Future<Decimal> _computeExpectedCash(
+      String shiftId, Decimal openingCash,) async {
     Decimal asDec(double? v) => Decimal.parse((v ?? 0).toString());
 
     final cashSales = await db.customSelect(
-      "SELECT COALESCE(SUM(total), 0) AS t FROM sales "
+      'SELECT COALESCE(SUM(total), 0) AS t FROM sales '
       "WHERE shift_id = ? AND payment_method = 'cash' "
       "AND status = 'completed' AND deleted_at IS NULL",
       variables: [Variable.withString(shiftId)],
     ).getSingle();
     final cashRefunds = await db.customSelect(
-      "SELECT COALESCE(SUM(total), 0) AS t FROM sales "
+      'SELECT COALESCE(SUM(total), 0) AS t FROM sales '
       "WHERE shift_id = ? AND payment_method = 'cash' AND status = 'refunded'",
       variables: [Variable.withString(shiftId)],
     ).getSingle();
     final debtCollected = await db.customSelect(
-      "SELECT COALESCE(SUM(amount), 0) AS t FROM debt_payments "
+      'SELECT COALESCE(SUM(amount), 0) AS t FROM debt_payments '
       "WHERE shift_id = ? AND method = 'cash'",
       variables: [Variable.withString(shiftId)],
     ).getSingle();
     final expenses = await db.customSelect(
-      "SELECT COALESCE(SUM(amount), 0) AS t FROM expenses "
-      "WHERE shift_id = ? AND deleted_at IS NULL",
+      'SELECT COALESCE(SUM(amount), 0) AS t FROM expenses '
+      'WHERE shift_id = ? AND deleted_at IS NULL',
       variables: [Variable.withString(shiftId)],
     ).getSingle();
 
-    return openingCash
-        + asDec(cashSales.read<double?>('t'))
-        + asDec(debtCollected.read<double?>('t'))
-        - asDec(expenses.read<double?>('t'))
-        - asDec(cashRefunds.read<double?>('t'));
+    return openingCash +
+        asDec(cashSales.read<double?>('t')) +
+        asDec(debtCollected.read<double?>('t')) -
+        asDec(expenses.read<double?>('t')) -
+        asDec(cashRefunds.read<double?>('t'));
   }
 
   Shift _toDomain(ShiftRow r) => Shift(

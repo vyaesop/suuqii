@@ -1,7 +1,7 @@
 import 'package:decimal/decimal.dart';
 import 'package:dio/dio.dart';
 
-import '../domain/entities/product.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
 
 class ProductsRemoteDataSource {
   ProductsRemoteDataSource(this._dio);
@@ -9,11 +9,13 @@ class ProductsRemoteDataSource {
 
   Future<List<Product>> list({String? shopId}) async {
     final res = await _dio.get<Map<String, dynamic>>('/v1/products');
-    final items = (res.data?['items'] as List? ?? []).cast<Map<String, dynamic>>();
+    final items =
+        (res.data?['items'] as List? ?? []).cast<Map<String, dynamic>>();
     return items.map((j) => _fromJson(j, shopId: shopId ?? '')).toList();
   }
 
-  Product _fromJson(Map<String, dynamic> j, {required String shopId}) => Product(
+  Product _fromJson(Map<String, dynamic> j, {required String shopId}) =>
+      Product(
         id: j['id'] as String,
         shopId: shopId,
         name: j['name'] as String,

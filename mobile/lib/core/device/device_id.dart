@@ -1,8 +1,6 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:suuqii/core/storage/secure_storage.dart';
 import 'package:uuid/uuid.dart';
-
-import '../storage/secure_storage.dart';
 
 part 'device_id.g.dart';
 

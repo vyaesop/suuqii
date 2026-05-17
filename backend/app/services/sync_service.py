@@ -30,7 +30,13 @@ from app.models import (
 )
 from app.schemas.sync import SyncEventIn, SyncResultOut, SyncResultStatus
 
-SENSITIVE_OPS = {"product.update", "inventory.adjust", "debt.writeoff", "sale.void"}
+SENSITIVE_OPS = {
+    "product.update",
+    "product.delete",
+    "inventory.adjust",
+    "debt.writeoff",
+    "sale.void",
+}
 
 
 class SyncService:
@@ -113,6 +119,7 @@ class SyncService:
             "sale.refund": self._sale_refund,
             "product.create": self._product_create,
             "product.update": self._product_update,
+            "product.delete": self._product_delete,
             "inventory.adjust": self._inventory_adjust,
             "debt.payment.create": self._debt_payment_create,
             "expense.create": self._expense_create,
@@ -270,6 +277,12 @@ class SyncService:
                 setattr(prod, field, Decimal(p[field]))
         if client_ts:
             prod.client_updated_at = client_ts
+
+    async def _product_delete(self, p: dict[str, Any]) -> None:
+        prod = await self.db.get(Product, UUID(p["id"]))
+        if not prod:
+            return  # already gone — idempotent
+        prod.deleted_at = datetime.now(UTC)
 
     async def _inventory_adjust(self, p: dict[str, Any]) -> None:
         product_id = UUID(p["product_id"])

@@ -1,10 +1,9 @@
 import 'package:decimal/decimal.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../inventory/domain/entities/product.dart';
-import '../data/sales_repository.dart';
-import '../domain/entities/sale.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/sales/data/sales_repository.dart';
+import 'package:suuqii/features/sales/domain/entities/sale.dart';
 
 part 'cart_controller.g.dart';
 

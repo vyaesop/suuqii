@@ -30,7 +30,8 @@ class SaleItemsTable extends Table {
   String get tableName => 'sale_items';
 
   TextColumn get id => text()();
-  TextColumn get saleId => text().references(SalesTable, #id, onDelete: KeyAction.cascade)();
+  TextColumn get saleId =>
+      text().references(SalesTable, #id, onDelete: KeyAction.cascade)();
   TextColumn get productId => text()();
   TextColumn get productNameSnapshot => text()();
   RealColumn get quantity => real()();

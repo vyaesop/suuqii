@@ -28,7 +28,8 @@ class DebtPaymentsTable extends Table {
   String get tableName => 'debt_payments';
 
   TextColumn get id => text()();
-  TextColumn get debtId => text().references(DebtsTable, #id, onDelete: KeyAction.cascade)();
+  TextColumn get debtId =>
+      text().references(DebtsTable, #id, onDelete: KeyAction.cascade)();
   TextColumn get shopId => text()();
   TextColumn get shiftId => text().nullable()();
   RealColumn get amount => real()();

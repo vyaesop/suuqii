@@ -1,15 +1,15 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/storage/tables/sync_events_table.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/storage/app_database.dart';
-import '../../../core/storage/tables/sync_events_table.dart';
 
 part 'sync_queue_dao.g.dart';
 
 @DriftAccessor(tables: [SyncEventsTable])
-class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixin {
+class SyncQueueDao extends DatabaseAccessor<AppDatabase>
+    with _$SyncQueueDaoMixin {
   SyncQueueDao(super.db);
 
   Future<void> enqueue({
@@ -17,12 +17,14 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixi
     required Map<String, dynamic> payload,
     DateTime? occurredAt,
   }) async {
-    await into(syncEventsTable).insert(SyncEventsTableCompanion.insert(
-      clientEventId: const Uuid().v4(),
-      op: op,
-      payload: jsonEncode(payload),
-      occurredAt: occurredAt ?? DateTime.now().toUtc(),
-    ));
+    await into(syncEventsTable).insert(
+      SyncEventsTableCompanion.insert(
+        clientEventId: const Uuid().v4(),
+        op: op,
+        payload: jsonEncode(payload),
+        occurredAt: occurredAt ?? DateTime.now().toUtc(),
+      ),
+    );
   }
 
   Future<List<SyncEventRow>> takePending({int limit = 50}) {

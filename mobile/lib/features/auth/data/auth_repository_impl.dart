@@ -1,7 +1,7 @@
-import '../../../core/http/dio_client.dart';
-import '../domain/entities/auth_state.dart';
-import 'auth_local_data_source.dart';
-import 'auth_remote_data_source.dart';
+import 'package:suuqii/core/http/dio_client.dart';
+import 'package:suuqii/features/auth/data/auth_local_data_source.dart';
+import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 
 class AuthRepository {
   AuthRepository({
@@ -34,6 +34,7 @@ class AuthRepository {
     required String phone,
     required String password,
     required String ownerPin,
+    required String deviceFingerprint,
     String locale = 'en',
   }) async {
     final res = await remote.registerShop(
@@ -42,6 +43,7 @@ class AuthRepository {
       phone: phone,
       password: password,
       ownerPin: ownerPin,
+      deviceFingerprint: deviceFingerprint,
       locale: locale,
     );
     return _applyBundle(res, phone, shopName: shopName, userName: ownerName);

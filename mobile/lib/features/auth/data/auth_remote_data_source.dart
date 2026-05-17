@@ -31,6 +31,7 @@ class AuthRemoteDataSource {
     required String phone,
     required String password,
     required String ownerPin,
+    required String deviceFingerprint,
     String locale = 'en',
   }) async {
     final res = await _dio.post<Map<String, dynamic>>(
@@ -41,6 +42,7 @@ class AuthRemoteDataSource {
         'phone': phone,
         'password': password,
         'owner_pin': ownerPin,
+        'device_fingerprint': deviceFingerprint,
         'locale': locale,
       },
     );
@@ -59,7 +61,7 @@ class AuthRemoteDataSource {
     return res.data!['challenge_token'] as String;
   }
 
-  Object _toError(Response res) {
+  AuthException _toError(Response<dynamic> res) {
     final d = res.data;
     if (d is Map && d['detail'] is String) {
       return AuthException(d['detail'] as String, res.statusCode);

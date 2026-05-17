@@ -54,6 +54,6 @@ See [../docs/05-flutter-structure.md](../docs/05-flutter-structure.md) for the f
 
 ```bash
 flutter build apk --release \
-  --dart-define=API_BASE_URL=https://api.suuqii.app \
+  --dart-define=API_BASE_URL=https://suuqii.vercel.app \
   --dart-define=SENTRY_DSN=...
 ```
