@@ -28,6 +28,10 @@ class CartController extends _$CartController {
     state = Cart.empty();
   }
 
+  void setDiscount(Decimal value) {
+    state = state.setDiscount(value);
+  }
+
   Future<String> checkout({
     required PaymentMethod paymentMethod,
     String? customerName,

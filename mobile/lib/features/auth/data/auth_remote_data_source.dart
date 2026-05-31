@@ -61,6 +61,31 @@ class AuthRemoteDataSource {
     return res.data!['challenge_token'] as String;
   }
 
+  Future<List<Map<String, dynamic>>> listShopUsers() async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/auth/users');
+    if (res.statusCode != 200) throw _toError(res);
+    final raw = res.data!['users'] as List<dynamic>;
+    return raw.cast<Map<String, dynamic>>();
+  }
+
+  Future<({String code, String expiresAt})> invite({
+    required String name,
+    required String phone,
+    String role = 'cashier',
+  }) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/v1/auth/invite',
+      data: {'name': name, 'phone': phone, 'role': role},
+    );
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      throw _toError(res);
+    }
+    return (
+      code: res.data!['invite_code'] as String,
+      expiresAt: res.data!['expires_at'] as String,
+    );
+  }
+
   AuthException _toError(Response<dynamic> res) {
     final d = res.data;
     if (d is Map && d['detail'] is String) {

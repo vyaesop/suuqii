@@ -30,3 +30,26 @@ class Shift {
           ? null
           : declaredClosingCash! - expectedClosingCash!;
 }
+
+/// Itemized cash-drawer math for a shift. Shown to the cashier so they
+/// can see exactly how the expected balance is derived.
+class ShiftBreakdown {
+  const ShiftBreakdown({
+    required this.openingCash,
+    required this.cashSales,
+    required this.debtCollected,
+    required this.expenses,
+    required this.cashRefunds,
+  });
+
+  final Decimal openingCash;
+  final Decimal cashSales;
+  final Decimal debtCollected;
+  final Decimal expenses;
+  final Decimal cashRefunds;
+
+  Decimal get expected =>
+      openingCash + cashSales + debtCollected - expenses - cashRefunds;
+}
+
+

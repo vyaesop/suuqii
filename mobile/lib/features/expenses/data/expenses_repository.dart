@@ -20,18 +20,18 @@ class ExpensesRepository {
   ExpensesRepository({
     required this.db,
     required this.remote,
-    required this.kickSync,
+    required this.syncWorker,
     required this.shopId,
     required this.userId,
-    required this.shiftIdNow,
+    required this.shiftId,
   });
 
   final AppDatabase db;
   final ExpensesRemoteDataSource remote;
-  final Future<void> Function() kickSync;
+  final SyncWorker syncWorker;
   final String shopId;
   final String userId;
-  final String? Function() shiftIdNow;
+  final String? shiftId;
 
   Stream<List<Expense>> watch() => db.expensesDao.watchAll();
 
@@ -52,7 +52,7 @@ class ExpensesRepository {
     final id = const Uuid().v4();
     final now = DateTime.now().toUtc();
     final at = occurredAt ?? now;
-    final shift = shiftIdNow();
+    final shift = shiftId;
 
     await db.transaction(() async {
       await db.into(db.expensesTable).insert(
@@ -85,7 +85,7 @@ class ExpensesRepository {
             ),
           );
     });
-    unawaited(kickSync());
+    unawaited(syncWorker.kick());
   }
 }
 
@@ -99,10 +99,10 @@ ExpensesRepository expensesRepository(ExpensesRepositoryRef ref) {
   return ExpensesRepository(
     db: ref.watch(appDatabaseProvider),
     remote: ExpensesRemoteDataSource(ref.watch(dioProvider)),
-    kickSync: () => ref.read(syncWorkerProvider).kick(),
+    syncWorker: ref.watch(syncWorkerProvider),
     shopId: auth.shopId,
     userId: auth.userId,
-    shiftIdNow: () => shift?.id,
+    shiftId: shift?.id,
   );
 }
 

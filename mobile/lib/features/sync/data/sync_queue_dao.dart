@@ -61,7 +61,7 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
       'UPDATE sync_events '
       'SET attempts = attempts + 1, last_attempt_at = ?, last_error = ? '
       'WHERE id IN ($placeholders)',
-      [DateTime.now().toIso8601String(), error, ...ids],
+      [sqliteDateTimeParam(DateTime.now()), error, ...ids],
     );
   }
 }

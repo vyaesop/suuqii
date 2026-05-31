@@ -16,13 +16,13 @@ part 'shifts_repository.g.dart';
 class ShiftsRepository {
   ShiftsRepository({
     required this.db,
-    required this.kickSync,
+    required this.syncWorker,
     required this.userId,
     required this.shopId,
   });
 
   final AppDatabase db;
-  final Future<void> Function() kickSync;
+  final SyncWorker syncWorker;
   final String userId;
   final String shopId;
 
@@ -67,13 +67,13 @@ class ShiftsRepository {
             ),
           );
     });
-    unawaited(kickSync());
+    unawaited(syncWorker.kick());
     final row = await (db.select(db.shiftsTable)..where((t) => t.id.equals(id)))
         .getSingle();
     return _toDomain(row);
   }
 
-  Future<({Decimal expected, Shift shift})> close({
+  Future<({ShiftBreakdown breakdown, Shift shift})> close({
     required String shiftId,
     required Decimal declaredCash,
     String? note,
@@ -84,8 +84,10 @@ class ShiftsRepository {
     if (row == null) throw StateError('Shift not found');
     if (row.closedAt != null) throw StateError('Shift already closed');
 
-    final expected = await _computeExpectedCash(
-        shiftId, Decimal.parse(row.openingCash.toString()),);
+    final breakdown = await computeBreakdown(
+      shiftId,
+      Decimal.parse(row.openingCash.toString()),
+    );
     final now = DateTime.now().toUtc();
 
     await db.transaction(() async {
@@ -93,7 +95,7 @@ class ShiftsRepository {
           .write(
         ShiftsTableCompanion(
           declaredClosingCash: Value(declaredCash.toDouble()),
-          expectedClosingCash: Value(expected.toDouble()),
+          expectedClosingCash: Value(breakdown.expected.toDouble()),
           closedAt: Value(now),
           note: Value(note),
           updatedAt: Value(now),
@@ -112,15 +114,20 @@ class ShiftsRepository {
             ),
           );
     });
-    unawaited(kickSync());
+    unawaited(syncWorker.kick());
     final updated = await (db.select(db.shiftsTable)
           ..where((t) => t.id.equals(shiftId)))
         .getSingle();
-    return (expected: expected, shift: _toDomain(updated));
+    return (breakdown: breakdown, shift: _toDomain(updated));
   }
 
-  Future<Decimal> _computeExpectedCash(
-      String shiftId, Decimal openingCash,) async {
+  /// Returns the full cash-drawer math: opening + cash sales + debt collected
+  /// − expenses − cash refunds = expected. Exposed so the UI can preview it
+  /// before the cashier declares their count.
+  Future<ShiftBreakdown> computeBreakdown(
+    String shiftId,
+    Decimal openingCash,
+  ) async {
     Decimal asDec(double? v) => Decimal.parse((v ?? 0).toString());
 
     final cashSales = await db.customSelect(
@@ -145,11 +152,13 @@ class ShiftsRepository {
       variables: [Variable.withString(shiftId)],
     ).getSingle();
 
-    return openingCash +
-        asDec(cashSales.read<double?>('t')) +
-        asDec(debtCollected.read<double?>('t')) -
-        asDec(expenses.read<double?>('t')) -
-        asDec(cashRefunds.read<double?>('t'));
+    return ShiftBreakdown(
+      openingCash: openingCash,
+      cashSales: asDec(cashSales.read<double?>('t')),
+      debtCollected: asDec(debtCollected.read<double?>('t')),
+      expenses: asDec(expenses.read<double?>('t')),
+      cashRefunds: asDec(cashRefunds.read<double?>('t')),
+    );
   }
 
   Shift _toDomain(ShiftRow r) => Shift(
@@ -177,7 +186,7 @@ ShiftsRepository shiftsRepository(ShiftsRepositoryRef ref) {
   }
   return ShiftsRepository(
     db: ref.watch(appDatabaseProvider),
-    kickSync: () => ref.read(syncWorkerProvider).kick(),
+    syncWorker: ref.watch(syncWorkerProvider),
     userId: auth.userId,
     shopId: auth.shopId,
   );

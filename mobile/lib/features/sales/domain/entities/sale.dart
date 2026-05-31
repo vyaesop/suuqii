@@ -13,16 +13,35 @@ class CartLine {
 }
 
 class Cart {
-  Cart(this.lines);
-  Cart.empty() : lines = const [];
+  Cart(this.lines, {Decimal? discount}) : discount = discount ?? Decimal.zero;
+  Cart.empty()
+      : lines = const [],
+        discount = Decimal.zero;
   final List<CartLine> lines;
+
+  /// Whole-cart discount in money units (ETB). Applied to subtotal at
+  /// checkout time; stored on the Sale.discount column server-side.
+  final Decimal discount;
 
   bool get isEmpty => lines.isEmpty;
   bool get isNotEmpty => lines.isNotEmpty;
-  int get itemCount => lines.length;
+  int get lineCount => lines.length;
+  Decimal get itemCount => lines.fold(Decimal.zero, (a, b) => a + b.qty);
 
-  Decimal get total => lines.fold(Decimal.zero, (a, b) => a + b.lineTotal);
+  Decimal get subtotal => lines.fold(Decimal.zero, (a, b) => a + b.lineTotal);
+  Decimal get total {
+    final t = subtotal - discount;
+    return t < Decimal.zero ? Decimal.zero : t;
+  }
+
   Decimal get costTotal => lines.fold(Decimal.zero, (a, b) => a + b.lineCost);
+
+  Decimal qtyFor(String productId) {
+    for (final line in lines) {
+      if (line.product.id == productId) return line.qty;
+    }
+    return Decimal.zero;
+  }
 
   Cart add(Product p, {Decimal? qty}) {
     final next =
@@ -34,7 +53,7 @@ class Cart {
     } else {
       next.add(CartLine(product: p, qty: addQty));
     }
-    return Cart(next);
+    return Cart(next, discount: discount);
   }
 
   Cart setQty(String productId, Decimal qty) {
@@ -45,9 +64,22 @@ class Cart {
       }
       return CartLine(product: l.product, qty: l.qty);
     }).toList();
-    return Cart(next);
+    return Cart(next, discount: discount);
   }
 
-  Cart remove(String productId) =>
-      Cart(lines.where((l) => l.product.id != productId).toList());
+  Cart remove(String productId) {
+    final remaining = lines
+        .where((l) => l.product.id != productId)
+        .map((l) => CartLine(product: l.product, qty: l.qty))
+        .toList();
+    return Cart(
+      remaining,
+      discount: remaining.isEmpty ? Decimal.zero : discount,
+    );
+  }
+
+  Cart setDiscount(Decimal value) => Cart(
+        lines.map((l) => CartLine(product: l.product, qty: l.qty)).toList(),
+        discount: value < Decimal.zero ? Decimal.zero : value,
+      );
 }

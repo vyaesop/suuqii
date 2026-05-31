@@ -20,18 +20,18 @@ class DebtsRepository {
   DebtsRepository({
     required this.db,
     required this.remote,
-    required this.kickSync,
+    required this.syncWorker,
     required this.shopId,
     required this.userId,
-    required this.shiftIdNow,
+    required this.shiftId,
   });
 
   final AppDatabase db;
   final DebtsRemoteDataSource remote;
-  final Future<void> Function() kickSync;
+  final SyncWorker syncWorker;
   final String shopId;
   final String userId;
-  final String? Function() shiftIdNow;
+  final String? shiftId;
 
   Stream<List<Debt>> watch({DebtStatus? status}) =>
       db.debtsDao.watchAll(status: status);
@@ -64,7 +64,7 @@ class DebtsRepository {
 
     final paymentId = const Uuid().v4();
     final now = DateTime.now().toUtc();
-    final shift = shiftIdNow();
+    final shift = shiftId;
 
     // Compute resulting status locally.
     final newPaid = debt.amountPaid + amount;
@@ -115,7 +115,7 @@ class DebtsRepository {
             ),
           );
     });
-    unawaited(kickSync());
+    unawaited(syncWorker.kick());
   }
 }
 
@@ -129,10 +129,10 @@ DebtsRepository debtsRepository(DebtsRepositoryRef ref) {
   return DebtsRepository(
     db: ref.watch(appDatabaseProvider),
     remote: DebtsRemoteDataSource(ref.watch(dioProvider)),
-    kickSync: () => ref.read(syncWorkerProvider).kick(),
+    syncWorker: ref.watch(syncWorkerProvider),
     shopId: auth.shopId,
     userId: auth.userId,
-    shiftIdNow: () => shift?.id,
+    shiftId: shift?.id,
   );
 }
 

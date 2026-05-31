@@ -18,6 +18,9 @@ import 'package:suuqii/features/sync/data/sync_queue_dao.dart';
 
 part 'app_database.g.dart';
 
+int sqliteDateTimeParam(DateTime value) =>
+    value.toUtc().millisecondsSinceEpoch ~/ 1000;
+
 @DriftDatabase(
   tables: [
     ProductsTable,
@@ -51,7 +54,42 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) async => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await _repairLegacyDateTimes();
+          }
+        },
+      );
+
+  Future<void> _repairLegacyDateTimes() async {
+    Future<void> repair(String table, String column) {
+      return customStatement(
+        'UPDATE $table '
+        "SET $column = CAST(strftime('%s', $column) AS INTEGER) "
+        "WHERE typeof($column) = 'text' AND $column IS NOT NULL",
+      );
+    }
+
+    await repair('sync_events', 'occurred_at');
+    await repair('sync_events', 'enqueued_at');
+    await repair('sync_events', 'last_attempt_at');
+
+    await repair('products', 'client_updated_at');
+    await repair('products', 'created_at');
+    await repair('products', 'updated_at');
+    await repair('products', 'deleted_at');
+
+    await repair('sales', 'occurred_at');
+    await repair('sales', 'created_at');
+    await repair('sales', 'deleted_at');
+
+    await repair('inventory_logs', 'created_at');
+  }
 }
 
 @Riverpod(keepAlive: true)

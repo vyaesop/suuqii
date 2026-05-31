@@ -32,9 +32,27 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => context.push('/owner'),
             ),
             ListTile(
+              leading: const Icon(Icons.bar_chart_rounded),
+              title: const Text('Reports'),
+              subtitle: const Text('Sales over time, top products'),
+              onTap: () => context.push('/reports'),
+            ),
+            ListTile(
               leading: const Icon(Icons.history),
               title: const Text('Audit log'),
               onTap: () => context.push('/audit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group_outlined),
+              title: const Text('Employees'),
+              subtitle: const Text('Invite and manage cashiers'),
+              onTap: () => context.push('/employees'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timelapse_rounded),
+              title: const Text('Open shifts'),
+              subtitle: const Text('Force-close stale shifts'),
+              onTap: () => context.push('/open-shifts'),
             ),
             ListTile(
               leading: const Icon(Icons.receipt_long_outlined),
@@ -43,6 +61,14 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const Divider(),
           ],
+          const _SectionHeader('Sales'),
+          ListTile(
+            leading: const Icon(Icons.receipt_outlined),
+            title: const Text('Recent sales'),
+            subtitle: const Text('View & refund recent transactions'),
+            onTap: () => context.push('/recent-sales'),
+          ),
+          const Divider(),
           const _SectionHeader('Account'),
           const ListTile(
             leading: Icon(Icons.language),

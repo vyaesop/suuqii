@@ -12,7 +12,7 @@ class AuthController extends _$AuthController {
   @override
   Future<AuthState> build() async {
     final repo = await ref.watch(authRepositoryProvider.future);
-    final resumed = repo.resume();
+    final resumed = await repo.resume();
     if (resumed == null) return const Unauthenticated();
     // We have a remembered profile; the dio interceptor will refresh the
     // access token on the first authenticated request that gets a 401.

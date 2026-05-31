@@ -49,9 +49,15 @@ class AuthRepository {
     return _applyBundle(res, phone, shopName: shopName, userName: ownerName);
   }
 
-  Authenticated? resume() {
+  Future<Authenticated?> resume() async {
+    final refresh = await local.readRefresh();
     final p = local.readProfile();
-    if (p == null) return null;
+    if (refresh == null || p == null) {
+      if (refresh != null || p != null) {
+        await local.clear();
+      }
+      return null;
+    }
     return Authenticated(
       userId: p.userId,
       shopId: p.shopId,

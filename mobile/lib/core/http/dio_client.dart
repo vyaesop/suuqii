@@ -63,13 +63,27 @@ class _AuthInterceptor extends Interceptor {
   final _waiters = <Completer<void>>[];
 
   @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    final tok = ref.read(tokenStoreProvider).access;
-    if (tok != null &&
-        !options.path.contains('/auth/login') &&
-        !options.path.contains('/auth/refresh') &&
-        !options.path.contains('/auth/register-shop') &&
-        !options.path.contains('/auth/accept-invite')) {
+  Future<void> onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    if (_isAuthEndpoint(options.path)) {
+      handler.next(options);
+      return;
+    }
+
+    var tok = ref.read(tokenStoreProvider).access;
+    if (tok == null) {
+      try {
+        await _ensureRefreshed();
+        tok = ref.read(tokenStoreProvider).access;
+      } catch (_) {
+        // No remembered session available. Let the request proceed without
+        // auth so callers can surface a normal unauthenticated state.
+      }
+    }
+
+    if (tok != null) {
       options.headers['Authorization'] = 'Bearer $tok';
     }
     handler.next(options);
@@ -77,10 +91,12 @@ class _AuthInterceptor extends Interceptor {
 
   @override
   Future<void> onError(
-      DioException err, ErrorInterceptorHandler handler,) async {
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
     final status = err.response?.statusCode;
     final path = err.requestOptions.path;
-    final isAuthEndpoint = path.contains('/auth/');
+    final isAuthEndpoint = _isAuthEndpoint(path);
     if (status != 401 ||
         isAuthEndpoint ||
         err.requestOptions.extra['retried'] == true) {
@@ -129,5 +145,12 @@ class _AuthInterceptor extends Interceptor {
       }
       _waiters.clear();
     }
+  }
+
+  bool _isAuthEndpoint(String path) {
+    return path.contains('/auth/login') ||
+        path.contains('/auth/refresh') ||
+        path.contains('/auth/register-shop') ||
+        path.contains('/auth/accept-invite');
   }
 }

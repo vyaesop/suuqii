@@ -5,11 +5,11 @@ import 'dart:math' as math;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-
 import 'package:suuqii/core/connectivity/connectivity_provider.dart';
-import 'package:suuqii/core/device/device_id.dart';
 import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/storage/secure_storage.dart';
+import 'package:uuid/uuid.dart';
 
 part 'sync_worker.g.dart';
 
@@ -18,7 +18,7 @@ SyncWorker syncWorker(SyncWorkerRef ref) => SyncWorker(
       db: ref.watch(appDatabaseProvider),
       dio: ref.watch(dioProvider),
       connectivity: ref.watch(connectivityProvider),
-      deviceIdFuture: () => ref.read(deviceFingerprintProvider.future),
+      secureStorage: ref.watch(secureStorageProvider),
     );
 
 /// Drains the local sync_events queue. Idempotent; safe to call concurrently.
@@ -27,13 +27,13 @@ class SyncWorker {
     required this.db,
     required this.dio,
     required this.connectivity,
-    required this.deviceIdFuture,
+    required this.secureStorage,
   });
 
   final AppDatabase db;
   final Dio dio;
   final Connectivity connectivity;
-  final Future<String> Function() deviceIdFuture;
+  final SecureStorage secureStorage;
 
   bool _running = false;
 
@@ -50,7 +50,7 @@ class SyncWorker {
         if (batch.isEmpty) break;
 
         try {
-          final deviceId = await deviceIdFuture();
+          final deviceId = await _deviceId();
           final response = await dio.post<Map<String, dynamic>>(
             '/v1/sync/push',
             data: {
@@ -131,5 +131,13 @@ class SyncWorker {
     final base = math.min(math.pow(2, attempts).toInt(), 300);
     final jitter = math.Random().nextInt(base);
     await Future<void>.delayed(Duration(seconds: base + jitter));
+  }
+
+  Future<String> _deviceId() async {
+    final existing = await secureStorage.readDeviceFingerprint();
+    if (existing != null && existing.isNotEmpty) return existing;
+    final fp = const Uuid().v4();
+    await secureStorage.writeDeviceFingerprint(fp);
+    return fp;
   }
 }

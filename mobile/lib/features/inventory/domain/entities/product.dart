@@ -31,6 +31,9 @@ class Product {
 
   bool get isLowStock => stock <= lowStockThreshold;
 
+  /// A single stock movement (restock, sale, adjustment, etc).
+  /// Read from `inventory_logs`; produced by sales, adjustments, and refunds.
+
   Product copyWith({Decimal? stock, Decimal? sellingPrice}) => Product(
         id: id,
         shopId: shopId,
@@ -45,4 +48,27 @@ class Product {
         imageUrl: imageUrl,
         clientUpdatedAt: clientUpdatedAt,
       );
+}
+
+/// A single stock movement (sale, restock, adjustment, refund).
+class InventoryMovement {
+  const InventoryMovement({
+    required this.id,
+    required this.movement,
+    required this.quantityDelta,
+    required this.createdAt,
+    this.reason,
+    this.referenceType,
+    this.referenceId,
+    this.userId,
+  });
+
+  final String id;
+  final String movement;
+  final Decimal quantityDelta;
+  final String? reason;
+  final String? referenceType;
+  final String? referenceId;
+  final String? userId;
+  final DateTime createdAt;
 }

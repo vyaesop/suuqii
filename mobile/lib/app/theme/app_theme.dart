@@ -193,7 +193,7 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(54),
+          minimumSize: const Size(0, 54),
           padding: const EdgeInsets.symmetric(
             horizontal: SuuqSpacing.lg,
           ),
@@ -207,7 +207,7 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          minimumSize: const Size.fromHeight(54),
+          minimumSize: const Size(0, 54),
           backgroundColor: scheme.primary,
           foregroundColor: scheme.onPrimary,
           elevation: 0,
@@ -220,7 +220,7 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(54),
+          minimumSize: const Size(0, 54),
           shape: SuuqShape.button,
           side: BorderSide(color: scheme.outline),
           textStyle: GoogleFonts.inter(

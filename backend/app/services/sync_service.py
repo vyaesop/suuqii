@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ConflictError, DomainError, OwnerPinRequired
 from app.core.security import decode_token
 from app.models import (
+    AuditLog,
     Debt,
     DebtPayment,
     Expense,
@@ -308,6 +309,7 @@ class SyncService:
         if not debt:
             raise DomainError("debt not found", code="not_found", status=404)
         amount = Decimal(p["amount"])
+        remaining_before = debt.amount_owed - debt.amount_paid
         self.db.add(DebtPayment(
             id=UUID(p["id"]),
             debt_id=debt_id,
@@ -325,6 +327,33 @@ class SyncService:
             debt.status = "paid"
         elif debt.amount_paid > 0:
             debt.status = "partial"
+
+        # Per docs/06: "Sum, even if it overpays — flag in audit". Real-world:
+        # two cashiers might collect on the same debt before sync converges.
+        if amount > remaining_before:
+            overpayment = amount - remaining_before
+            self.db.add(AuditLog(
+                shop_id=self.shop_id,
+                user_id=self.user.id,
+                action="debt.payment.overpayment",
+                entity_type="debt",
+                entity_id=debt_id,
+                old_value={
+                    "remaining": str(remaining_before),
+                    "amount_owed": str(debt.amount_owed),
+                },
+                new_value={
+                    "payment_amount": str(amount),
+                    "overpayment": str(overpayment),
+                    "method": p["method"],
+                },
+                device_id=self.device_id,
+                note=(
+                    f"Payment of {amount} exceeded remaining {remaining_before} "
+                    f"by {overpayment}"
+                ),
+                created_at=datetime.now(UTC),
+            ))
 
     async def _expense_create(self, p: dict[str, Any]) -> None:
         self.db.add(Expense(

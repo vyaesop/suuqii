@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
@@ -47,29 +48,26 @@ class ProductImage extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.network(
-        imageUrl!,
+      child: CachedNetworkImage(
+        imageUrl: imageUrl!,
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => fallback,
-        loadingBuilder: (_, child, progress) {
-          if (progress == null) return child;
-          return Container(
-            width: size,
-            height: size,
-            color: scheme.surfaceContainerHighest,
-            alignment: Alignment.center,
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: scheme.onSurfaceVariant,
-              ),
+        errorWidget: (_, __, ___) => fallback,
+        placeholder: (_, __) => Container(
+          width: size,
+          height: size,
+          color: scheme.surfaceContainerHighest,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: scheme.onSurfaceVariant,
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }

@@ -81,6 +81,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   selected: _lowStockOnly,
                   onSelected: (v) => setState(() => _lowStockOnly = v),
                 ),
+                const Spacer(),
+                if (canEdit)
+                  TextButton.icon(
+                    icon: const Icon(Icons.inventory_rounded, size: 18),
+                    onPressed: () =>
+                        context.push('/inventory/bulk-restock'),
+                    label: const Text('Bulk restock'),
+                  ),
               ],
             ),
           ),
@@ -129,11 +137,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         const SizedBox(height: SuuqSpacing.xs),
                     itemBuilder: (_, i) => _InventoryRow(
                       product: visible[i],
-                      onTap: canEdit
-                          ? () => context.push(
-                                '/inventory/edit/${visible[i].id}',
-                              )
-                          : null,
+                      onTap: () =>
+                          context.push('/inventory/${visible[i].id}'),
                     ),
                   );
                 },

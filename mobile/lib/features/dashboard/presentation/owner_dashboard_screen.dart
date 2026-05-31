@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/dashboard/data/dashboard_repository.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -34,6 +36,10 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
               onChanged: (r) => setState(() => _range = r),
             ),
             const SizedBox(height: SuuqSpacing.md),
+            if (summaryAsync.valueOrNull?.fromCache ?? false) ...[
+              _OfflineBanner(fetchedAt: summaryAsync.valueOrNull?.fetchedAt),
+              const SizedBox(height: SuuqSpacing.sm),
+            ],
             summaryAsync.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: SuuqSpacing.xxl),
@@ -45,6 +51,8 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
               ),
               data: _buildSummary,
             ),
+            const SizedBox(height: SuuqSpacing.lg),
+            _AnomalyScanCard(onScan: _scanAnomalies),
           ],
         ),
       ),
@@ -162,6 +170,108 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
       ],
     );
   }
+
+  Future<void> _scanAnomalies() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final res = await ref.read(dioProvider).post<Map<String, dynamic>>(
+            '/v1/audit/scan-anomalies',
+          );
+      final written = (res.data!['written'] as List).length;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            written == 0
+                ? 'Scan complete — nothing unusual'
+                : '$written anomaly${written == 1 ? "" : " entries"} '
+                  'written to audit',
+          ),
+          action: written > 0
+              ? SnackBarAction(
+                  label: 'View',
+                  onPressed: () => context.push('/audit'),
+                )
+              : null,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Scan failed: $e')));
+    }
+  }
+}
+
+class _AnomalyScanCard extends StatefulWidget {
+  const _AnomalyScanCard({required this.onScan});
+  final Future<void> Function() onScan;
+
+  @override
+  State<_AnomalyScanCard> createState() => _AnomalyScanCardState();
+}
+
+class _AnomalyScanCardState extends State<_AnomalyScanCard> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return SectionCard(
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(SuuqRadius.sm),
+            ),
+            child: Icon(
+              Icons.health_and_safety_outlined,
+              size: 18,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: SuuqSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Anomaly scan',
+                  style: theme.textTheme.titleSmall,
+                ),
+                Text(
+                  'Check for oversells, large variances, stale shifts.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: SuuqSpacing.sm),
+          OutlinedButton(
+            onPressed: _busy
+                ? null
+                : () async {
+                    setState(() => _busy = true);
+                    try {
+                      await widget.onScan();
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
+            child: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Scan'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RangeSelector extends StatelessWidget {
@@ -269,5 +379,49 @@ class _KpiTile extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner({this.fetchedAt});
+  final DateTime? fetchedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: SuuqSpacing.md,
+        vertical: SuuqSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(SuuqRadius.md),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: SuuqSpacing.xs),
+          Expanded(
+            child: Text(
+              fetchedAt == null
+                  ? 'Showing offline snapshot'
+                  : 'Offline snapshot — updated ${_relative(fetchedAt!)}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _relative(DateTime when) {
+    final diff = DateTime.now().toUtc().difference(when.toUtc());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }

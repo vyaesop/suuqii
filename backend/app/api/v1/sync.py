@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import current_device, current_user, db_session
+from app.core.rate_limit import limiter
 from app.models import SyncEvent, User
 from app.schemas.sync import (
     SyncEventOut,
@@ -16,7 +17,9 @@ router = APIRouter(prefix="/sync", tags=["sync"])
 
 
 @router.post("/push", response_model=SyncPushResponse)
+@limiter.limit("60/minute")
 async def push(
+    request: Request,
     req: SyncPushRequest,
     db: AsyncSession = Depends(db_session),
     user: User = Depends(current_user),
@@ -32,7 +35,9 @@ async def push(
 
 
 @router.get("/pull", response_model=SyncPullResponse)
+@limiter.limit("120/minute")
 async def pull(
+    request: Request,
     cursor: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=500),
     device_id: str = Depends(current_device),

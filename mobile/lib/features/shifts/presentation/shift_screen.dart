@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/shifts/data/shifts_repository.dart';
+import 'package:suuqii/features/shifts/domain/entities/shift.dart';
 import 'package:suuqii/l10n/app_localizations.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -273,19 +274,25 @@ class _ActiveShiftView extends ConsumerWidget {
 
   Future<void> _closeShift(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result =
-        await showModalBottomSheet<({Decimal declared, String? note})>(
+    final repo = ref.read(shiftsRepositoryProvider);
+
+    // Compute the live breakdown so the cashier sees expected cash before
+    // they enter their declared count.
+    final preview = await repo.computeBreakdown(shiftId, openingCash);
+    if (!context.mounted) return;
+
+    final result = await showModalBottomSheet<({Decimal declared, String? note})>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const _CloseSheet(),
+      builder: (_) => _CloseSheet(breakdown: preview),
     );
     if (result == null) return;
     try {
-      final r = await ref.read(shiftsRepositoryProvider).close(
-            shiftId: shiftId,
-            declaredCash: result.declared,
-            note: result.note,
-          );
+      final r = await repo.close(
+        shiftId: shiftId,
+        declaredCash: result.declared,
+        note: result.note,
+      );
       if (!context.mounted) return;
       unawaited(
         showDialog<void>(
@@ -294,29 +301,32 @@ class _ActiveShiftView extends ConsumerWidget {
             final variance = r.shift.variance ?? Decimal.zero;
             final isShort = variance < Decimal.zero;
             final isOver = variance > Decimal.zero;
+            final b = r.breakdown;
             return AlertDialog(
               title: const Text('Shift closed'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  InfoRow(label: 'Expected', value: formatMoney(r.expected)),
-                  InfoRow(
-                    label: 'Declared',
-                    value: formatMoney(result.declared),
-                  ),
-                  const Divider(),
-                  InfoRow(
-                    label: 'Variance',
-                    value: formatMoney(variance),
-                    emphasize: true,
-                    intent: isShort
-                        ? Theme.of(context).colorScheme.error
-                        : isOver
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                  ),
-                ],
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _BreakdownTable(breakdown: b),
+                    const Divider(),
+                    InfoRow(
+                      label: 'Declared',
+                      value: formatMoney(result.declared),
+                    ),
+                    InfoRow(
+                      label: 'Variance',
+                      value: formatMoney(variance),
+                      emphasize: true,
+                      intent: isShort
+                          ? Theme.of(context).colorScheme.error
+                          : isOver
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -335,7 +345,8 @@ class _ActiveShiftView extends ConsumerWidget {
 }
 
 class _CloseSheet extends StatefulWidget {
-  const _CloseSheet();
+  const _CloseSheet({required this.breakdown});
+  final ShiftBreakdown breakdown;
   @override
   State<_CloseSheet> createState() => _CloseSheetState();
 }
@@ -360,9 +371,12 @@ class _CloseSheetState extends State<_CloseSheet> {
           Text('Close shift', style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'Count the cash in the drawer.',
+            'Here is what should be in the drawer. Count the actual cash, '
+            'then enter it below.',
             style: theme.textTheme.bodyMedium,
           ),
+          const SizedBox(height: SuuqSpacing.md),
+          _BreakdownTable(breakdown: widget.breakdown),
           const SizedBox(height: SuuqSpacing.md),
           TextField(
             controller: _amount,
@@ -405,6 +419,77 @@ class _CloseSheetState extends State<_CloseSheet> {
             },
             child: const Text('Close shift'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BreakdownTable extends StatelessWidget {
+  const _BreakdownTable({required this.breakdown});
+  final ShiftBreakdown breakdown;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final b = breakdown;
+    return Container(
+      padding: const EdgeInsets.all(SuuqSpacing.md),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(SuuqRadius.md),
+      ),
+      child: Column(
+        children: [
+          _BreakdownRow(label: 'Opening cash', value: b.openingCash),
+          _BreakdownRow(label: '+ Cash sales', value: b.cashSales),
+          _BreakdownRow(label: '+ Debt collected', value: b.debtCollected),
+          _BreakdownRow(label: '− Expenses', value: b.expenses, subtract: true),
+          _BreakdownRow(
+            label: '− Cash refunds',
+            value: b.cashRefunds,
+            subtract: true,
+          ),
+          Divider(color: scheme.outlineVariant, height: SuuqSpacing.md),
+          _BreakdownRow(
+            label: 'Expected in drawer',
+            value: b.expected,
+            emphasize: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BreakdownRow extends StatelessWidget {
+  const _BreakdownRow({
+    required this.label,
+    required this.value,
+    this.subtract = false,
+    this.emphasize = false,
+  });
+  final String label;
+  final Decimal value;
+  final bool subtract;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = (emphasize
+            ? theme.textTheme.titleMedium
+            : theme.textTheme.bodyMedium)
+        ?.copyWith(
+      fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: style)),
+          Text(formatMoney(value), style: style),
         ],
       ),
     );

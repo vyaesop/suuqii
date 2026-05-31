@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RegisterShopRequest(BaseModel):
@@ -8,10 +8,16 @@ class RegisterShopRequest(BaseModel):
     owner_name: str = Field(min_length=1, max_length=120)
     phone: str
     password: str = Field(min_length=8)
-    owner_pin: str = Field(min_length=4, max_length=8)
+    owner_pin: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
     device_fingerprint: str
     device_label: str | None = None
     locale: str = "en"
+
+    @model_validator(mode="after")
+    def _pin_not_password(self) -> "RegisterShopRequest":
+        if self.owner_pin == self.password or self.owner_pin in self.password:
+            raise ValueError("owner_pin must not match or be contained in password")
+        return self
 
 
 class LoginRequest(BaseModel):
@@ -55,3 +61,16 @@ class AcceptInviteRequest(BaseModel):
 
 class OwnerPinVerifyRequest(BaseModel):
     pin: str
+
+
+class ShopUser(BaseModel):
+    id: UUID
+    name: str
+    phone: str
+    role: str
+    is_active: bool
+    created_at: str
+
+
+class ShopUsersResponse(BaseModel):
+    users: list[ShopUser]

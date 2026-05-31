@@ -1,14 +1,19 @@
+import 'dart:io';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/services/cloudinary_service.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
-import 'package:suuqii/shared/widgets/sheet_handle.dart';
+import 'package:suuqii/shared/widgets/product_image.dart';
 
 const _units = <String>['piece', 'kg', 'liter', 'pack', 'm'];
 
@@ -30,10 +35,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   final _stock = TextEditingController(text: '0');
   final _threshold = TextEditingController(text: '0');
   final _barcode = TextEditingController();
+  final _imageUrl = TextEditingController();
   String _unit = 'piece';
 
   bool _loaded = false;
   bool _busy = false;
+  bool _uploading = false;
+  double _uploadProgress = 0;
   Decimal? _originalSelling;
 
   @override
@@ -51,6 +59,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     _stock.dispose();
     _threshold.dispose();
     _barcode.dispose();
+    _imageUrl.dispose();
     super.dispose();
   }
 
@@ -67,6 +76,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     _stock.text = p.stock.toString();
     _threshold.text = p.lowStockThreshold.toString();
     _barcode.text = p.barcode ?? '';
+    _imageUrl.text = p.imageUrl ?? '';
     _unit = p.unit;
     _originalSelling = p.sellingPrice;
     setState(() => _loaded = true);
@@ -108,6 +118,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                   children: [
                     TextFormField(
                       controller: _name,
+                      onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(labelText: 'Name'),
                       validator: _required,
                     ),
@@ -212,6 +223,86 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 ),
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
+                  title: 'Image',
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        GestureDetector(
+                          onTap: _uploading ? null : _pickAndUploadImage,
+                          child: Stack(
+                            children: [
+                              ProductImage(
+                                name: _previewName,
+                                imageUrl: _normalizedImageUrl,
+                                size: 84,
+                              ),
+                              if (_uploading)
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(
+                                      SuuqRadius.md,
+                                    ),
+                                    child: ColoredBox(
+                                      color: Colors.black54,
+                                      child: Center(
+                                        child: CircularProgressIndicator(
+                                          value: _uploadProgress > 0
+                                              ? _uploadProgress
+                                              : null,
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: SuuqSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed:
+                                    _uploading ? null : _pickAndUploadImage,
+                                icon: const Icon(
+                                  Icons.upload_rounded,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  _normalizedImageUrl == null
+                                      ? 'Upload photo'
+                                      : 'Change photo',
+                                ),
+                              ),
+                              if (_normalizedImageUrl != null) ...[
+                                const SizedBox(height: SuuqSpacing.xs),
+                                TextButton.icon(
+                                  onPressed: () =>
+                                      setState(() => _imageUrl.text = ''),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Remove'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor:
+                                        Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: SuuqSpacing.lg),
+                _Section(
                   title: 'Identifiers',
                   children: [
                     TextFormField(
@@ -263,10 +354,77 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     return null;
   }
 
+  Future<void> _pickAndUploadImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    setState(() {
+      _uploading = true;
+      _uploadProgress = 0;
+    });
+
+    try {
+      final url = await CloudinaryService().uploadImage(
+        File(picked.path),
+        onProgress: (sent, total) =>
+            setState(() => _uploadProgress = sent / total),
+      );
+      setState(() => _imageUrl.text = url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  String get _previewName {
+    final name = _name.text.trim();
+    return name.isEmpty ? 'Preview' : name;
+  }
+
+  String? get _normalizedImageUrl {
+    final value = _imageUrl.text.trim();
+    return value.isEmpty ? null : value;
+  }
+
   Future<void> _save({required bool isOwner}) async {
     if (!_form.currentState!.validate()) return;
     final selling = Decimal.parse(_selling.text.trim());
     final purchase = Decimal.parse(_purchase.text.trim());
+    final category = _category.text.trim().isEmpty
+        ? null
+        : _category.text.trim();
+    final barcode = _barcode.text.trim().isEmpty ? null : _barcode.text.trim();
+    final imageUrl = _normalizedImageUrl;
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
 
@@ -284,33 +442,27 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       if (widget.isCreating) {
         await repo.create(
           name: _name.text.trim(),
-          category: _category.text.trim().isEmpty
-              ? null
-              : _category.text.trim(),
+          category: category,
           purchasePrice: purchase,
           sellingPrice: selling,
           stock: Decimal.parse(_stock.text.trim()),
           lowStockThreshold: Decimal.parse(_threshold.text.trim()),
           unit: _unit,
-          barcode: _barcode.text.trim().isEmpty
-              ? null
-              : _barcode.text.trim(),
+          barcode: barcode,
+          imageUrl: imageUrl,
           ownerChallengeToken: challenge,
         );
       } else {
         await repo.update(
           id: widget.productId!,
           name: _name.text.trim(),
-          category: _category.text.trim().isEmpty
-              ? null
-              : _category.text.trim(),
+          category: category,
           purchasePrice: purchase,
           sellingPrice: selling,
           lowStockThreshold: Decimal.parse(_threshold.text.trim()),
           unit: _unit,
-          barcode: _barcode.text.trim().isEmpty
-              ? null
-              : _barcode.text.trim(),
+          barcode: barcode,
+          imageUrl: imageUrl,
           ownerChallengeToken: challenge,
         );
       }
@@ -330,7 +482,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final result = await showModalBottomSheet<({Decimal delta, String reason})>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const _StockAdjustSheet(),
+      builder: (_) => const StockAdjustSheet(),
     );
     if (result == null) return;
 
@@ -378,113 +530,6 @@ class _Section extends StatelessWidget {
         ),
         ...children,
       ],
-    );
-  }
-}
-
-class _StockAdjustSheet extends StatefulWidget {
-  const _StockAdjustSheet();
-  @override
-  State<_StockAdjustSheet> createState() => _StockAdjustSheetState();
-}
-
-class _StockAdjustSheetState extends State<_StockAdjustSheet> {
-  final _qty = TextEditingController();
-  String _movement = 'restock';
-  String _reason = 'restock';
-
-  static const _reasonsByMovement = {
-    'restock': ['restock', 'supplier delivery', 'transfer in'],
-    'adjustment': [
-      'count correction',
-      'waste',
-      'damaged',
-      'theft',
-      'transfer out',
-    ],
-  };
-
-  @override
-  void initState() {
-    super.initState();
-    _reason = _reasonsByMovement[_movement]!.first;
-  }
-
-  @override
-  void dispose() {
-    _qty.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SuuqSheet(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Adjust stock',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: SuuqSpacing.md),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                value: 'restock',
-                label: Text('Add'),
-                icon: Icon(Icons.add_rounded),
-              ),
-              ButtonSegment(
-                value: 'adjustment',
-                label: Text('Remove'),
-                icon: Icon(Icons.remove_rounded),
-              ),
-            ],
-            selected: {_movement},
-            onSelectionChanged: (s) => setState(() {
-              _movement = s.first;
-              _reason = _reasonsByMovement[_movement]!.first;
-            }),
-          ),
-          const SizedBox(height: SuuqSpacing.md),
-          TextField(
-            controller: _qty,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Quantity'),
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: SuuqSpacing.sm),
-          DropdownButtonFormField<String>(
-            initialValue: _reason,
-            decoration: const InputDecoration(labelText: 'Reason'),
-            items: _reasonsByMovement[_movement]!
-                .map(
-                  (r) => DropdownMenuItem(value: r, child: Text(r)),
-                )
-                .toList(),
-            onChanged: (v) => setState(() => _reason = v ?? _reason),
-          ),
-          const SizedBox(height: SuuqSpacing.lg),
-          FilledButton(
-            onPressed: () {
-              final n = Decimal.tryParse(_qty.text.trim());
-              if (n == null || n <= Decimal.zero) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Enter a positive number')),
-                );
-                return;
-              }
-              final signed = _movement == 'restock' ? n : -n;
-              Navigator.pop(context, (delta: signed, reason: _reason));
-            },
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
     );
   }
 }
