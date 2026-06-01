@@ -28,11 +28,13 @@ async def list_sales(
         stmt = stmt.where(Sale.payment_method == payment_method)
     stmt = stmt.order_by(Sale.occurred_at.desc()).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
+    is_owner = user.role == "owner"
     return {"items": [
         {
             "id": str(s.id),
             "total": str(s.total),
-            "profit": str(s.total - s.cost_total),  # generated column not auto-mapped here
+            # Profit reveals purchase cost; restrict to owners.
+            **({"profit": str(s.total - s.cost_total)} if is_owner else {}),
             "payment_method": s.payment_method,
             "status": s.status,
             "occurred_at": s.occurred_at.isoformat(),

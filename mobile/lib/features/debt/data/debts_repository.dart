@@ -34,7 +34,7 @@ class DebtsRepository {
   final String? shiftId;
 
   Stream<List<Debt>> watch({DebtStatus? status}) =>
-      db.debtsDao.watchAll(status: status);
+      db.debtsDao.watchAll(shopId: shopId, status: status);
 
   Future<Debt?> byId(String id) => db.debtsDao.getById(id);
 

@@ -12,8 +12,13 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     with _$ProductsDaoMixin {
   ProductsDao(super.db);
 
-  Stream<List<Product>> watchAll({String? query, String? category}) {
+  Stream<List<Product>> watchAll({
+    required String shopId,
+    String? query,
+    String? category,
+  }) {
     final q = select(productsTable)
+      ..where((t) => t.shopId.equals(shopId))
       ..where((t) => t.deletedAt.isNull())
       ..orderBy([(t) => OrderingTerm.asc(t.name)]);
     if (query != null && query.isNotEmpty) {

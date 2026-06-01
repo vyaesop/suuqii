@@ -22,6 +22,7 @@ class ProductsRepository {
     required this.syncWorker,
     required this.shopId,
     required this.userId,
+    required this.isOwner,
   });
 
   final AppDatabase db;
@@ -29,9 +30,10 @@ class ProductsRepository {
   final SyncWorker syncWorker;
   final String shopId;
   final String userId;
+  final bool isOwner;
 
   Stream<List<Product>> watch({String? query, String? category}) =>
-      db.productsDao.watchAll(query: query, category: category);
+      db.productsDao.watchAll(shopId: shopId, query: query, category: category);
 
   Future<Product?> byId(String id) => db.productsDao.getById(id);
 
@@ -49,9 +51,9 @@ class ProductsRepository {
       "  WHERE movement = 'sale' "
       '  GROUP BY product_id '
       ') l ON l.product_id = p.id '
-      'WHERE p.deleted_at IS NULL '
+      'WHERE p.deleted_at IS NULL AND p.shop_id = ? '
       'ORDER BY l.last_sold DESC LIMIT ?',
-      variables: [Variable.withInt(limit)],
+      variables: [Variable.withString(shopId), Variable.withInt(limit)],
       readsFrom: {db.productsTable, db.inventoryLogsTable},
     ).watch().map(
       (rows) => rows.map((r) {
@@ -82,7 +84,8 @@ class ProductsRepository {
     return db.customSelect(
       'SELECT DISTINCT category FROM products '
       "WHERE category IS NOT NULL AND category != '' "
-      'AND deleted_at IS NULL ORDER BY category',
+      'AND deleted_at IS NULL AND shop_id = ? ORDER BY category',
+      variables: [Variable.withString(shopId)],
       readsFrom: {db.productsTable},
     ).watch().map(
       (rows) => rows.map((r) => r.read<String>('category')).toList(),
@@ -171,7 +174,9 @@ class ProductsRepository {
                 'id': id,
                 'name': name,
                 'category': category,
-                'purchase_price': purchasePrice.toString(),
+                // purchase_price is owner-only data; non-owners leave it unset
+                // (server defaults to 0 for creates, ignores missing for updates).
+                if (isOwner) 'purchase_price': purchasePrice.toString(),
                 'selling_price': sellingPrice.toString(),
                 'stock': stock.toString(),
                 'low_stock_threshold': lowStockThreshold.toString(),
@@ -212,7 +217,8 @@ class ProductsRepository {
       'client_updated_at': now.toIso8601String(),
       'name': name,
       'category': category,
-      'purchase_price': purchasePrice.toString(),
+      // Non-owners cannot set purchase_price; omit so the server leaves it unchanged.
+      if (isOwner) 'purchase_price': purchasePrice.toString(),
       'selling_price': sellingPrice.toString(),
       'low_stock_threshold': lowStockThreshold.toString(),
       'unit': unit,
@@ -304,6 +310,7 @@ ProductsRepository productsRepository(ProductsRepositoryRef ref) {
     syncWorker: ref.watch(syncWorkerProvider),
     shopId: auth.shopId,
     userId: auth.userId,
+    isOwner: auth.role == 'owner',
   );
 }
 

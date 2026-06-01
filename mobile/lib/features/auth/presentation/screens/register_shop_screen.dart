@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -21,6 +22,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
   final _phone = TextEditingController();
   final _password = TextEditingController();
   final _pin = TextEditingController();
+  String _shopType = 'regular';
   bool _busy = false;
 
   @override
@@ -70,13 +72,28 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
                   _Group(
+                    title: 'Shop type',
+                    children: [
+                      _ShopTypeSelector(
+                        value: _shopType,
+                        onChanged: (v) => setState(() => _shopType = v),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: SuuqSpacing.md),
+                  _Group(
                     title: 'Shop',
                     children: [
                       TextFormField(
                         controller: _shopName,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Shop name',
-                          prefixIcon: Icon(Icons.storefront_rounded, size: 20),
+                          prefixIcon: Icon(
+                            _shopType == 'bakery'
+                                ? Icons.bakery_dining_rounded
+                                : Icons.storefront_rounded,
+                            size: 20,
+                          ),
                         ),
                         validator: _req,
                       ),
@@ -137,6 +154,10 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                         controller: _pin,
                         keyboardType: TextInputType.number,
                         obscureText: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(8),
+                        ],
                         decoration: const InputDecoration(
                           labelText: 'Owner PIN',
                           helperText:
@@ -191,6 +212,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
             phone: _phone.text.trim(),
             password: _password.text,
             ownerPin: _pin.text,
+            shopType: _shopType,
           );
       router.go('/pos');
     } catch (e) {
@@ -198,6 +220,102 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+}
+
+class _ShopTypeSelector extends StatelessWidget {
+  const _ShopTypeSelector({required this.value, required this.onChanged});
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _TypeCard(
+            icon: Icons.storefront_rounded,
+            label: 'Regular shop',
+            description: 'Sells finished goods',
+            selected: value == 'regular',
+            onTap: () => onChanged('regular'),
+          ),
+        ),
+        const SizedBox(width: SuuqSpacing.sm),
+        Expanded(
+          child: _TypeCard(
+            icon: Icons.bakery_dining_rounded,
+            label: 'Bakery',
+            description: 'Makes products from ingredients',
+            selected: value == 'bakery',
+            onTap: () => onChanged('bakery'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TypeCard extends StatelessWidget {
+  const _TypeCard({
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final String description;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.all(SuuqSpacing.sm),
+        decoration: BoxDecoration(
+          color: selected
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest,
+          border: Border.all(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+            width: selected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(SuuqRadius.md),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 28,
+              color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: SuuqSpacing.xs),
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: selected ? scheme.primary : scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              description,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

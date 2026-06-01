@@ -12,11 +12,14 @@ class RegisterShopRequest(BaseModel):
     device_fingerprint: str
     device_label: str | None = None
     locale: str = "en"
+    shop_type: str = "regular"
 
     @model_validator(mode="after")
     def _pin_not_password(self) -> "RegisterShopRequest":
         if self.owner_pin == self.password or self.owner_pin in self.password:
             raise ValueError("owner_pin must not match or be contained in password")
+        if self.shop_type not in {"regular", "bakery"}:
+            raise ValueError("shop_type must be 'regular' or 'bakery'")
         return self
 
 
@@ -38,6 +41,8 @@ class TokenBundle(BaseModel):
     user_id: UUID
     shop_id: UUID
     role: str
+    shop_type: str = "regular"
+    shop_name: str = ""
 
 
 class InviteRequest(BaseModel):

@@ -20,7 +20,7 @@ class ProductsRemoteDataSource {
         shopId: shopId,
         name: j['name'] as String,
         category: j['category'] as String?,
-        purchasePrice: Decimal.parse(j['purchase_price'] as String),
+        purchasePrice: Decimal.parse((j['purchase_price'] as String?) ?? '0'),
         sellingPrice: Decimal.parse(j['selling_price'] as String),
         stock: Decimal.parse(j['stock'] as String),
         lowStockThreshold: Decimal.parse(j['low_stock_threshold'] as String),

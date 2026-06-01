@@ -29,15 +29,15 @@ async def list_products(
         stmt = stmt.where(Product.stock <= Product.low_stock_threshold)
     stmt = stmt.order_by(Product.name).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
-    return {"items": [_dump(p) for p in rows]}
+    is_owner = user.role == "owner"
+    return {"items": [_dump(p, is_owner=is_owner) for p in rows]}
 
 
-def _dump(p: Product) -> dict:
-    return {
+def _dump(p: Product, *, is_owner: bool = True) -> dict:
+    d: dict = {
         "id": str(p.id),
         "name": p.name,
         "category": p.category,
-        "purchase_price": str(p.purchase_price),
         "selling_price": str(p.selling_price),
         "stock": str(p.stock),
         "low_stock_threshold": str(p.low_stock_threshold),
@@ -46,3 +46,6 @@ def _dump(p: Product) -> dict:
         "image_url": p.image_url,
         "client_updated_at": p.client_updated_at.isoformat() if p.client_updated_at else None,
     }
+    # Purchase price is financially sensitive; only owners see the real value.
+    d["purchase_price"] = str(p.purchase_price) if is_owner else "0"
+    return d

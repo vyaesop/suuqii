@@ -1,44 +1,15 @@
-{
+﻿{
   "@@locale": "en",
-  "appTitle": "Suuqii",
   "navSell": "Sell",
   "navInventory": "Inventory",
   "navDebts": "Debts",
   "navShift": "Shift",
   "navDashboard": "Dashboard",
   "navSettings": "Settings",
-
-  "login": "Log in",
+  "shiftOpeningCash": "Opening Cash",
+  "shiftEnd": "End Shift",
   "phone": "Phone",
   "password": "Password",
-  "createNewShop": "Create a new shop",
-  "joinShopWithCode": "Join shop with code",
-
-  "checkout": "Checkout",
-  "paymentCash": "Cash",
-  "paymentMobile": "Mobile money",
-  "paymentCredit": "Credit",
-  "total": "Total",
-  "change": "Change",
-  "tendered": "Tendered",
-
-  "lowStock": "Low stock",
-  "outstandingDebt": "Outstanding debt",
-  "revenue": "Revenue",
-  "profit": "Profit",
-  "expenses": "Expenses",
-  "netProfit": "Net profit",
-
-  "ownerPinRequired": "Owner PIN required",
-  "wrongPin": "Wrong PIN",
-
-  "syncOffline": "Offline",
-  "syncPending": "{n} changes pending",
-  "@syncPending": { "placeholders": { "n": { "type": "int" } } },
-
-  "shiftOpeningCash": "Opening cash",
-  "shiftDeclaredCash": "Declared cash",
-  "shiftExpectedCash": "Expected cash",
-  "shiftVariance": "Variance",
-  "shiftEnd": "End shift"
+  "login": "Log In",
+  "createNewShop": "Create New Shop"
 }

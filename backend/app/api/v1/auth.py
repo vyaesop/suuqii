@@ -3,7 +3,6 @@ Authentication endpoints — register shop, login, refresh, invite, owner-PIN.
 
 This is a concise reference implementation; review and harden before launch.
 """
-import asyncio
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_hex
@@ -42,52 +41,50 @@ from app.schemas.auth import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-# --- Owner-PIN rate limiting ---------------------------------------------
-# In-memory tracker; per-process state. For multi-worker deployments this
-# should be backed by Redis or a DB row. The lock is short-lived (15 min)
-# and the consequence of a missed lock under multi-worker is "user gets one
-# extra attempt" — acceptable for v1 but flagged for follow-up.
+# --- Owner-PIN rate limiting (DB-backed) ---------------------------------
 OWNER_PIN_MAX_ATTEMPTS = 5
 OWNER_PIN_LOCK_MINUTES = 15
-_owner_pin_state: dict[UUID, dict] = {}
-_owner_pin_lock = asyncio.Lock()
 
 
-async def _check_owner_pin_lock(user_id: UUID) -> int | None:
-    """Return seconds-remaining if locked, else None."""
-    async with _owner_pin_lock:
-        st = _owner_pin_state.get(user_id)
-        if not st:
-            return None
-        locked_until = st.get("locked_until")
-        if not locked_until:
-            return None
-        now = datetime.now(UTC)
-        if locked_until <= now:
-            # Lock expired — reset.
-            _owner_pin_state.pop(user_id, None)
-            return None
-        return int((locked_until - now).total_seconds())
+def _pin_seconds_left(user: User) -> int | None:
+    """Return seconds remaining in lockout, or None if not locked."""
+    if not user.owner_pin_locked_until:
+        return None
+    now = datetime.now(UTC)
+    locked_until = user.owner_pin_locked_until
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=UTC)
+    if locked_until <= now:
+        return None
+    return int((locked_until - now).total_seconds())
 
 
-async def _record_owner_pin_failure(user_id: UUID) -> int:
-    """Increment failure count. Returns attempts remaining (0 = locked now)."""
-    async with _owner_pin_lock:
-        st = _owner_pin_state.setdefault(
-            user_id, {"attempts": 0, "locked_until": None}
-        )
-        st["attempts"] += 1
-        if st["attempts"] >= OWNER_PIN_MAX_ATTEMPTS:
-            st["locked_until"] = datetime.now(UTC) + timedelta(
-                minutes=OWNER_PIN_LOCK_MINUTES
-            )
-            return 0
-        return OWNER_PIN_MAX_ATTEMPTS - st["attempts"]
+async def _record_pin_failure(db: AsyncSession, user: User) -> int:
+    """Increment failure count. Returns attempts remaining (0 = just locked)."""
+    # If a previous lockout has expired, reset the counter first so the user
+    # gets a fresh 5-attempt window rather than re-locking on the very first
+    # wrong guess.
+    if user.owner_pin_locked_until is not None:
+        expiry = user.owner_pin_locked_until
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        if expiry <= datetime.now(UTC):
+            user.owner_pin_attempts = 0
+            user.owner_pin_locked_until = None
+
+    user.owner_pin_attempts = (user.owner_pin_attempts or 0) + 1
+    if user.owner_pin_attempts >= OWNER_PIN_MAX_ATTEMPTS:
+        user.owner_pin_locked_until = datetime.now(UTC) + timedelta(minutes=OWNER_PIN_LOCK_MINUTES)
+        await db.commit()
+        return 0
+    await db.commit()
+    return OWNER_PIN_MAX_ATTEMPTS - user.owner_pin_attempts
 
 
-async def _reset_owner_pin_attempts(user_id: UUID) -> None:
-    async with _owner_pin_lock:
-        _owner_pin_state.pop(user_id, None)
+async def _reset_pin_attempts(db: AsyncSession, user: User) -> None:
+    user.owner_pin_attempts = 0
+    user.owner_pin_locked_until = None
+    await db.commit()
 
 
 def _fp_hash(fp: str) -> str:
@@ -95,7 +92,8 @@ def _fp_hash(fp: str) -> str:
 
 
 async def _issue_token_bundle(
-    db: AsyncSession, user: User, device_fingerprint: str, device_label: str | None
+    db: AsyncSession, user: User, device_fingerprint: str, device_label: str | None,
+    shop: Shop | None = None,
 ) -> TokenBundle:
     access = issue_access_token(
         user_id=user.id, shop_id=user.shop_id, role=user.role, device_id=device_fingerprint
@@ -126,9 +124,17 @@ async def _issue_token_bundle(
             last_seen_at=datetime.now(UTC),
             created_at=datetime.now(UTC),
         ))
+
+    # Resolve shop_type: use passed shop object, or load from DB if needed.
+    resolved_shop = shop
+    if resolved_shop is None:
+        resolved_shop = await db.get(Shop, user.shop_id)
+
     return TokenBundle(
         access=access, refresh=refresh,
         user_id=user.id, shop_id=user.shop_id, role=user.role,
+        shop_type=resolved_shop.shop_type if resolved_shop else "regular",
+        shop_name=resolved_shop.name if resolved_shop else "",
     )
 
 
@@ -141,7 +147,7 @@ async def register_shop(request: Request, req: RegisterShopRequest) -> TokenBund
         if existing:
             raise DomainError("phone already in use", code="phone_taken", status=409)
 
-        shop = Shop(name=req.shop_name, phone=req.phone, locale=req.locale)
+        shop = Shop(name=req.shop_name, phone=req.phone, locale=req.locale, shop_type=req.shop_type)
         db.add(shop)
         await db.flush()
 
@@ -161,6 +167,7 @@ async def register_shop(request: Request, req: RegisterShopRequest) -> TokenBund
             owner,
             device_fingerprint=req.device_fingerprint,
             device_label=req.device_label,
+            shop=shop,
         )
         await db.commit()
         return bundle
@@ -277,22 +284,21 @@ async def verify_owner_pin(
     req: OwnerPinVerifyRequest,
     response: Response,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
 ):
     if user.role != "owner" or not user.owner_pin_hash:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner pin not set")
 
-    # Refuse early if currently locked out.
-    seconds_left = await _check_owner_pin_lock(user.id)
+    seconds_left = _pin_seconds_left(user)
     if seconds_left is not None:
         response.headers["Retry-After"] = str(seconds_left)
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"too many attempts — try again in "
-            f"{seconds_left // 60}m {seconds_left % 60}s",
+            f"too many attempts — try again in {seconds_left // 60}m {seconds_left % 60}s",
         )
 
     if not verify_password(req.pin, user.owner_pin_hash):
-        remaining = await _record_owner_pin_failure(user.id)
+        remaining = await _record_pin_failure(db, user)
         if remaining == 0:
             response.headers["Retry-After"] = str(OWNER_PIN_LOCK_MINUTES * 60)
             raise HTTPException(
@@ -304,8 +310,7 @@ async def verify_owner_pin(
             f"wrong pin — {remaining} attempt{'s' if remaining != 1 else ''} left",
         )
 
-    # Success — clear any prior failures.
-    await _reset_owner_pin_attempts(user.id)
+    await _reset_pin_attempts(db, user)
     return {"ok": True, "challenge_token": issue_owner_challenge(user_id=user.id)}
 
 

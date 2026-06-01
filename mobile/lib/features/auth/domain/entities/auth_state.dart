@@ -18,6 +18,7 @@ final class Authenticated extends AuthState {
     required this.userName,
     required this.shopName,
     required this.accessToken,
+    this.shopType = 'regular',
   });
 
   final String userId;
@@ -26,4 +27,7 @@ final class Authenticated extends AuthState {
   final String userName;
   final String shopName;
   final String accessToken;
+  final String shopType;
+
+  bool get isBakery => shopType == 'bakery';
 }

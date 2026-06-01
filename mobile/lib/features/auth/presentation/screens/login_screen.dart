@@ -117,6 +117,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         : () => context.go('/register-shop'),
                     child: Text(l.createNewShop),
                   ),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => context.go('/accept-invite'),
+                    child: const Text('I have an invite code'),
+                  ),
                 ],
               ),
             ),

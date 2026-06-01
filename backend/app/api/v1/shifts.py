@@ -26,8 +26,11 @@ async def list_shifts(
     db: AsyncSession = Depends(db_session),
 ):
     stmt = select(Shift).where(Shift.shop_id == user.shop_id)
-    # Cashiers see only their own shifts
     if user.role != "owner":
+        # Cashiers see only their own shifts. Attempting to query another
+        # user's shifts is forbidden — explicit 403 rather than silent filter.
+        if user_id and user_id != str(user.id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "cannot view another user's shifts")
         stmt = stmt.where(Shift.user_id == user.id)
     elif user_id:
         stmt = stmt.where(Shift.user_id == user_id)

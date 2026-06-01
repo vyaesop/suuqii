@@ -21,6 +21,7 @@ class SalesRepository {
     required this.currentUserId,
     required this.currentShopId,
     required this.currentShiftId,
+    this.isBakery = false,
   });
 
   final AppDatabase db;
@@ -28,6 +29,7 @@ class SalesRepository {
   final String currentUserId;
   final String currentShopId;
   final String? currentShiftId;
+  final bool isBakery;
 
   /// Atomic local write: sale + items + stock decrement + inventory log
   /// + (optional) debt + sync event. Returns the persisted sale id.
@@ -128,6 +130,26 @@ class SalesRepository {
         });
       }
 
+      // Bakery: deduct ingredient supplies consumed by this sale.
+      // Load all recipes in a single query to avoid N+1 inside the transaction.
+      final supplyDeductionsPayload = <Map<String, dynamic>>[];
+      if (isBakery) {
+        final productIds = cart.lines.map((l) => l.product.id).toList();
+        final recipesByProduct =
+            await db.recipesDao.getForProducts(productIds);
+        for (final line in cart.lines) {
+          final recipeItems = recipesByProduct[line.product.id] ?? [];
+          for (final item in recipeItems) {
+            final delta = -(item.quantity * line.qty);
+            await db.suppliesDao.applyDelta(item.supplyId, delta);
+            supplyDeductionsPayload.add({
+              'supply_id': item.supplyId,
+              'quantity_delta': delta.toString(),
+            });
+          }
+        }
+      }
+
       String? debtId;
       if (paymentMethod == PaymentMethod.credit) {
         debtId = const Uuid().v4();
@@ -160,6 +182,8 @@ class SalesRepository {
                 'payment_method': method,
                 'occurred_at': now.toIso8601String(),
                 'items': itemsPayload,
+                if (supplyDeductionsPayload.isNotEmpty)
+                  'supply_deductions': supplyDeductionsPayload,
                 if (debtId != null) 'debt_id': debtId,
                 if (paymentMethod == PaymentMethod.credit)
                   'customer': {
@@ -309,5 +333,6 @@ SalesRepository salesRepository(SalesRepositoryRef ref) {
     currentUserId: auth.userId,
     currentShopId: auth.shopId,
     currentShiftId: shiftAsync.valueOrNull?.id,
+    isBakery: auth.isBakery,
   );
 }

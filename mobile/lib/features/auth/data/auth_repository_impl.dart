@@ -36,6 +36,7 @@ class AuthRepository {
     required String ownerPin,
     required String deviceFingerprint,
     String locale = 'en',
+    String shopType = 'regular',
   }) async {
     final res = await remote.registerShop(
       shopName: shopName,
@@ -45,6 +46,7 @@ class AuthRepository {
       ownerPin: ownerPin,
       deviceFingerprint: deviceFingerprint,
       locale: locale,
+      shopType: shopType,
     );
     return _applyBundle(res, phone, shopName: shopName, userName: ownerName);
   }
@@ -64,8 +66,27 @@ class AuthRepository {
       role: p.role,
       userName: p.userName,
       shopName: p.shopName,
+      shopType: p.shopType,
       accessToken: '',
     );
+  }
+
+  Future<Authenticated> acceptInvite({
+    required String phone,
+    required String inviteCode,
+    required String password,
+    required String deviceFingerprint,
+  }) async {
+    final res = await remote.acceptInvite(
+      phone: phone,
+      inviteCode: inviteCode,
+      password: password,
+      deviceFingerprint: deviceFingerprint,
+    );
+    // Server now returns shop_name in the bundle; pass it through so invited
+    // cashiers see the correct shop name after every app restart.
+    final shopName = res['shop_name'] as String?;
+    return _applyBundle(res, phone, shopName: shopName);
   }
 
   Future<String> verifyOwnerPin(String pin) => remote.verifyOwnerPin(pin);
@@ -86,6 +107,7 @@ class AuthRepository {
     final userId = bundle['user_id'] as String;
     final shopId = bundle['shop_id'] as String;
     final role = bundle['role'] as String;
+    final shopType = (bundle['shop_type'] as String?) ?? 'regular';
 
     tokens.access = access;
     await local.saveTokens(refresh: refresh);
@@ -95,6 +117,7 @@ class AuthRepository {
       role: role,
       userName: userName,
       shopName: shopName,
+      shopType: shopType,
     );
     return Authenticated(
       userId: userId,
@@ -102,6 +125,7 @@ class AuthRepository {
       role: role,
       userName: userName ?? phone,
       shopName: shopName ?? '',
+      shopType: shopType,
       accessToken: access,
     );
   }

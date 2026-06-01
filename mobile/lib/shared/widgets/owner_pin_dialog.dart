@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/presentation/providers.dart';
 
 /// Bottom sheet that prompts for the owner PIN, calls the backend, and
@@ -108,11 +109,20 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
       final repo = await ref.read(authRepositoryProvider.future);
       final token = await repo.verifyOwnerPin(pin);
       if (mounted) Navigator.pop(context, token);
+    } on AuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          // Surface the server message directly — it already contains
+          // remaining-attempt counts and lockout durations.
+          _error = e.message;
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = 'Wrong PIN';
+          _error = 'Network error — try again';
         });
       }
     }

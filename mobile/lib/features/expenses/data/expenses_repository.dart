@@ -33,7 +33,7 @@ class ExpensesRepository {
   final String userId;
   final String? shiftId;
 
-  Stream<List<Expense>> watch() => db.expensesDao.watchAll();
+  Stream<List<Expense>> watch() => db.expensesDao.watchAll(shopId: shopId);
 
   Future<int> refreshFromServer() async {
     final items = await remote.list(shopId: shopId);
@@ -47,6 +47,7 @@ class ExpensesRepository {
     required String category,
     String? description,
     DateTime? occurredAt,
+    String? ownerChallengeToken,
   }) async {
     if (amount <= Decimal.zero) throw StateError('Amount must be positive');
     final id = const Uuid().v4();
@@ -81,6 +82,8 @@ class ExpensesRepository {
                 'category': category,
                 if (description != null) 'description': description,
                 'occurred_at': at.toIso8601String(),
+                if (ownerChallengeToken != null)
+                  'owner_challenge': ownerChallengeToken,
               }),
             ),
           );

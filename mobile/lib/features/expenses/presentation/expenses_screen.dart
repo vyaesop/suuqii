@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/expenses/data/expenses_repository.dart';
 import 'package:suuqii/features/expenses/domain/entities/expense.dart';
+import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 
 class ExpensesScreen extends ConsumerStatefulWidget {
   const ExpensesScreen({super.key});
@@ -93,12 +96,24 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
       builder: (_) => const _AddSheet(),
     );
     if (result == null) return;
+
+    // expense.create is sensitive — non-owners must authorize with owner PIN.
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    final isOwner = auth is Authenticated && auth.role == 'owner';
+    String? challenge;
+    if (!isOwner) {
+      if (!context.mounted) return;
+      challenge = await requestOwnerChallenge(context, ref);
+      if (challenge == null) return;
+    }
+
     try {
       await ref.read(expensesRepositoryProvider).add(
             title: result.title,
             amount: result.amount,
             category: result.category,
             description: result.description,
+            ownerChallengeToken: challenge,
           );
       messenger.showSnackBar(const SnackBar(content: Text('Expense added')));
     } catch (e) {

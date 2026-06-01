@@ -15,6 +15,7 @@ class AuthLocalDataSource {
   static const _kRole = 'auth.role';
   static const _kUserName = 'auth.user_name';
   static const _kShopName = 'auth.shop_name';
+  static const _kShopType = 'auth.shop_type';
 
   Future<void> saveTokens({required String refresh}) async {
     await _secure.writeRefresh(refresh);
@@ -28,12 +29,14 @@ class AuthLocalDataSource {
     required String role,
     String? userName,
     String? shopName,
+    String? shopType,
   }) async {
     await _prefs.setString(_kUserId, userId);
     await _prefs.setString(_kShopId, shopId);
     await _prefs.setString(_kRole, role);
     if (userName != null) await _prefs.setString(_kUserName, userName);
     if (shopName != null) await _prefs.setString(_kShopName, shopName);
+    if (shopType != null) await _prefs.setString(_kShopType, shopType);
   }
 
   ({
@@ -41,7 +44,8 @@ class AuthLocalDataSource {
     String shopId,
     String role,
     String userName,
-    String shopName
+    String shopName,
+    String shopType,
   })? readProfile() {
     final uid = _prefs.getString(_kUserId);
     final sid = _prefs.getString(_kShopId);
@@ -53,6 +57,7 @@ class AuthLocalDataSource {
       role: role,
       userName: _prefs.getString(_kUserName) ?? '',
       shopName: _prefs.getString(_kShopName) ?? '',
+      shopType: _prefs.getString(_kShopType) ?? 'regular',
     );
   }
 
@@ -63,5 +68,6 @@ class AuthLocalDataSource {
     await _prefs.remove(_kRole);
     await _prefs.remove(_kUserName);
     await _prefs.remove(_kShopName);
+    await _prefs.remove(_kShopType);
   }
 }

@@ -11,7 +11,10 @@ import 'package:suuqii/core/services/cloudinary_service.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/data/recipes_repository.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
+import 'package:suuqii/features/supplies/data/supplies_repository.dart';
+import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
@@ -38,6 +41,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   final _imageUrl = TextEditingController();
   String _unit = 'piece';
 
+  // Bakery recipe state: list of (supply, qty controller) pairs
+  final List<({Supply supply, TextEditingController qty})> _recipeLines = [];
+
   bool _loaded = false;
   bool _busy = false;
   bool _uploading = false;
@@ -60,6 +66,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     _threshold.dispose();
     _barcode.dispose();
     _imageUrl.dispose();
+    for (final line in _recipeLines) {
+      line.qty.dispose();
+    }
     super.dispose();
   }
 
@@ -79,6 +88,34 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     _imageUrl.text = p.imageUrl ?? '';
     _unit = p.unit;
     _originalSelling = p.sellingPrice;
+
+    // Load existing recipe for bakery shops.
+    // getForProduct already enriches items with supply name/unit/cost, so we
+    // don't need a separate getAll() call here.
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    if (auth is Authenticated && auth.isBakery) {
+      final existingRecipe = await ref
+          .read(recipesRepositoryProvider)
+          .getForProduct(widget.productId!);
+      for (final item in existingRecipe) {
+        if (item.supplyName == null) continue; // supply deleted, skip
+        _recipeLines.add((
+          supply: Supply(
+            id: item.supplyId,
+            shopId: item.shopId,
+            name: item.supplyName!,
+            unit: item.supplyUnit ?? 'piece',
+            quantityOnHand: Decimal.zero,
+            reorderThreshold: Decimal.zero,
+            costPerUnit: item.supplyCostPerUnit ?? Decimal.zero,
+          ),
+          qty: TextEditingController(
+            text: item.quantity.toStringAsFixed(2),
+          ),
+        ),);
+      }
+    }
+
     setState(() => _loaded = true);
   }
 
@@ -90,6 +127,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     }
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
+    final isBakery = auth is Authenticated && auth.isBakery;
 
     return Scaffold(
       appBar: AppBar(
@@ -123,11 +161,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                       validator: _required,
                     ),
                     const SizedBox(height: SuuqSpacing.sm),
-                    TextFormField(
+                    _CategoryField(
                       controller: _category,
-                      decoration: const InputDecoration(
-                        labelText: 'Category (optional)',
-                      ),
+                      categories: ref
+                              .watch(watchCategoriesProvider)
+                              .valueOrNull ??
+                          const [],
                     ),
                     const SizedBox(height: SuuqSpacing.sm),
                     DropdownButtonFormField<String>(
@@ -152,26 +191,30 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _purchase,
-                            keyboardType: const TextInputType
-                                .numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Purchase',
-                              prefixText: 'ETB  ',
+                        // Bakery shops derive cost from recipe; regular shops
+                        // use an explicit purchase price (owner-only).
+                        if (isOwner && !isBakery) ...[
+                          Expanded(
+                            child: TextFormField(
+                              controller: _purchase,
+                              keyboardType: const TextInputType
+                                  .numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(
+                                labelText: 'Purchase',
+                                prefixText: 'ETB  ',
+                              ),
+                              validator: _decimal,
                             ),
-                            validator: _decimal,
                           ),
-                        ),
-                        const SizedBox(width: SuuqSpacing.sm),
+                          const SizedBox(width: SuuqSpacing.sm),
+                        ],
                         Expanded(
                           child: TextFormField(
                             controller: _selling,
                             keyboardType: const TextInputType
                                 .numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
-                              labelText: 'Selling',
+                              labelText: 'Selling price',
                               prefixText: 'ETB  ',
                             ),
                             validator: _decimal,
@@ -181,6 +224,17 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                     ),
                   ],
                 ),
+                if (isBakery) ...[
+                  const SizedBox(height: SuuqSpacing.lg),
+                  _RecipeSection(
+                    lines: _recipeLines,
+                    onAddLine: () => _addRecipeLine(context),
+                    onRemoveLine: (i) {
+                      _recipeLines[i].qty.dispose();
+                      setState(() => _recipeLines.removeAt(i));
+                    },
+                  ),
+                ],
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
                   title: 'Stock',
@@ -336,7 +390,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                     ),
                   )
                 : const Icon(Icons.check_rounded),
-            onPressed: _busy ? null : () => _save(isOwner: isOwner),
+            onPressed: _busy ? null : () => _save(isOwner: isOwner, isBakery: isBakery),
             label: Text(widget.isCreating ? 'Create product' : 'Save changes'),
           ),
         ),
@@ -352,6 +406,40 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final d = Decimal.tryParse(v.trim());
     if (d == null || d < Decimal.zero) return 'Invalid number';
     return null;
+  }
+
+  Future<void> _addRecipeLine(BuildContext context) async {
+    final supplies = await ref.read(suppliesRepositoryProvider).getAll();
+    if (!context.mounted) return;
+    if (supplies.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add supplies first before building a recipe'),
+        ),
+      );
+      return;
+    }
+    final existing = _recipeLines.map((l) => l.supply.id).toSet();
+    final available = supplies.where((s) => !existing.contains(s.id)).toList();
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All supplies already added')),
+      );
+      return;
+    }
+
+    final picked = await showModalBottomSheet<Supply>(
+      context: context,
+      builder: (ctx) => _SupplyPickerSheet(supplies: available),
+    );
+    if (picked == null) return;
+
+    setState(() {
+      _recipeLines.add((
+        supply: picked,
+        qty: TextEditingController(text: '1'),
+      ),);
+    });
   }
 
   Future<void> _pickAndUploadImage() async {
@@ -416,10 +504,16 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     return value.isEmpty ? null : value;
   }
 
-  Future<void> _save({required bool isOwner}) async {
+  Future<void> _save({
+    required bool isOwner,
+    required bool isBakery,
+  }) async {
     if (!_form.currentState!.validate()) return;
     final selling = Decimal.parse(_selling.text.trim());
-    final purchase = Decimal.parse(_purchase.text.trim());
+    // Bakery: cost is derived from recipe. Regular: owner enters purchase price.
+    final purchase = isBakery
+        ? Decimal.zero
+        : Decimal.parse(_purchase.text.isEmpty ? '0' : _purchase.text.trim());
     final category = _category.text.trim().isEmpty
         ? null
         : _category.text.trim();
@@ -428,10 +522,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
 
-    final priceChanged =
-        _originalSelling != null && _originalSelling != selling;
+    final priceChanged = !widget.isCreating &&
+        _originalSelling != null &&
+        _originalSelling != selling;
+    final needsPin = !isOwner && (widget.isCreating || priceChanged);
     String? challenge;
-    if (!isOwner && priceChanged) {
+    if (needsPin) {
       challenge = await requestOwnerChallenge(context, ref);
       if (challenge == null) return;
     }
@@ -439,8 +535,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     setState(() => _busy = true);
     try {
       final repo = ref.read(productsRepositoryProvider);
+      String productId;
       if (widget.isCreating) {
-        await repo.create(
+        final created = await repo.create(
           name: _name.text.trim(),
           category: category,
           purchasePrice: purchase,
@@ -452,6 +549,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
           imageUrl: imageUrl,
           ownerChallengeToken: challenge,
         );
+        productId = created.id;
       } else {
         await repo.update(
           id: widget.productId!,
@@ -465,7 +563,26 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
           imageUrl: imageUrl,
           ownerChallengeToken: challenge,
         );
+        productId = widget.productId!;
       }
+
+      // Save recipe for bakery shops
+      if (isBakery) {
+        final lines = _recipeLines
+            .map((line) {
+              final qty = Decimal.tryParse(line.qty.text.trim());
+              if (qty == null || qty <= Decimal.zero) return null;
+              return (supplyId: line.supply.id, quantity: qty);
+            })
+            .whereType<({String supplyId, Decimal quantity})>()
+            .toList();
+        await ref.read(recipesRepositoryProvider).setRecipe(
+              productId: productId,
+              lines: lines,
+              ownerChallengeToken: challenge,
+            );
+      }
+
       router.pop();
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -509,6 +626,205 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Recipe section widget
+// ---------------------------------------------------------------------------
+
+class _RecipeSection extends StatelessWidget {
+  const _RecipeSection({
+    required this.lines,
+    required this.onAddLine,
+    required this.onRemoveLine,
+  });
+
+  final List<({Supply supply, TextEditingController qty})> lines;
+  final VoidCallback onAddLine;
+  final ValueChanged<int> onRemoveLine;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+
+    var totalCost = Decimal.zero;
+    for (final line in lines) {
+      final qty = Decimal.tryParse(line.qty.text.trim()) ?? Decimal.zero;
+      totalCost += qty * line.supply.costPerUnit;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: SuuqSpacing.xs),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'RECIPE',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              if (lines.isNotEmpty)
+                Text(
+                  'Cost: ETB ${totalCost.toStringAsFixed(2)}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(SuuqRadius.md),
+          ),
+          child: Column(
+            children: [
+              if (lines.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(SuuqSpacing.md),
+                  child: Text(
+                    'No ingredients added yet.\nAdd supplies to calculate cost automatically.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ...lines.asMap().entries.map((entry) {
+                final i = entry.key;
+                final line = entry.value;
+                return _RecipeLine(
+                  supply: line.supply,
+                  qtyController: line.qty,
+                  onRemove: () => onRemoveLine(i),
+                  showDivider: i < lines.length - 1,
+                );
+              }),
+              const Divider(height: 1),
+              TextButton.icon(
+                onPressed: onAddLine,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add ingredient'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecipeLine extends StatelessWidget {
+  const _RecipeLine({
+    required this.supply,
+    required this.qtyController,
+    required this.onRemove,
+    required this.showDivider,
+  });
+
+  final Supply supply;
+  final TextEditingController qtyController;
+  final VoidCallback onRemove;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: SuuqSpacing.sm,
+            vertical: SuuqSpacing.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  supply.name,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ),
+              SizedBox(
+                width: 80,
+                child: TextField(
+                  controller: qtyController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    suffixText: supply.unit,
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: SuuqSpacing.xs),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: onRemove,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+        ),
+        if (showDivider) const Divider(height: 1),
+      ],
+    );
+  }
+}
+
+class _SupplyPickerSheet extends StatelessWidget {
+  const _SupplyPickerSheet({required this.supplies});
+  final List<Supply> supplies;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              SuuqSpacing.lg, SuuqSpacing.md, SuuqSpacing.lg, 0,
+            ),
+            child: Text(
+              'Pick an ingredient',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          const SizedBox(height: SuuqSpacing.xs),
+          ...supplies.map(
+            (s) => ListTile(
+              title: Text(s.name),
+              subtitle: Text(
+                '${s.quantityOnHand.toStringAsFixed(2)} ${s.unit} on hand',
+              ),
+              onTap: () => Navigator.pop(context, s),
+            ),
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Section header widget (shared with the rest of the screen)
+// ---------------------------------------------------------------------------
+
 class _Section extends StatelessWidget {
   const _Section({required this.title, required this.children});
   final String title;
@@ -530,6 +846,75 @@ class _Section extends StatelessWidget {
         ),
         ...children,
       ],
+    );
+  }
+}
+
+/// Category field with autocomplete from previously-used categories.
+///
+/// Allows free-form text entry while surfacing existing categories as
+/// suggestions so the product list stays consistent without forcing a
+/// predefined taxonomy on the user.
+class _CategoryField extends StatelessWidget {
+  const _CategoryField({
+    required this.controller,
+    required this.categories,
+  });
+
+  final TextEditingController controller;
+  final List<String> categories;
+
+  @override
+  Widget build(BuildContext context) {
+    return Autocomplete<String>(
+      initialValue: TextEditingValue(text: controller.text),
+      optionsBuilder: (value) {
+        final q = value.text.trim().toLowerCase();
+        // Show all categories when the field is empty; otherwise filter.
+        if (q.isEmpty) return categories;
+        return categories.where((c) => c.toLowerCase().contains(q));
+      },
+      fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmit) {
+        return TextFormField(
+          controller: autoCtrl,
+          focusNode: focusNode,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (v) => controller.text = v,
+          onFieldSubmitted: (_) => onSubmit(),
+          decoration: InputDecoration(
+            labelText: 'Category (optional)',
+            suffixIcon: categories.isNotEmpty
+                ? const Icon(Icons.expand_more, size: 18)
+                : null,
+          ),
+        );
+      },
+      onSelected: (value) => controller.text = value,
+      optionsViewBuilder: (ctx, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(SuuqRadius.md),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (_, i) {
+                  final option = options.elementAt(i);
+                  return ListTile(
+                    dense: true,
+                    title: Text(option),
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

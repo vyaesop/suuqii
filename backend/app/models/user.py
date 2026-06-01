@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,8 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)
     owner_pin_hash: Mapped[str | None] = mapped_column(String)
+    owner_pin_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    owner_pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fcm_token: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

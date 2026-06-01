@@ -10,8 +10,9 @@ part 'expenses_dao.g.dart';
 class ExpensesDao extends DatabaseAccessor<AppDatabase> with _$ExpensesDaoMixin {
   ExpensesDao(super.db);
 
-  Stream<List<Expense>> watchAll() {
+  Stream<List<Expense>> watchAll({required String shopId}) {
     final q = select(expensesTable)
+      ..where((t) => t.shopId.equals(shopId))
       ..where((t) => t.deletedAt.isNull())
       ..orderBy([
         (t) => OrderingTerm(expression: t.occurredAt, mode: OrderingMode.desc),

@@ -10,8 +10,9 @@ part 'debts_dao.g.dart';
 class DebtsDao extends DatabaseAccessor<AppDatabase> with _$DebtsDaoMixin {
   DebtsDao(super.db);
 
-  Stream<List<Debt>> watchAll({DebtStatus? status}) {
+  Stream<List<Debt>> watchAll({required String shopId, DebtStatus? status}) {
     final q = select(debtsTable)
+      ..where((t) => t.shopId.equals(shopId))
       ..where((t) => t.deletedAt.isNull())
       ..orderBy([
         (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),

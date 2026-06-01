@@ -85,7 +85,7 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
           ),
           const SizedBox(height: SuuqSpacing.sm),
           DropdownButtonFormField<String>(
-            initialValue: _reason,
+            value: _reason,
             decoration: const InputDecoration(labelText: 'Reason'),
             items: _reasonsByMovement[_movement]!
                 .map(

@@ -33,6 +33,7 @@ class AuthRemoteDataSource {
     required String ownerPin,
     required String deviceFingerprint,
     String locale = 'en',
+    String shopType = 'regular',
   }) async {
     final res = await _dio.post<Map<String, dynamic>>(
       '/v1/auth/register-shop',
@@ -44,6 +45,7 @@ class AuthRemoteDataSource {
         'owner_pin': ownerPin,
         'device_fingerprint': deviceFingerprint,
         'locale': locale,
+        'shop_type': shopType,
       },
     );
     if (res.statusCode != 201 && res.statusCode != 200) {
@@ -59,6 +61,27 @@ class AuthRemoteDataSource {
     );
     if (res.statusCode != 200) throw _toError(res);
     return res.data!['challenge_token'] as String;
+  }
+
+  Future<Map<String, dynamic>> acceptInvite({
+    required String phone,
+    required String inviteCode,
+    required String password,
+    required String deviceFingerprint,
+    String? deviceLabel,
+  }) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/v1/auth/accept-invite',
+      data: {
+        'phone': phone,
+        'invite_code': inviteCode,
+        'password': password,
+        'device_fingerprint': deviceFingerprint,
+        if (deviceLabel != null) 'device_label': deviceLabel,
+      },
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) throw _toError(res);
+    return res.data!;
   }
 
   Future<List<Map<String, dynamic>>> listShopUsers() async {
@@ -88,8 +111,23 @@ class AuthRemoteDataSource {
 
   AuthException _toError(Response<dynamic> res) {
     final d = res.data;
-    if (d is Map && d['detail'] is String) {
-      return AuthException(d['detail'] as String, res.statusCode);
+    if (d is Map) {
+      final detail = d['detail'];
+      if (detail is String) {
+        return AuthException(detail, res.statusCode);
+      }
+      // FastAPI returns a list of validation errors for 422 responses.
+      if (detail is List && detail.isNotEmpty) {
+        final first = detail.first;
+        if (first is Map) {
+          final raw = first['msg'] as String? ?? 'Validation error';
+          // Strip Pydantic's "Value error, " prefix for cleaner UX.
+          final msg = raw.startsWith('Value error, ')
+              ? raw.substring('Value error, '.length)
+              : raw;
+          return AuthException(msg, res.statusCode);
+        }
+      }
     }
     return AuthException('request failed (${res.statusCode})', res.statusCode);
   }

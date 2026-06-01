@@ -6,6 +6,7 @@ per push request, with per-event idempotency.
 """
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -23,21 +24,51 @@ from app.models import (
     Expense,
     InventoryLog,
     Product,
+    RecipeItem,
     Sale,
     SaleItem,
     Shift,
+    Supply,
     SyncEvent,
     User,
 )
 from app.schemas.sync import SyncEventIn, SyncResultOut, SyncResultStatus
 
 SENSITIVE_OPS = {
+    "product.create",
     "product.update",
     "product.delete",
     "inventory.adjust",
     "debt.writeoff",
-    "sale.void",
+    "sale.refund",
+    "expense.create",
+    "supply.create",
+    "supply.update",
+    "supply.delete",
+    # recipe.set intentionally excluded: it can only reference products that
+    # already required owner PIN to create, and it has no financial effect.
+    # sale.void intentionally excluded: the handler is not yet implemented.
 }
+
+# Single-use nonce tracking: nonce → expiry unix timestamp.
+# Per-process; acceptable for v1 single-worker deployments. In multi-worker
+# production move to Redis with TTL keys.
+_used_nonces: dict[str, float] = {}
+_NONCE_CLEANUP_INTERVAL = 300  # purge expired entries every 5 min
+_last_nonce_cleanup: float = 0.0
+
+
+def _consume_nonce(nonce: str, exp: float) -> bool:
+    """Mark nonce as used. Returns False if already consumed or expired."""
+    global _last_nonce_cleanup, _used_nonces  # noqa: PLW0603
+    now = time.time()
+    if now - _last_nonce_cleanup > _NONCE_CLEANUP_INTERVAL:
+        _used_nonces = {n: e for n, e in _used_nonces.items() if e > now}
+        _last_nonce_cleanup = now
+    if nonce in _used_nonces or exp <= now:
+        return False
+    _used_nonces[nonce] = exp
+    return True
 
 
 class SyncService:
@@ -54,10 +85,13 @@ class SyncService:
         self.shop_id = shop_id
         self.user = user
         self.device_id = device_id
-        self._challenge_user_id: UUID | None = self._validate_challenge(owner_challenge)
+        # Consume the batch-level nonce once at construction so the token
+        # cannot be replayed across different sync requests.
+        self._batch_challenge_id: UUID | None = self._authorize_challenge(owner_challenge)
 
     @staticmethod
-    def _validate_challenge(token: str | None) -> UUID | None:
+    def _parse_challenge(token: str | None) -> UUID | None:
+        """Decode and validate a challenge token; does NOT consume its nonce."""
         if not token:
             return None
         try:
@@ -68,17 +102,42 @@ class SyncService:
             return None
         return UUID(payload["sub"])
 
+    def _authorize_challenge(self, token: str | None) -> UUID | None:
+        """Validate token and consume its nonce. Returns owner user_id or None."""
+        if not token:
+            return None
+        try:
+            payload = decode_token(token)
+        except Exception:  # noqa: BLE001
+            return None
+        if payload.get("purpose") != "owner_pin":
+            return None
+        nonce = payload.get("nonce", "")
+        exp = float(payload.get("exp", 0))
+        if not _consume_nonce(nonce, exp):
+            return None
+        return UUID(payload["sub"])
+
     async def apply(self, event: SyncEventIn) -> SyncResultOut:
         existing = await self._existing_event(event.client_event_id)
         if existing is not None:
             return SyncResultOut(client_event_id=event.client_event_id, status=SyncResultStatus.DUPLICATE)
 
-        if event.op in SENSITIVE_OPS and self.user.role != "owner" and self._challenge_user_id is None:
-            return SyncResultOut(
-                client_event_id=event.client_event_id,
-                status=SyncResultStatus.REJECTED,
-                code="owner_pin_required",
+        if event.op in SENSITIVE_OPS and self.user.role != "owner":
+            # Per-event token (mobile stores it in payload) takes precedence;
+            # fall back to the batch-level header token.
+            per_event_token: str | None = event.payload.get("owner_challenge")
+            challenge_id = (
+                self._authorize_challenge(per_event_token)
+                if per_event_token
+                else self._batch_challenge_id
             )
+            if challenge_id is None:
+                return SyncResultOut(
+                    client_event_id=event.client_event_id,
+                    status=SyncResultStatus.REJECTED,
+                    code="owner_pin_required",
+                )
 
         try:
             handler = self._handler_for(event.op)
@@ -118,6 +177,7 @@ class SyncService:
         m = {
             "sale.create": self._sale_create,
             "sale.refund": self._sale_refund,
+            "sale.void": self._sale_void,
             "product.create": self._product_create,
             "product.update": self._product_update,
             "product.delete": self._product_delete,
@@ -126,6 +186,10 @@ class SyncService:
             "expense.create": self._expense_create,
             "shift.open": self._shift_open,
             "shift.close": self._shift_close,
+            "supply.create": self._supply_create,
+            "supply.update": self._supply_update,
+            "supply.delete": self._supply_delete,
+            "recipe.set": self._recipe_set,
         }
         if op not in m:
             raise DomainError(f"unsupported op: {op}", code="unsupported_op")
@@ -206,6 +270,20 @@ class SyncService:
                 status="open",
             ))
 
+        # Bakery: deduct supplies consumed by this sale (client pre-calculated).
+        # Shop-scoped: only supplies belonging to this shop can be decremented.
+        for ded in p.get("supply_deductions", []):
+            supply_id = UUID(ded["supply_id"])
+            delta = Decimal(ded["quantity_delta"])  # negative value
+            await self.db.execute(
+                Supply.__table__.update()
+                .where(Supply.id == supply_id, Supply.shop_id == self.shop_id)
+                .values(
+                    quantity_on_hand=Supply.quantity_on_hand + delta,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+
     async def _sale_refund(self, p: dict[str, Any]) -> None:
         sale_id = UUID(p["sale_id"])
         sale = await self.db.get(Sale, sale_id)
@@ -230,7 +308,7 @@ class SyncService:
             await self.db.execute(
                 Product.__table__.update()
                 .where(Product.id == item.product_id)
-                .values(stock=Product.stock + item.quantity)
+                .values(stock=Product.stock + item.quantity, updated_at=datetime.now(UTC))
             )
 
     async def _product_create(self, p: dict[str, Any]) -> None:
@@ -241,7 +319,7 @@ class SyncService:
             shop_id=self.shop_id,
             name=p["name"],
             category=p.get("category"),
-            purchase_price=Decimal(p["purchase_price"]),
+            purchase_price=Decimal(p.get("purchase_price", "0")),
             selling_price=Decimal(p["selling_price"]),
             stock=Decimal(p.get("stock", "0")),
             low_stock_threshold=Decimal(p.get("low_stock_threshold", "0")),
@@ -392,3 +470,57 @@ class SyncService:
         declared = Decimal(p["declared_closing_cash"])
         note = p.get("note")
         await ShiftService(self.db, self.shop_id).close(shift_id, declared, note)
+
+    async def _sale_void(self, p: dict[str, Any]) -> None:
+        raise DomainError("sale.void is not yet supported", code="not_implemented")
+
+    async def _supply_create(self, p: dict[str, Any]) -> None:
+        if await self.db.get(Supply, UUID(p["id"])):
+            return
+        self.db.add(Supply(
+            id=UUID(p["id"]),
+            shop_id=self.shop_id,
+            name=p["name"],
+            unit=p.get("unit", "piece"),
+            quantity_on_hand=Decimal(p.get("quantity_on_hand", "0")),
+            reorder_threshold=Decimal(p.get("reorder_threshold", "0")),
+            cost_per_unit=Decimal(p.get("cost_per_unit", "0")),
+        ))
+
+    async def _supply_update(self, p: dict[str, Any]) -> None:
+        supply = await self.db.get(Supply, UUID(p["id"]))
+        if not supply:
+            raise DomainError("supply not found", code="not_found", status=404)
+        for field in ("name", "unit"):
+            if field in p:
+                setattr(supply, field, p[field])
+        for field in ("quantity_on_hand", "reorder_threshold", "cost_per_unit"):
+            if field in p:
+                setattr(supply, field, Decimal(p[field]))
+        supply.updated_at = datetime.now(UTC)
+
+    async def _supply_delete(self, p: dict[str, Any]) -> None:
+        supply = await self.db.get(Supply, UUID(p["id"]))
+        if supply:
+            supply.deleted_at = datetime.now(UTC)
+
+    async def _recipe_set(self, p: dict[str, Any]) -> None:
+        """Replace a product's recipe atomically: delete old items, insert new ones."""
+        product_id = UUID(p["product_id"])
+        existing = await self.db.execute(
+            select(RecipeItem).where(
+                RecipeItem.product_id == product_id,
+                RecipeItem.shop_id == self.shop_id,
+            )
+        )
+        for row in existing.scalars():
+            await self.db.delete(row)
+
+        for item in p.get("items", []):
+            self.db.add(RecipeItem(
+                id=UUID(item["id"]),
+                shop_id=self.shop_id,
+                product_id=product_id,
+                supply_id=UUID(item["supply_id"]),
+                quantity=Decimal(item["quantity"]),
+            ))

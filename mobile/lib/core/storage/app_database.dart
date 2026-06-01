@@ -8,12 +8,16 @@ import 'package:suuqii/core/storage/tables/debts_table.dart';
 import 'package:suuqii/core/storage/tables/expenses_table.dart';
 import 'package:suuqii/core/storage/tables/inventory_logs_table.dart';
 import 'package:suuqii/core/storage/tables/products_table.dart';
+import 'package:suuqii/core/storage/tables/recipes_table.dart';
 import 'package:suuqii/core/storage/tables/sales_tables.dart';
 import 'package:suuqii/core/storage/tables/shifts_table.dart';
+import 'package:suuqii/core/storage/tables/supplies_table.dart';
 import 'package:suuqii/core/storage/tables/sync_events_table.dart';
 import 'package:suuqii/features/debt/data/debts_dao.dart';
 import 'package:suuqii/features/expenses/data/expenses_dao.dart';
 import 'package:suuqii/features/inventory/data/products_dao.dart';
+import 'package:suuqii/features/inventory/data/recipes_dao.dart';
+import 'package:suuqii/features/supplies/data/supplies_dao.dart';
 import 'package:suuqii/features/sync/data/sync_queue_dao.dart';
 
 part 'app_database.g.dart';
@@ -33,8 +37,10 @@ int sqliteDateTimeParam(DateTime value) =>
     ShiftsTable,
     AuditLogsTable,
     SyncEventsTable,
+    SuppliesTable,
+    RecipeItemsTable,
   ],
-  daos: [SyncQueueDao, ProductsDao, DebtsDao, ExpensesDao],
+  daos: [SyncQueueDao, ProductsDao, DebtsDao, ExpensesDao, SuppliesDao, RecipesDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
@@ -54,7 +60,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -63,8 +69,32 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             await _repairLegacyDateTimes();
           }
+          if (from < 3) {
+            await m.createTable(suppliesTable);
+            await m.createTable(recipeItemsTable);
+          }
         },
       );
+
+  /// Wipe all shop-scoped data. Called on logout or when a different shop
+  /// account is detected on login, so stale data from a previous session never
+  /// leaks into the new one.
+  Future<void> clearAllShopData() async {
+    await transaction(() async {
+      await customStatement('DELETE FROM sync_events');
+      await customStatement('DELETE FROM inventory_logs');
+      await customStatement('DELETE FROM sale_items');
+      await customStatement('DELETE FROM sales');
+      await customStatement('DELETE FROM debt_payments');
+      await customStatement('DELETE FROM debts');
+      await customStatement('DELETE FROM expenses');
+      await customStatement('DELETE FROM shifts');
+      await customStatement('DELETE FROM audit_logs');
+      await customStatement('DELETE FROM recipe_items');
+      await customStatement('DELETE FROM supplies');
+      await customStatement('DELETE FROM products');
+    });
+  }
 
   Future<void> _repairLegacyDateTimes() async {
     Future<void> repair(String table, String column) {

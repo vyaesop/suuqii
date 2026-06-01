@@ -5,6 +5,7 @@ import 'package:suuqii/app/home_shell.dart';
 import 'package:suuqii/features/audit/presentation/audit_screen.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/auth/presentation/screens/accept_invite_screen.dart';
 import 'package:suuqii/features/auth/presentation/screens/login_screen.dart';
 import 'package:suuqii/features/auth/presentation/screens/register_shop_screen.dart';
 import 'package:suuqii/features/dashboard/presentation/owner_dashboard_screen.dart';
@@ -22,6 +23,7 @@ import 'package:suuqii/features/settings/presentation/employees_screen.dart';
 import 'package:suuqii/features/settings/presentation/settings_screen.dart';
 import 'package:suuqii/features/shifts/presentation/open_shifts_screen.dart';
 import 'package:suuqii/features/shifts/presentation/shift_screen.dart';
+import 'package:suuqii/features/supplies/presentation/supplies_screen.dart';
 
 part 'router.g.dart';
 
@@ -65,6 +67,10 @@ GoRouter router(RouterRef ref) {
       GoRoute(
         path: '/register-shop',
         builder: (_, __) => const RegisterShopScreen(),
+      ),
+      GoRoute(
+        path: '/accept-invite',
+        builder: (_, __) => const AcceptInviteScreen(),
       ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
@@ -126,6 +132,10 @@ GoRouter router(RouterRef ref) {
           GoRoute(
             path: '/expenses',
             builder: (_, __) => const ExpensesScreen(),
+          ),
+          GoRoute(
+            path: '/supplies',
+            builder: (_, __) => const SuppliesScreen(),
           ),
           GoRoute(path: '/audit', builder: (_, __) => const AuditScreen()),
           GoRoute(
