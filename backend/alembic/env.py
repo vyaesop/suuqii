@@ -19,9 +19,11 @@ from app.models import (  # noqa: F401
     expense,
     inventory_log,
     product,
+    recipe,
     sale,
     shift,
     shop,
+    supply,
     sync_event,
     user,
 )
