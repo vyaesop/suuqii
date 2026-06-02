@@ -10,6 +10,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/services/cloudinary_service.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/data/recipes_repository.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
@@ -18,7 +19,7 @@ import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
-const _units = <String>['piece', 'kg', 'liter', 'pack', 'm'];
+const _units = <String>['piece', 'kg', 'quintal', 'liter', 'pack', 'm'];
 
 class ProductEditScreen extends ConsumerStatefulWidget {
   const ProductEditScreen({super.key, this.productId});
@@ -41,8 +42,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   final _imageUrl = TextEditingController();
   String _unit = 'piece';
 
-  // Bakery recipe state: list of (supply, qty controller) pairs
-  final List<({Supply supply, TextEditingController qty})> _recipeLines = [];
+  // Bakery recipe state: list of (supply, qty controller, recipe unit) tuples
+  final List<({Supply supply, TextEditingController qty, String unit})>
+      _recipeLines = [];
 
   bool _loaded = false;
   bool _busy = false;
@@ -99,12 +101,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
           .getForProduct(widget.productId!);
       for (final item in existingRecipe) {
         if (item.supplyName == null) continue; // supply deleted, skip
+        final supplyUnit = item.supplyUnit ?? 'piece';
         _recipeLines.add((
           supply: Supply(
             id: item.supplyId,
             shopId: item.shopId,
             name: item.supplyName!,
-            unit: item.supplyUnit ?? 'piece',
+            unit: supplyUnit,
             quantityOnHand: Decimal.zero,
             reorderThreshold: Decimal.zero,
             costPerUnit: item.supplyCostPerUnit ?? Decimal.zero,
@@ -112,6 +115,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
           qty: TextEditingController(
             text: item.quantity.toStringAsFixed(2),
           ),
+          unit: item.recipeUnit ?? supplyUnit,
         ),);
       }
     }
@@ -233,6 +237,11 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                       _recipeLines[i].qty.dispose();
                       setState(() => _recipeLines.removeAt(i));
                     },
+                    onUnitChanged: (i, newUnit) => setState(() {
+                      final old = _recipeLines[i];
+                      _recipeLines[i] =
+                          (supply: old.supply, qty: old.qty, unit: newUnit);
+                    }),
                   ),
                 ],
                 const SizedBox(height: SuuqSpacing.lg),
@@ -434,10 +443,14 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     );
     if (picked == null) return;
 
+    // Default recipe unit to the most-common sub-unit for the supply's unit
+    // (e.g. kg supply → default to g so the user enters 100 not 0.1).
+    final defaultUnit = compatibleUnits(picked.unit).first;
     setState(() {
       _recipeLines.add((
         supply: picked,
-        qty: TextEditingController(text: '1'),
+        qty: TextEditingController(text: ''),
+        unit: defaultUnit,
       ),);
     });
   }
@@ -572,9 +585,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
             .map((line) {
               final qty = Decimal.tryParse(line.qty.text.trim());
               if (qty == null || qty <= Decimal.zero) return null;
-              return (supplyId: line.supply.id, quantity: qty);
+              return (
+                supplyId: line.supply.id,
+                quantity: qty,
+                recipeUnit: line.unit,
+              );
             })
-            .whereType<({String supplyId, Decimal quantity})>()
+            .whereType<({String supplyId, Decimal quantity, String recipeUnit})>()
             .toList();
         await ref.read(recipesRepositoryProvider).setRecipe(
               productId: productId,
@@ -635,21 +652,26 @@ class _RecipeSection extends StatelessWidget {
     required this.lines,
     required this.onAddLine,
     required this.onRemoveLine,
+    required this.onUnitChanged,
   });
 
-  final List<({Supply supply, TextEditingController qty})> lines;
+  final List<({Supply supply, TextEditingController qty, String unit})> lines;
   final VoidCallback onAddLine;
   final ValueChanged<int> onRemoveLine;
+  final void Function(int index, String unit) onUnitChanged;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
 
+    // Total cost converts each recipe qty to the supply's unit before
+    // multiplying by cost-per-supply-unit.
     var totalCost = Decimal.zero;
     for (final line in lines) {
       final qty = Decimal.tryParse(line.qty.text.trim()) ?? Decimal.zero;
-      totalCost += qty * line.supply.costPerUnit;
+      final qtyInSupplyUnit = convertUnit(qty, line.unit, line.supply.unit);
+      totalCost += qtyInSupplyUnit * line.supply.costPerUnit;
     }
 
     return Column(
@@ -689,7 +711,8 @@ class _RecipeSection extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(SuuqSpacing.md),
                   child: Text(
-                    'No ingredients added yet.\nAdd supplies to calculate cost automatically.',
+                    'No ingredients added yet.\n'
+                    'Add supplies to calculate cost automatically.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
@@ -702,6 +725,8 @@ class _RecipeSection extends StatelessWidget {
                 return _RecipeLine(
                   supply: line.supply,
                   qtyController: line.qty,
+                  selectedUnit: line.unit,
+                  onUnitChanged: (u) => onUnitChanged(i, u),
                   onRemove: () => onRemoveLine(i),
                   showDivider: i < lines.length - 1,
                 );
@@ -724,17 +749,22 @@ class _RecipeLine extends StatelessWidget {
   const _RecipeLine({
     required this.supply,
     required this.qtyController,
+    required this.selectedUnit,
+    required this.onUnitChanged,
     required this.onRemove,
     required this.showDivider,
   });
 
   final Supply supply;
   final TextEditingController qtyController;
+  final String selectedUnit;
+  final ValueChanged<String> onUnitChanged;
   final VoidCallback onRemove;
   final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
+    final units = compatibleUnits(supply.unit);
     return Column(
       children: [
         Padding(
@@ -751,24 +781,37 @@ class _RecipeLine extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                width: 80,
+                width: 72,
                 child: TextField(
                   controller: qtyController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   textAlign: TextAlign.center,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     isDense: true,
-                    suffixText: supply.unit,
-                    border: const OutlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 8,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: SuuqSpacing.xs),
+              const SizedBox(width: 4),
+              // Unit selector — compact dropdown showing compatible units.
+              DropdownButton<String>(
+                value: units.contains(selectedUnit) ? selectedUnit : units.first,
+                items: units
+                    .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                    .toList(),
+                onChanged: (u) {
+                  if (u != null) onUnitChanged(u);
+                },
+                underline: const SizedBox.shrink(),
+                isDense: true,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(width: 2),
               IconButton(
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: onRemove,

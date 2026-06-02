@@ -5,6 +5,7 @@ import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
@@ -98,14 +99,18 @@ class SalesRepository {
               ),
             );
 
-        // stock delta + ledger
-        await db.customStatement(
+        // stock delta + ledger. customUpdate (not customStatement) so the
+        // products stream refreshes and the POS/inventory grid shows the new
+        // stock immediately.
+        await db.customUpdate(
           'UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?',
-          [
-            line.qty.toDouble(),
-            sqliteDateTimeParam(now),
-            line.product.id,
+          variables: [
+            Variable.withReal(line.qty.toDouble()),
+            Variable.withInt(sqliteDateTimeParam(now)),
+            Variable.withString(line.product.id),
           ],
+          updates: {db.productsTable},
+          updateKind: UpdateKind.update,
         );
         await db.into(db.inventoryLogsTable).insert(
               InventoryLogsTableCompanion.insert(
@@ -140,7 +145,15 @@ class SalesRepository {
         for (final line in cart.lines) {
           final recipeItems = recipesByProduct[line.product.id] ?? [];
           for (final item in recipeItems) {
-            final delta = -(item.quantity * line.qty);
+            // Convert recipe quantity to supply's storage unit before deducting.
+            // e.g. recipe says 100g, supply tracked in kg → deduct 0.1 kg.
+            final recipeQtyPerUnit = item.quantity;
+            final supplyUnit = await db.suppliesDao.getUnit(item.supplyId);
+            final effectiveUnit = item.recipeUnit ?? supplyUnit ?? 'piece';
+            final qtyInSupplyUnit = supplyUnit != null
+                ? convertUnit(recipeQtyPerUnit * line.qty, effectiveUnit, supplyUnit)
+                : recipeQtyPerUnit * line.qty;
+            final delta = -qtyInSupplyUnit;
             await db.suppliesDao.applyDelta(item.supplyId, delta);
             supplyDeductionsPayload.add({
               'supply_id': item.supplyId,
@@ -262,9 +275,15 @@ class SalesRepository {
       await (db.update(db.salesTable)..where((t) => t.id.equals(saleId)))
           .write(const SalesTableCompanion(status: Value('refunded')));
       for (final item in items) {
-        await db.customStatement(
+        await db.customUpdate(
           'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?',
-          [item.quantity, sqliteDateTimeParam(now), item.productId],
+          variables: [
+            Variable.withReal(item.quantity),
+            Variable.withInt(sqliteDateTimeParam(now)),
+            Variable.withString(item.productId),
+          ],
+          updates: {db.productsTable},
+          updateKind: UpdateKind.update,
         );
         await db.into(db.inventoryLogsTable).insert(
               InventoryLogsTableCompanion.insert(

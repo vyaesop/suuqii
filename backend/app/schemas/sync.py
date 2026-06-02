@@ -11,12 +11,18 @@ SyncOp = Literal[
     "debt.create", "debt.payment.create", "debt.writeoff",
     "expense.create", "expense.update", "expense.delete",
     "shift.open", "shift.close",
+    "supply.create", "supply.update", "supply.delete",
+    "recipe.set",
 ]
 
 
 class SyncEventIn(BaseModel):
     client_event_id: UUID
-    op: SyncOp
+    # Inbound op is a plain string, NOT a Literal: an unrecognized op must be
+    # rejected per-event by the handler map (DomainError → "rejected"), never
+    # 422 the entire batch. A single bad/newer event would otherwise block every
+    # other event behind it in the offline queue forever.
+    op: str
     occurred_at: datetime
     payload: dict[str, Any]
 

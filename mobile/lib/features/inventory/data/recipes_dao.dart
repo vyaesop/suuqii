@@ -56,6 +56,7 @@ class RecipesDao extends DatabaseAccessor<AppDatabase> with _$RecipesDaoMixin {
             productId: item.productId,
             supplyId: item.supplyId,
             quantity: item.quantity.toDouble(),
+            recipeUnit: Value(item.recipeUnit),
           ),
           mode: InsertMode.insertOrReplace,
         );
@@ -69,5 +70,6 @@ class RecipesDao extends DatabaseAccessor<AppDatabase> with _$RecipesDaoMixin {
         productId: r.productId,
         supplyId: r.supplyId,
         quantity: Decimal.parse(r.quantity.toString()),
+        recipeUnit: r.recipeUnit,
       );
 }

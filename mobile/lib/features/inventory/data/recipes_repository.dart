@@ -52,7 +52,7 @@ class RecipesRepository {
   /// Atomically replace the recipe for a product and enqueue a sync event.
   Future<void> setRecipe({
     required String productId,
-    required List<({String supplyId, Decimal quantity})> lines,
+    required List<({String supplyId, Decimal quantity, String recipeUnit})> lines,
     String? ownerChallengeToken,
   }) async {
     final now = DateTime.now().toUtc();
@@ -64,6 +64,7 @@ class RecipesRepository {
             productId: productId,
             supplyId: l.supplyId,
             quantity: l.quantity,
+            recipeUnit: l.recipeUnit,
           ),
         )
         .toList();
@@ -83,6 +84,7 @@ class RecipesRepository {
                         'id': i.id,
                         'supply_id': i.supplyId,
                         'quantity': i.quantity.toString(),
+                        'recipe_unit': i.recipeUnit,
                       },
                     )
                     .toList(),

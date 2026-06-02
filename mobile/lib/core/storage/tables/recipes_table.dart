@@ -10,6 +10,9 @@ class RecipeItemsTable extends Table {
   TextColumn get productId => text()();
   TextColumn get supplyId => text()();
   RealColumn get quantity => real()();
+  /// Unit in which [quantity] is expressed. May differ from the supply's unit
+  /// (e.g. supply in "kg", recipe in "g"). Null means same unit as supply.
+  TextColumn get recipeUnit => text().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 

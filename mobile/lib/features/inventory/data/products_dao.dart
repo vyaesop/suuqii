@@ -54,11 +54,17 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
-  /// Local-only stock delta. Used inside the sales transaction.
-  Future<void> applyStockDelta(String productId, Decimal delta) =>
-      customStatement(
+  /// Local-only stock delta. customUpdate (not customStatement) so watching
+  /// streams refresh after the change.
+  Future<void> applyStockDelta(String productId, Decimal delta) => customUpdate(
         'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?',
-        [delta.toDouble(), sqliteDateTimeParam(DateTime.now()), productId],
+        variables: [
+          Variable.withReal(delta.toDouble()),
+          Variable.withInt(sqliteDateTimeParam(DateTime.now())),
+          Variable.withString(productId),
+        ],
+        updates: {productsTable},
+        updateKind: UpdateKind.update,
       );
 
   Product _toDomain(ProductRow r) => Product(

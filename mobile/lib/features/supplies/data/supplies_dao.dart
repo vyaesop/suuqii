@@ -55,10 +55,26 @@ class SuppliesDao extends DatabaseAccessor<AppDatabase> with _$SuppliesDaoMixin 
     });
   }
 
-  Future<void> applyDelta(String id, Decimal delta) => customStatement(
+  /// Returns the unit string for a supply without loading the full row.
+  Future<String?> getUnit(String id) async {
+    final rows = await customSelect(
+      'SELECT unit FROM supplies WHERE id = ? LIMIT 1',
+      variables: [Variable.withString(id)],
+      readsFrom: {suppliesTable},
+    ).get();
+    return rows.isEmpty ? null : rows.first.read<String>('unit');
+  }
+
+  Future<void> applyDelta(String id, Decimal delta) => customUpdate(
         'UPDATE supplies SET quantity_on_hand = quantity_on_hand + ?, '
         'updated_at = ? WHERE id = ?',
-        [delta.toDouble(), sqliteDateTimeParam(DateTime.now()), id],
+        variables: [
+          Variable.withReal(delta.toDouble()),
+          Variable.withInt(sqliteDateTimeParam(DateTime.now())),
+          Variable.withString(id),
+        ],
+        updates: {suppliesTable},
+        updateKind: UpdateKind.update,
       );
 
   Supply _toDomain(SupplyRow r) => Supply(

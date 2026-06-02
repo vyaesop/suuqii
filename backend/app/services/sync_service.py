@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, DomainError, OwnerPinRequired
@@ -152,6 +153,13 @@ class SyncService:
         except DomainError as e:
             return SyncResultOut(client_event_id=event.client_event_id,
                                  status=SyncResultStatus.REJECTED, code=e.code, detail=str(e))
+        except IntegrityError as e:
+            # FK or unique violation — most likely a referenced entity (product,
+            # supply) hasn't synced yet. Return CONFLICT so the batch doesn't
+            # 500 and the event can be retried once dependencies land.
+            return SyncResultOut(client_event_id=event.client_event_id,
+                                 status=SyncResultStatus.CONFLICT,
+                                 code="integrity_error", detail=str(e.orig))
 
         self.db.add(SyncEvent(
             shop_id=self.shop_id,
@@ -523,4 +531,5 @@ class SyncService:
                 product_id=product_id,
                 supply_id=UUID(item["supply_id"]),
                 quantity=Decimal(item["quantity"]),
+                recipe_unit=item.get("recipe_unit"),
             ))

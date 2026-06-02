@@ -10,7 +10,7 @@ import 'package:suuqii/features/supplies/data/supplies_repository.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 
-const _supplyUnits = ['piece', 'kg', 'g', 'liter', 'ml', 'cup', 'pack'];
+const _supplyUnits = ['piece', 'kg', 'quintal', 'g', 'liter', 'ml', 'cup', 'pack'];
 
 class SuppliesScreen extends ConsumerWidget {
   const SuppliesScreen({super.key});
