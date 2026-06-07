@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
@@ -299,8 +301,10 @@ class _CartLineTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isBakery = ref.watch(authControllerProvider).valueOrNull is Authenticated &&
+        (ref.watch(authControllerProvider).valueOrNull! as Authenticated).isBakery;
     final stock = line.product.stock;
-    final atStockLimit = line.qty >= stock;
+    final atStockLimit = !isBakery && line.qty >= stock;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: SuuqSpacing.sm),
@@ -352,14 +356,18 @@ class _CartLineTile extends ConsumerWidget {
                 : () => ref
                     .read(cartControllerProvider.notifier)
                     .setQty(line.product.id, line.qty + Decimal.one),
-            onTapQty: () => _editQty(context, ref),
+            onTapQty: () => _editQty(context, ref, isBakery: isBakery),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _editQty(BuildContext context, WidgetRef ref) async {
+  Future<void> _editQty(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool isBakery,
+  }) async {
     final controller = TextEditingController(text: _fmtQty(line.qty));
     final result = await showDialog<Decimal?>(
       context: context,
@@ -371,7 +379,7 @@ class _CartLineTile extends ConsumerWidget {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
             labelText: 'Quantity (${line.product.unit})',
-            helperText: 'In stock: ${_fmtQty(line.product.stock)}',
+            helperText: isBakery ? null : 'In stock: ${_fmtQty(line.product.stock)}',
           ),
         ),
         actions: [
@@ -397,7 +405,7 @@ class _CartLineTile extends ConsumerWidget {
       ref.read(cartControllerProvider.notifier).remove(line.product.id);
       return;
     }
-    if (result > line.product.stock) {
+    if (!isBakery && result > line.product.stock) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

@@ -46,15 +46,16 @@ class ProductsRepository {
     return db.customSelect(
       'SELECT p.* FROM products p '
       'JOIN ('
-      '  SELECT product_id, MAX(created_at) AS last_sold '
-      '  FROM inventory_logs '
-      "  WHERE movement = 'sale' "
-      '  GROUP BY product_id '
+      '  SELECT si.product_id, MAX(s.occurred_at) AS last_sold '
+      '  FROM sale_items si '
+      '  JOIN sales s ON s.id = si.sale_id '
+      "  WHERE s.deleted_at IS NULL AND s.status != 'refunded' "
+      '  GROUP BY si.product_id '
       ') l ON l.product_id = p.id '
       'WHERE p.deleted_at IS NULL AND p.shop_id = ? '
       'ORDER BY l.last_sold DESC LIMIT ?',
       variables: [Variable.withString(shopId), Variable.withInt(limit)],
-      readsFrom: {db.productsTable, db.inventoryLogsTable},
+      readsFrom: {db.productsTable, db.saleItemsTable, db.salesTable},
     ).watch().map(
       (rows) => rows.map((r) {
         return Product(

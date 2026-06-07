@@ -147,8 +147,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                                   mainAxisSpacing: SuuqSpacing.sm,
                                 ),
                                 itemCount: products.length,
-                                itemBuilder: (_, i) =>
-                                    _ProductTile(product: products[i]),
+                                itemBuilder: (_, i) => _ProductTile(
+                                  product: products[i],
+                                  isBakery: auth.isBakery,
+                                ),
                               );
                             },
                           ),
@@ -372,9 +374,10 @@ class _SearchField extends StatelessWidget {
 }
 
 class _ProductTile extends ConsumerWidget {
-  const _ProductTile({required this.product});
+  const _ProductTile({required this.product, required this.isBakery});
 
   final Product product;
+  final bool isBakery;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -556,7 +559,7 @@ class _ProductTile extends ConsumerWidget {
 
     final nextQty = currentQty + Decimal.one;
 
-    if (product.stock <= Decimal.zero) {
+    if (!isBakery && product.stock <= Decimal.zero) {
       HapticFeedback.heavyImpact();
       messenger
         ..hideCurrentSnackBar()
@@ -570,7 +573,7 @@ class _ProductTile extends ConsumerWidget {
       return;
     }
 
-    if (nextQty > product.stock) {
+    if (!isBakery && nextQty > product.stock) {
       HapticFeedback.mediumImpact();
       messenger
         ..hideCurrentSnackBar()
@@ -642,7 +645,7 @@ class _ProductTile extends ConsumerWidget {
       ref.read(cartControllerProvider.notifier).remove(product.id);
       return;
     }
-    if (result > product.stock) {
+    if (!isBakery && result > product.stock) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1057,6 +1060,10 @@ class _RecentTile extends ConsumerWidget {
       cartControllerProvider.select((cart) => cart.qtyFor(product.id)),
     );
     final inCart = qty > Decimal.zero;
+    final isBakery =
+        ref.watch(authControllerProvider).valueOrNull is Authenticated &&
+            (ref.watch(authControllerProvider).valueOrNull! as Authenticated)
+                .isBakery;
     return Material(
       color: inCart ? scheme.primaryContainer : scheme.surfaceContainer,
       borderRadius: BorderRadius.circular(SuuqRadius.md),
@@ -1077,7 +1084,7 @@ class _RecentTile extends ConsumerWidget {
           }
 
           final nextQty = qty + Decimal.one;
-          if (nextQty > product.stock) {
+          if (!isBakery && nextQty > product.stock) {
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
               ..showSnackBar(

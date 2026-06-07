@@ -16,6 +16,7 @@ class Shop(Base, TimestampMixin, SoftDeleteMixin):
     phone: Mapped[str | None] = mapped_column(String)
     currency: Mapped[str] = mapped_column(CHAR(3), default="ETB", nullable=False)
     debt_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("500.00"))
+    expense_approval_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("500.00"), server_default="500.00")
     locale: Mapped[str] = mapped_column(String, default="en", nullable=False)
     shop_type: Mapped[str] = mapped_column(String, default="regular", nullable=False)
     parent_shop_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("shops.id"))

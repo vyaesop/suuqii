@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
@@ -40,12 +41,51 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
   final _customerPhone = TextEditingController();
   DateTime? _dueDate;
 
+  // Outstanding balance for the currently-entered customer phone.
+  Decimal _customerOutstanding = Decimal.zero;
+  bool _loadingOutstanding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _customerPhone.addListener(_onPhoneChanged);
+  }
+
   @override
   void dispose() {
     _tendered.dispose();
     _customerName.dispose();
     _customerPhone.dispose();
     super.dispose();
+  }
+
+  void _onPhoneChanged() {
+    final phone = _customerPhone.text.trim();
+    if (phone.isEmpty) {
+      setState(() {
+        _customerOutstanding = Decimal.zero;
+        _loadingOutstanding = false;
+      });
+      return;
+    }
+    // Debounce: only query when user stops typing for a moment.
+    _lookupOutstanding(phone);
+  }
+
+  Future<void> _lookupOutstanding(String phone) async {
+    setState(() => _loadingOutstanding = true);
+    try {
+      final outstanding =
+          await ref.read(debtsRepositoryProvider).outstandingByPhone(phone);
+      if (mounted && _customerPhone.text.trim() == phone) {
+        setState(() {
+          _customerOutstanding = outstanding;
+          _loadingOutstanding = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingOutstanding = false);
+    }
   }
 
   @override
@@ -109,7 +149,16 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
           const SizedBox(height: SuuqSpacing.xs),
           _PaymentPicker(
             value: _method,
-            onChanged: (method) => setState(() => _method = method),
+            onChanged: (method) => setState(() {
+              _method = method;
+              // Reset outstanding lookup when switching away from credit.
+              if (method != PaymentMethod.credit) {
+                _customerOutstanding = Decimal.zero;
+                _loadingOutstanding = false;
+              } else if (_customerPhone.text.trim().isNotEmpty) {
+                _lookupOutstanding(_customerPhone.text.trim());
+              }
+            }),
           ),
           const SizedBox(height: SuuqSpacing.lg),
           AnimatedSwitcher(
@@ -130,6 +179,9 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                         customerName: _customerName,
                         customerPhone: _customerPhone,
                         dueDate: _dueDate,
+                        customerOutstanding: _customerOutstanding,
+                        loadingOutstanding: _loadingOutstanding,
+                        saleTotal: total,
                         onPickDueDate: () async {
                           final now = DateTime.now();
                           final picked = await showDatePicker(
@@ -467,6 +519,9 @@ class _CreditSection extends StatelessWidget {
     required this.customerPhone,
     required this.dueDate,
     required this.onPickDueDate,
+    required this.customerOutstanding,
+    required this.loadingOutstanding,
+    required this.saleTotal,
     super.key,
   });
 
@@ -474,10 +529,16 @@ class _CreditSection extends StatelessWidget {
   final TextEditingController customerPhone;
   final DateTime? dueDate;
   final Future<void> Function() onPickDueDate;
+  final Decimal customerOutstanding;
+  final bool loadingOutstanding;
+  final Decimal saleTotal;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final hasOutstanding = customerOutstanding > Decimal.zero;
+    final cumulativeAfterSale = customerOutstanding + saleTotal;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -514,11 +575,115 @@ class _CreditSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: SuuqSpacing.sm),
-        const _InfoCard(
-          icon: Icons.verified_user_outlined,
-          label: 'Large credit sales may require owner approval when synced.',
-        ),
+        // Outstanding balance card — shown once phone is entered.
+        if (loadingOutstanding)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: SuuqSpacing.xs),
+            child: LinearProgressIndicator(),
+          )
+        else if (hasOutstanding) ...[
+          Container(
+            padding: const EdgeInsets.all(SuuqSpacing.md),
+            decoration: BoxDecoration(
+              color: scheme.errorContainer,
+              borderRadius: BorderRadius.circular(SuuqRadius.md),
+              border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: scheme.onErrorContainer,
+                    ),
+                    const SizedBox(width: SuuqSpacing.xs),
+                    Text(
+                      'Existing outstanding balance',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onErrorContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                _BalanceRow(
+                  label: 'Current outstanding',
+                  amount: customerOutstanding,
+                  color: scheme.onErrorContainer,
+                  theme: theme,
+                ),
+                _BalanceRow(
+                  label: 'This sale',
+                  amount: saleTotal,
+                  color: scheme.onErrorContainer,
+                  theme: theme,
+                ),
+                Divider(
+                  color: scheme.onErrorContainer.withValues(alpha: 0.3),
+                  height: SuuqSpacing.md,
+                ),
+                _BalanceRow(
+                  label: 'Total after sale',
+                  amount: cumulativeAfterSale,
+                  color: scheme.onErrorContainer,
+                  theme: theme,
+                  bold: true,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Owner approval may be required if cumulative balance exceeds the shop limit.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onErrorContainer.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          const _InfoCard(
+            icon: Icons.verified_user_outlined,
+            label: 'Large credit sales may require owner approval when synced.',
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _BalanceRow extends StatelessWidget {
+  const _BalanceRow({
+    required this.label,
+    required this.amount,
+    required this.color,
+    required this.theme,
+    this.bold = false,
+  });
+
+  final String label;
+  final Decimal amount;
+  final Color color;
+  final ThemeData theme;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: color,
+      fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: style)),
+          Text(formatMoney(amount), style: style),
+        ],
+      ),
     );
   }
 }

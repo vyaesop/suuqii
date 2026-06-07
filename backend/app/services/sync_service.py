@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.models import (
     RecipeItem,
     Sale,
     SaleItem,
+    Shop,
     Shift,
     Supply,
     SyncEvent,
@@ -42,7 +43,7 @@ SENSITIVE_OPS = {
     "inventory.adjust",
     "debt.writeoff",
     "sale.refund",
-    "expense.create",
+    # expense.create is NOT blanket-sensitive; threshold-based check in handler
     "supply.create",
     "supply.update",
     "supply.delete",
@@ -119,20 +120,20 @@ class SyncService:
             return None
         return UUID(payload["sub"])
 
+    def _resolve_challenge(self, payload: dict[str, Any]) -> UUID | None:
+        """Resolve a per-event or batch-level challenge token."""
+        per_event_token: str | None = payload.get("owner_challenge")
+        if per_event_token:
+            return self._authorize_challenge(per_event_token)
+        return self._batch_challenge_id
+
     async def apply(self, event: SyncEventIn) -> SyncResultOut:
         existing = await self._existing_event(event.client_event_id)
         if existing is not None:
             return SyncResultOut(client_event_id=event.client_event_id, status=SyncResultStatus.DUPLICATE)
 
         if event.op in SENSITIVE_OPS and self.user.role != "owner":
-            # Per-event token (mobile stores it in payload) takes precedence;
-            # fall back to the batch-level header token.
-            per_event_token: str | None = event.payload.get("owner_challenge")
-            challenge_id = (
-                self._authorize_challenge(per_event_token)
-                if per_event_token
-                else self._batch_challenge_id
-            )
+            challenge_id = self._resolve_challenge(event.payload)
             if challenge_id is None:
                 return SyncResultOut(
                     client_event_id=event.client_event_id,
@@ -191,6 +192,7 @@ class SyncService:
             "product.delete": self._product_delete,
             "inventory.adjust": self._inventory_adjust,
             "debt.payment.create": self._debt_payment_create,
+            "debt.writeoff": self._debt_writeoff,
             "expense.create": self._expense_create,
             "shift.open": self._shift_open,
             "shift.close": self._shift_close,
@@ -236,6 +238,9 @@ class SyncService:
         )
         self.db.add(sale)
 
+        shop = await self.db.get(Shop, self.shop_id)
+        is_bakery = shop is not None and shop.shop_type == "bakery"
+
         for item in p["items"]:
             self.db.add(SaleItem(
                 id=UUID(item["id"]),
@@ -246,33 +251,64 @@ class SyncService:
                 unit_price=Decimal(item["unit_price"]),
                 unit_cost=Decimal(item["unit_cost"]),
             ))
-            # delta-based stock decrement + ledger
-            self.db.add(InventoryLog(
-                shop_id=self.shop_id,
-                product_id=UUID(item["product_id"]),
-                movement="sale",
-                quantity_delta=-Decimal(item["quantity"]),
-                reference_type="sale",
-                reference_id=sale_id,
-                user_id=self.user.id,
-                created_at=datetime.now(UTC),
-            ))
-            await self.db.execute(
-                Product.__table__.update()
-                .where(Product.id == UUID(item["product_id"]))
-                .values(stock=Product.stock - Decimal(item["quantity"]),
-                        updated_at=datetime.now(UTC))
-            )
+            if not is_bakery:
+                # delta-based stock decrement + ledger (skipped for bakery —
+                # ingredient supplies are decremented via supply_deductions)
+                self.db.add(InventoryLog(
+                    shop_id=self.shop_id,
+                    product_id=UUID(item["product_id"]),
+                    movement="sale",
+                    quantity_delta=-Decimal(item["quantity"]),
+                    reference_type="sale",
+                    reference_id=sale_id,
+                    user_id=self.user.id,
+                    created_at=datetime.now(UTC),
+                ))
+                await self.db.execute(
+                    Product.__table__.update()
+                    .where(Product.id == UUID(item["product_id"]))
+                    .values(stock=Product.stock - Decimal(item["quantity"]),
+                            updated_at=datetime.now(UTC))
+                )
 
         if p["payment_method"] == "credit":
             cust = p.get("customer", {})
+            sale_total = Decimal(p["total"])
+            customer_phone = cust.get("phone")
+
+            # Per-customer cumulative credit exposure check.
+            # Sum all open/partial debts for this phone number and block if
+            # adding this sale would exceed the shop's debt_threshold.
+            if customer_phone and shop is not None:
+                existing_outstanding = (await self.db.execute(
+                    select(func.coalesce(func.sum(Debt.amount_owed - Debt.amount_paid), 0))
+                    .where(
+                        Debt.shop_id == self.shop_id,
+                        Debt.customer_phone == customer_phone,
+                        Debt.status.in_(["open", "partial"]),
+                        Debt.deleted_at.is_(None),
+                    )
+                )).scalar_one()
+                cumulative = Decimal(existing_outstanding) + sale_total
+                if cumulative > shop.debt_threshold:
+                    # Requires owner PIN — the challenge was already validated
+                    # for ops in SENSITIVE_OPS; credit sales above threshold
+                    # need PIN regardless of role.
+                    if self.user.role != "owner" and self._resolve_challenge(p) is None:
+                        raise OwnerPinRequired(
+                            f"Customer {customer_phone} would have "
+                            f"{cumulative} outstanding (threshold {shop.debt_threshold}). "
+                            "Owner PIN required.",
+                            code="customer_credit_limit_exceeded",
+                        )
+
             self.db.add(Debt(
                 id=UUID(p["debt_id"]) if p.get("debt_id") else None,
                 shop_id=self.shop_id,
                 sale_id=sale_id,
                 customer_name=cust.get("name", "Unknown"),
-                customer_phone=cust.get("phone"),
-                amount_owed=Decimal(p["total"]),
+                customer_phone=customer_phone,
+                amount_owed=sale_total,
                 amount_paid=Decimal("0"),
                 due_date=cust.get("due_date"),
                 status="open",
@@ -301,23 +337,52 @@ class SyncService:
             raise ConflictError("already refunded", server_payload={"sale_id": str(sale_id)})
 
         sale.status = "refunded"
+
+        shop = await self.db.get(Shop, self.shop_id)
+        is_bakery = shop is not None and shop.shop_type == "bakery"
+
         items = await self.db.execute(select(SaleItem).where(SaleItem.sale_id == sale_id))
         for item in items.scalars():
-            self.db.add(InventoryLog(
-                shop_id=self.shop_id,
-                product_id=item.product_id,
-                movement="refund",
-                quantity_delta=item.quantity,
-                reference_type="sale",
-                reference_id=sale_id,
-                user_id=self.user.id,
-                created_at=datetime.now(UTC),
-            ))
-            await self.db.execute(
-                Product.__table__.update()
-                .where(Product.id == item.product_id)
-                .values(stock=Product.stock + item.quantity, updated_at=datetime.now(UTC))
+            if not is_bakery:
+                self.db.add(InventoryLog(
+                    shop_id=self.shop_id,
+                    product_id=item.product_id,
+                    movement="refund",
+                    quantity_delta=item.quantity,
+                    reference_type="sale",
+                    reference_id=sale_id,
+                    user_id=self.user.id,
+                    created_at=datetime.now(UTC),
+                ))
+                await self.db.execute(
+                    Product.__table__.update()
+                    .where(Product.id == item.product_id)
+                    .values(stock=Product.stock + item.quantity, updated_at=datetime.now(UTC))
+                )
+
+        # Bakery: restore ingredient supplies consumed by the original sale.
+        # The original sale.create sync event carries the supply_deductions payload.
+        if is_bakery:
+            original_event = await self.db.execute(
+                select(SyncEvent).where(
+                    SyncEvent.shop_id == self.shop_id,
+                    SyncEvent.op == "sale.create",
+                ).order_by(SyncEvent.id)
             )
+            for ev in original_event.scalars():
+                if ev.payload.get("id") == str(sale_id):
+                    for ded in ev.payload.get("supply_deductions", []):
+                        supply_id = UUID(ded["supply_id"])
+                        delta = Decimal(ded["quantity_delta"])  # negative — reverse it
+                        await self.db.execute(
+                            Supply.__table__.update()
+                            .where(Supply.id == supply_id, Supply.shop_id == self.shop_id)
+                            .values(
+                                quantity_on_hand=Supply.quantity_on_hand - delta,
+                                updated_at=datetime.now(UTC),
+                            )
+                        )
+                    break
 
     async def _product_create(self, p: dict[str, Any]) -> None:
         if await self.db.get(Product, UUID(p["id"])):
@@ -441,14 +506,81 @@ class SyncService:
                 created_at=datetime.now(UTC),
             ))
 
+    async def _debt_writeoff(self, p: dict[str, Any]) -> None:
+        """Write off a debt: mark as written_off and book the uncollected balance
+        as a bad-debt expense so the P&L reflects the actual loss."""
+        debt_id = UUID(p["debt_id"])
+        debt = await self.db.get(Debt, debt_id)
+        if not debt:
+            raise DomainError("debt not found", code="not_found", status=404)
+        if debt.status == "written_off":
+            return  # idempotent
+        if debt.status == "paid":
+            raise ConflictError(
+                "debt is already paid — nothing to write off",
+                server_payload={"debt_id": str(debt_id)},
+            )
+
+        remaining = debt.amount_owed - debt.amount_paid
+        old_status = debt.status
+        debt.status = "written_off"
+
+        # Auto-create a bad-debt expense so the write-off is visible in the P&L
+        # net profit calculation. shift_id=None so it does NOT enter cash
+        # reconciliation (the debt was never collected as cash).
+        if remaining > Decimal("0"):
+            self.db.add(Expense(
+                shop_id=self.shop_id,
+                user_id=self.user.id,
+                shift_id=None,
+                title=f"Bad debt write-off: {debt.customer_name}",
+                amount=remaining,
+                category="other",
+                description=(
+                    f"Uncollected balance on debt {debt_id} "
+                    f"(customer: {debt.customer_name}, "
+                    f"phone: {debt.customer_phone or 'N/A'})"
+                ),
+                occurred_at=datetime.now(UTC),
+            ))
+
+        self.db.add(AuditLog(
+            shop_id=self.shop_id,
+            user_id=self.user.id,
+            action="debt.writeoff",
+            entity_type="debt",
+            entity_id=debt_id,
+            old_value={"status": old_status, "amount_owed": str(debt.amount_owed),
+                       "amount_paid": str(debt.amount_paid)},
+            new_value={"status": "written_off", "written_off_amount": str(remaining)},
+            device_id=self.device_id,
+            created_at=datetime.now(UTC),
+        ))
+
     async def _expense_create(self, p: dict[str, Any]) -> None:
+        amount = Decimal(p["amount"])
+
+        # Threshold-based PIN check: cashiers can create small expenses freely;
+        # anything above the shop's expense_approval_threshold needs owner PIN.
+        if self.user.role != "owner":
+            shop = await self.db.get(Shop, self.shop_id)
+            threshold = shop.expense_approval_threshold if shop else Decimal("500.00")
+            if amount > threshold:
+                challenge_id = self._resolve_challenge(p)
+                if challenge_id is None:
+                    raise OwnerPinRequired(
+                        f"Expense of {amount} exceeds approval threshold {threshold}. "
+                        "Owner PIN required.",
+                        code="expense_approval_required",
+                    )
+
         self.db.add(Expense(
             id=UUID(p["id"]),
             shop_id=self.shop_id,
             user_id=self.user.id,
             shift_id=UUID(p["shift_id"]) if p.get("shift_id") else None,
             title=p["title"],
-            amount=Decimal(p["amount"]),
+            amount=amount,
             category=p.get("category", "other"),
             description=p.get("description"),
             occurred_at=datetime.fromisoformat(p["occurred_at"]),

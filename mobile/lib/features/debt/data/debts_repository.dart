@@ -41,6 +41,24 @@ class DebtsRepository {
   Stream<List<DebtPayment>> watchPayments(String debtId) =>
       db.debtsDao.watchPayments(debtId);
 
+  /// Total outstanding balance (amount_owed - amount_paid) for all open/partial
+  /// debts linked to a given customer phone number. Used at checkout to warn
+  /// the cashier before extending more credit to an already-indebted customer.
+  Future<Decimal> outstandingByPhone(String phone) async {
+    if (phone.isEmpty) return Decimal.zero;
+    final rows = await db.customSelect(
+      'SELECT COALESCE(SUM(amount_owed - amount_paid), 0.0) AS outstanding '
+      'FROM debts '
+      'WHERE shop_id = ? AND customer_phone = ? '
+      "AND status IN ('open', 'partial') AND deleted_at IS NULL",
+      variables: [Variable.withString(shopId), Variable.withString(phone)],
+      readsFrom: {db.debtsTable},
+    ).get();
+    final val = rows.firstOrNull?.read<double>('outstanding');
+    if (val == null) return Decimal.zero;
+    return Decimal.parse(val.toStringAsFixed(2));
+  }
+
   Future<int> refreshFromServer() async {
     // Pull both open + partial; paid ones are kept locally but stale is fine.
     final open = await remote.list(shopId: shopId, status: 'open');
