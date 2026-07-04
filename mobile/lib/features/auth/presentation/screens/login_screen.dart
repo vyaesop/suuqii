@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/errors/error_messages.dart';
+import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/l10n/app_localizations.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
@@ -19,6 +21,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _pwd = TextEditingController();
   bool _busy = false;
   bool _obscure = true;
+  String? _phoneError;
+  String? _pwdError;
+  String? _formError;
 
   @override
   void dispose() {
@@ -51,12 +56,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.xxl),
                   Text(
-                    'Welcome back',
+                    l.welcomeBack,
                     style: theme.textTheme.displaySmall,
                   ),
                   const SizedBox(height: SuuqSpacing.xs),
                   Text(
-                    'Sign in to your shop to keep selling.',
+                    l.loginSubtitle,
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
@@ -64,8 +69,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     controller: _phone,
                     keyboardType: TextInputType.phone,
                     textInputAction: TextInputAction.next,
+                    onChanged: (_) {
+                      if (_phoneError != null) {
+                        setState(() => _phoneError = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: l.phone,
+                      errorText: _phoneError,
                       prefixIcon: const Icon(
                         Icons.phone_iphone_rounded,
                         size: 20,
@@ -77,16 +88,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     controller: _pwd,
                     obscureText: _obscure,
                     textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _submit(),
+                    onChanged: (_) {
+                      if (_pwdError != null) setState(() => _pwdError = null);
+                    },
+                    onSubmitted: (_) => _submit(l),
                     decoration: InputDecoration(
                       labelText: l.password,
+                      errorText: _pwdError,
                       prefixIcon: const Icon(
                         Icons.lock_outline_rounded,
                         size: 20,
                       ),
                       suffixIcon: IconButton(
-                        onPressed: () =>
-                            setState(() => _obscure = !_obscure),
+                        onPressed: () => setState(() => _obscure = !_obscure),
                         icon: Icon(
                           _obscure
                               ? Icons.visibility_outlined
@@ -96,9 +110,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                   ),
+                  if (_formError != null) ...[
+                    const SizedBox(height: SuuqSpacing.sm),
+                    _FormError(message: _formError!),
+                  ],
                   const SizedBox(height: SuuqSpacing.lg),
                   FilledButton(
-                    onPressed: _busy ? null : _submit,
+                    onPressed: _busy ? null : () => _submit(l),
                     child: _busy
                         ? const SizedBox(
                             height: 18,
@@ -112,16 +130,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.sm),
                   TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => context.go('/register-shop'),
+                    onPressed:
+                        _busy ? null : () => context.go('/register-shop'),
                     child: Text(l.createNewShop),
                   ),
                   TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => context.go('/accept-invite'),
-                    child: const Text('I have an invite code'),
+                    onPressed:
+                        _busy ? null : () => context.go('/accept-invite'),
+                    child: Text(l.joinShopWithCode),
                   ),
                 ],
               ),
@@ -132,26 +148,76 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Future<void> _submit() async {
-    if (_phone.text.trim().isEmpty || _pwd.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter phone and password')),
-      );
+  Future<void> _submit(AppLocalizations l) async {
+    final phone = _phone.text.trim();
+    final pwd = _pwd.text;
+    final phoneEmpty = phone.isEmpty;
+    final pwdEmpty = pwd.isEmpty;
+    if (phoneEmpty || pwdEmpty) {
+      setState(() {
+        _phoneError = phoneEmpty ? l.enterPhoneAndPassword : null;
+        _pwdError = pwdEmpty ? l.enterPhoneAndPassword : null;
+        _formError = null;
+      });
       return;
     }
-    setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() {
+      _busy = true;
+      _formError = null;
+    });
     final router = GoRouter.of(context);
     try {
       await ref.read(authControllerProvider.notifier).login(
-            phone: _phone.text.trim(),
-            password: _pwd.text,
+            phone: phone,
+            password: pwd,
           );
       router.go('/pos');
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _formError = error is AuthException && error.status == 401
+            ? l.errorInvalidCredentials
+            : messageForError(error, l);
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+}
+
+class _FormError extends StatelessWidget {
+  const _FormError({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(SuuqSpacing.sm),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(SuuqRadius.sm),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            size: 18,
+            color: scheme.onErrorContainer,
+          ),
+          const SizedBox(width: SuuqSpacing.xs),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: scheme.onErrorContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

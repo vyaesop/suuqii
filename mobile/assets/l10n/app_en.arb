@@ -1,15 +1,76 @@
-﻿{
+{
   "@@locale": "en",
+  "appTitle": "Suuqii",
+
   "navSell": "Sell",
   "navInventory": "Inventory",
   "navDebts": "Debts",
   "navShift": "Shift",
   "navDashboard": "Dashboard",
   "navSettings": "Settings",
-  "shiftOpeningCash": "Opening Cash",
-  "shiftEnd": "End Shift",
+
+  "login": "Log In",
   "phone": "Phone",
   "password": "Password",
-  "login": "Log In",
-  "createNewShop": "Create New Shop"
+  "createNewShop": "Create New Shop",
+  "joinShopWithCode": "I have an invite code",
+  "welcomeBack": "Welcome back",
+  "loginSubtitle": "Sign in to your shop to keep selling.",
+  "enterPhoneAndPassword": "Enter phone and password",
+
+  "checkout": "Checkout",
+  "paymentCash": "Cash",
+  "paymentMobile": "Mobile",
+  "paymentCredit": "Credit",
+  "total": "Total",
+  "change": "Change",
+  "tendered": "Tendered",
+
+  "searchProducts": "Search products",
+  "recentSales": "Recent sales",
+  "addItems": "Add items",
+  "undo": "Undo",
+  "removedFromCart": "Removed from cart",
+
+  "lowStock": "Low stock",
+  "outstandingDebt": "Outstanding debt",
+  "revenue": "Revenue",
+  "profit": "Profit",
+  "expenses": "Expenses",
+  "netProfit": "Net profit",
+
+  "ownerPinRequired": "Owner PIN required",
+  "wrongPin": "Wrong PIN",
+
+  "syncOffline": "Offline",
+  "syncPending": "{n} changes pending",
+  "@syncPending": { "placeholders": { "n": { "type": "int" } } },
+
+  "shiftOpeningCash": "Opening Cash",
+  "shiftDeclaredCash": "Declared cash",
+  "shiftExpectedCash": "Expected cash",
+  "shiftVariance": "Variance",
+  "shiftEnd": "End Shift",
+
+  "settingsShop": "Shop",
+  "settingsSales": "Sales",
+  "settingsAccount": "Account",
+  "settingsLanguage": "Language",
+  "settingsTheme": "Theme",
+  "themeFollowsSystem": "Follows system",
+  "selectLanguage": "Select language",
+  "languageSystem": "System default",
+  "languageEnglish": "English",
+  "languageOromo": "Afaan Oromoo",
+
+  "logOut": "Log out",
+  "logOutConfirmTitle": "Log out?",
+  "logOutConfirmBody": "You'll need your phone and password to sign back in.",
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+
+  "errorNoConnection": "No connection — try again",
+  "errorServer": "Server error — please try again",
+  "errorGeneric": "Something went wrong — try again",
+  "errorInvalidCredentials": "Wrong phone or password"
 }

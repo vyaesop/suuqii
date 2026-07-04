@@ -1,6 +1,7 @@
 {
   "@@locale": "om",
   "appTitle": "Suuqii",
+
   "navSell": "Gurguri",
   "navInventory": "Meeshaa",
   "navDebts": "Liqii",
@@ -12,7 +13,10 @@
   "phone": "Bilbila",
   "password": "Jecha darbii",
   "createNewShop": "Suuqa haaraa uumi",
-  "joinShopWithCode": "Lakkoofsa waliin makaa",
+  "joinShopWithCode": "Koodii afeerraa qaba",
+  "welcomeBack": "Baga nagaan deebite",
+  "loginSubtitle": "Gurgurtaa itti fufuuf suuqa keetti seeni.",
+  "enterPhoneAndPassword": "Bilbilaa fi jecha darbii galchi",
 
   "checkout": "Bittaa xumuri",
   "paymentCash": "Kaash",
@@ -22,12 +26,18 @@
   "change": "Deebii",
   "tendered": "Kennanii",
 
+  "searchProducts": "Meeshaa barbaadi",
+  "recentSales": "Gurgurtaa dhiheenyaa",
+  "addItems": "Meeshaa dabali",
+  "undo": "Deebisi",
+  "removedFromCart": "Gaarii irraa haqame",
+
   "lowStock": "Meeshaa xiqqaate",
   "outstandingDebt": "Liqii hin kaffalamne",
   "revenue": "Galii",
-  "profit": "Bu'aa",
+  "profit": "Buʼaa",
   "expenses": "Baasii",
-  "netProfit": "Bu'aa qulqulluu",
+  "netProfit": "Buʼaa qulqulluu",
 
   "ownerPinRequired": "PIN abbaa qabeenyaa barbaachisa",
   "wrongPin": "PIN dogoggora",
@@ -40,5 +50,27 @@
   "shiftDeclaredCash": "Maallaqa ibsame",
   "shiftExpectedCash": "Maallaqa eegamu",
   "shiftVariance": "Garaagarummaa",
-  "shiftEnd": "Soorama xumuri"
+  "shiftEnd": "Soorama xumuri",
+
+  "settingsShop": "Suuqa",
+  "settingsSales": "Gurgurtaa",
+  "settingsAccount": "Herrega",
+  "settingsLanguage": "Afaan",
+  "settingsTheme": "Bifa",
+  "themeFollowsSystem": "Sirna hordofa",
+  "selectLanguage": "Afaan filadhu",
+  "languageSystem": "Kan sirnaa",
+  "languageEnglish": "Ingiliffa",
+  "languageOromo": "Afaan Oromoo",
+
+  "logOut": "Bahi",
+  "logOutConfirmTitle": "Bahuu barbaaddaa?",
+  "logOutConfirmBody": "Deebiʼanii seenuuf bilbilaa fi jecha darbii barbaachisa.",
+  "cancel": "Dhiisi",
+  "confirm": "Mirkaneessi",
+
+  "errorNoConnection": "Interneetii hin jiru — irra deebiʼii yaali",
+  "errorServer": "Rakkoo sarvarii — irra deebiʼii yaali",
+  "errorGeneric": "Wanti tokko dogoggore — irra deebiʼii yaali",
+  "errorInvalidCredentials": "Bilbilli ykn jecha darbii sirrii miti"
 }

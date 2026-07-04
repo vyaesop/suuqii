@@ -15,6 +15,7 @@ import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/features/sales/presentation/cart_review_sheet.dart';
 import 'package:suuqii/features/sales/presentation/checkout_sheet.dart';
 import 'package:suuqii/features/sales/presentation/receipt_sheet.dart';
+import 'package:suuqii/l10n/app_localizations.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
@@ -305,6 +306,7 @@ class _SearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         SuuqSpacing.md,
@@ -325,7 +327,7 @@ class _SearchField extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Search products',
+                  hintText: l.searchProducts,
                   prefixIcon: Icon(
                     Icons.search_rounded,
                     size: 24,
@@ -411,7 +413,8 @@ class _ProductTile extends ConsumerWidget {
               ),
             ),
             InkWell(
-              onTap: () => _toggleSelection(context, ref),
+              onTap: () => _addOne(context, ref),
+              onLongPress: inCart ? () => _removeWithUndo(context, ref) : null,
               borderRadius: BorderRadius.circular(SuuqRadius.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -539,23 +542,9 @@ class _ProductTile extends ConsumerWidget {
     );
   }
 
-  void _toggleSelection(BuildContext context, WidgetRef ref) {
+  void _addOne(BuildContext context, WidgetRef ref) {
     final currentQty = ref.read(cartControllerProvider).qtyFor(product.id);
     final messenger = ScaffoldMessenger.of(context);
-
-    if (currentQty > Decimal.zero) {
-      HapticFeedback.selectionClick();
-      ref.read(cartControllerProvider.notifier).remove(product.id);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text('${product.name} removed from cart'),
-            duration: const Duration(milliseconds: 900),
-          ),
-        );
-      return;
-    }
 
     final nextQty = currentQty + Decimal.one;
 
@@ -601,6 +590,30 @@ class _ProductTile extends ConsumerWidget {
                 '${product.name} added to cart',
           ),
           duration: const Duration(milliseconds: 1000),
+        ),
+      );
+  }
+
+  void _removeWithUndo(BuildContext context, WidgetRef ref) {
+    final l = AppLocalizations.of(context);
+    final prevQty = ref.read(cartControllerProvider).qtyFor(product.id);
+    if (prevQty <= Decimal.zero) return;
+
+    HapticFeedback.mediumImpact();
+    ref.read(cartControllerProvider.notifier).remove(product.id);
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${product.name} — ${l.removedFromCart}'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: l.undo,
+            onPressed: () => ref
+                .read(cartControllerProvider.notifier)
+                .setQty(product.id, prevQty),
+          ),
         ),
       );
   }
@@ -714,6 +727,7 @@ class _CartBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
+    final l = AppLocalizations.of(context);
     return Container(
       decoration: BoxDecoration(
         color: scheme.primary,
@@ -836,7 +850,7 @@ class _CartBar extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            cart.isEmpty ? 'Add items' : 'Checkout',
+                            cart.isEmpty ? l.addItems : l.checkout,
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -1088,13 +1102,13 @@ class _RecentTile extends ConsumerWidget {
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
               ..showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Only ${_formatQty(product.stock)} ${product.unit} of '
-                  '${product.name} in stock',
+                SnackBar(
+                  content: Text(
+                    'Only ${_formatQty(product.stock)} ${product.unit} of '
+                    '${product.name} in stock',
+                  ),
                 ),
-              ),
-            );
+              );
             return;
           }
 

@@ -59,6 +59,8 @@ void main() {
       ],
       child: MaterialApp(
         theme: AppTheme.light(),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: const Scaffold(
           body: PosScreen(),
         ),
@@ -148,8 +150,38 @@ void main() {
     expect(find.text('1 items across 1 line'), findsOneWidget);
   });
 
-  testWidgets('tapping a selected product removes it from the cart',
+  testWidgets('long-pressing a selected product removes it from the cart',
       (tester) async {
+    final product = Product(
+      id: 'p1',
+      shopId: 'shop-1',
+      name: 'Coffee',
+      purchasePrice: Decimal.parse('10'),
+      sellingPrice: Decimal.parse('25'),
+      stock: Decimal.parse('5'),
+      lowStockThreshold: Decimal.parse('1'),
+      unit: 'pack',
+    );
+
+    await tester.pumpWidget(buildSubject([product]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Coffee'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 items across 1 line'), findsOneWidget);
+
+    await tester.longPress(find.text('Coffee'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Coffee — Removed from cart'), findsOneWidget);
+    expect(
+      find.text('Cart is empty - tap a product to add it'),
+      findsOneWidget,
+    );
+    expect(find.text('ETB 0'), findsOneWidget);
+  });
+
+  testWidgets('tapping a selected product adds another unit', (tester) async {
     final product = Product(
       id: 'p1',
       shopId: 'shop-1',
@@ -171,9 +203,7 @@ void main() {
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Coffee removed from cart'), findsOneWidget);
-    expect(find.text('Cart is empty - tap a product to add it'), findsOneWidget);
-    expect(find.text('ETB 0'), findsOneWidget);
+    expect(find.text('2 items across 1 line'), findsOneWidget);
   });
 
   testWidgets('sell route renders through the home shell', (tester) async {
