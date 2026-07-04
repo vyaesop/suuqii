@@ -67,16 +67,27 @@ def run_migrations_online() -> None:
             sql_file = Path(__file__).parent / "versions" / "0001_initial.sql"
             if sql_file.exists():
                 conn.execute(text(sql_file.read_text()))
+                # Some revision identifiers are longer than Alembic's historical
+                # 32-char default, so size the column generously to avoid
+                # truncation when stamping later revisions.
                 conn.execute(text(
                     "CREATE TABLE IF NOT EXISTS alembic_version "
-                    "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                    "(version_num VARCHAR(255) NOT NULL PRIMARY KEY)"
                 ))
                 conn.execute(text(
                     "INSERT INTO alembic_version(version_num) VALUES ('0001_initial')"
                 ))
                 conn.commit()
-                return
+        else:
+            # Widen pre-existing version tables created with the old 32-char
+            # column so long revision identifiers can be stamped.
+            conn.execute(text(
+                "ALTER TABLE alembic_version "
+                "ALTER COLUMN version_num TYPE VARCHAR(255)"
+            ))
+            conn.commit()
 
+        # Fall through so any revisions after the bootstrap (0002+) are applied.
         context.configure(connection=conn, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
