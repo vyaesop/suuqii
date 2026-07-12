@@ -55,3 +55,7 @@ Thumbs.db
 *.sqlite-shm
 
 .vercel
+
+# Agent/tool run artifacts
+.codex-run/
+**/.codex-run/
