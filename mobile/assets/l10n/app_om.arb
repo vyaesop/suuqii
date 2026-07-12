@@ -37,6 +37,7 @@
   "errConflict": "Namni biraa galmee kana jijjiireera — haaromsiitii ammas yaali",
   "errExpired": "Koodiin kun yeroon isaa darbeera — haaraa gaafadhu",
   "errBadRole": "Akkaawuntiin kee gocha kanaaf hayyama hin qabu",
+  "errServerUpgrading": "Serverichi haaromfamaa jira — xiqqoo turtee irra deebi'ii yaali",
   "errHttp": "Gaaffiin hin milkoofne ({status})",
   "errUnknown": "Wanti tokko dogoggoreera — ammas yaali",
 

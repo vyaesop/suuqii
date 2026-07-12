@@ -44,7 +44,9 @@ class AuthController extends _$AuthController {
   }) async {
     // Capture previous shop before clearing state — once we set AsyncLoading
     // state.valueOrNull becomes null and the shop-switch check never fires.
-    final prevShopId = (state.valueOrNull as Authenticated?)?.shopId;
+    // state is normally Unauthenticated here (fresh login), so never cast.
+    final prev = state.valueOrNull;
+    final prevShopId = prev is Authenticated ? prev.shopId : null;
     state = const AsyncLoading();
     try {
       final repo = await ref.read(authRepositoryProvider.future);

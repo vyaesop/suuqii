@@ -63,6 +63,8 @@ String? _messageForCode(AppLocalizations l, String? code) {
       return l.errExpired;
     case 'bad_role':
       return l.errBadRole;
+    case 'database_schema_outdated':
+      return l.errServerUpgrading;
     case null:
       return null;
     default:

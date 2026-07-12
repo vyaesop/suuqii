@@ -1,6 +1,11 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import ProgrammingError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class DomainError(Exception):
@@ -42,6 +47,28 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "code": exc.code,
             },
         )
+
+    # Schema drift (missing table/column — deploy raced the migration, or
+    # the migration failed) must read as an explicit, retryable 503 with a
+    # machine code the mobile app can localize, never an opaque 500.
+    @app.exception_handler(ProgrammingError)
+    async def _schema(_: Request, exc: ProgrammingError) -> JSONResponse:
+        name = type(exc.orig).__name__ if exc.orig else ""
+        if name in ("UndefinedTableError", "UndefinedColumnError",
+                    "UndefinedTable", "UndefinedColumn"):
+            logger.error("schema out of date: %s", exc.orig)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "type": "about:blank",
+                    "title": "ServiceUnavailable",
+                    "status": 503,
+                    "detail": "server database is being upgraded — retry shortly",
+                    "code": "database_schema_outdated",
+                },
+                headers={"Retry-After": "10"},
+            )
+        raise exc
 
     # HTTPException raised throughout the routers gets the same problem+json
     # shape as DomainError, so clients only ever parse one error schema.

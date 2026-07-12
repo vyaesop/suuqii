@@ -311,8 +311,8 @@ class _CartLineTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final isBakery = ref.watch(authControllerProvider).valueOrNull is Authenticated &&
-        (ref.watch(authControllerProvider).valueOrNull! as Authenticated).isBakery;
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    final isBakery = auth is Authenticated && auth.isBakery;
     final stock = line.product.stock;
     final atStockLimit = !isBakery && line.qty >= stock;
 

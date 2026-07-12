@@ -1139,10 +1139,8 @@ class _RecentTile extends ConsumerWidget {
       cartControllerProvider.select((cart) => cart.qtyFor(product.id)),
     );
     final inCart = qty > Decimal.zero;
-    final isBakery =
-        ref.watch(authControllerProvider).valueOrNull is Authenticated &&
-            (ref.watch(authControllerProvider).valueOrNull! as Authenticated)
-                .isBakery;
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    final isBakery = auth is Authenticated && auth.isBakery;
     return Material(
       color: inCart ? scheme.primaryContainer : scheme.surfaceContainer,
       borderRadius: BorderRadius.circular(SuuqRadius.md),

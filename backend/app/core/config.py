@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     fcm_private_key: str | None = None
     sentry_dsn: str | None = None
     log_level: str = "INFO"
+    # Bring the DB schema to head on first request per process (serverless
+    # has no deploy hook to run alembic). Disable for test harnesses.
+    migrate_on_start: bool = True
     default_locale: str = "en"
     timezone: str = "Africa/Addis_Ababa"
 

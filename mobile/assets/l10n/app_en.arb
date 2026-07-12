@@ -38,6 +38,7 @@
   "errConflict": "Someone else changed this record — refresh and try again",
   "errExpired": "This code has expired — ask for a new one",
   "errBadRole": "Your account doesn't have permission for this",
+  "errServerUpgrading": "The server is being updated — try again in a moment",
   "errHttp": "Request failed ({status})",
   "@errHttp": {
     "description": "Generic HTTP failure with status code.",

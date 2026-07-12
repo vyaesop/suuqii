@@ -10,10 +10,12 @@ from app.api.v1 import auth, audit, debts, expenses, products, reports, sales, s
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.rate_limit import limiter
+from app.db.bootstrap import ensure_migrated
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
+    await ensure_migrated()
     yield
 
 
@@ -44,6 +46,14 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
+
+    # Belt-and-braces with lifespan: Vercel's runtime is not guaranteed to
+    # run ASGI startup before the first request, so gate requests too.
+    # After the first success this is a boolean check.
+    @app.middleware("http")
+    async def _migration_gate(request, call_next):  # noqa: ANN001, ANN202
+        await ensure_migrated()
+        return await call_next(request)
 
     api = "/v1"
     app.include_router(auth.router, prefix=api)

@@ -10,6 +10,12 @@ disposable database, e.g.:
 Never point this at a real deployment: the schema is dropped and recreated.
 """
 import os
+
+# Must be set before anything imports app.core.config: the app's
+# migration-on-first-request gate would otherwise run against whatever
+# DATABASE_URL is in .env (potentially a real deployment).
+os.environ.setdefault("MIGRATE_ON_START", "false")
+
 from decimal import Decimal
 from uuid import uuid4
 
