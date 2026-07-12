@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -71,6 +72,29 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/readyz", tags=["meta"])
+    async def readyz() -> JSONResponse:
+        """Deep health check: confirms the API can actually reach the
+        database. Use this to verify the app→backend→Neon chain is live.
+        Returns 200 {db: connected, migration: <rev>} or 503 if the DB is
+        unreachable."""
+        from sqlalchemy import text
+
+        from app.db.session import engine
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+                rev = (await conn.execute(
+                    text("SELECT version_num FROM alembic_version")
+                )).scalar()
+            return JSONResponse({"status": "ok", "db": "connected", "migration": rev})
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "db": "error",
+                         "detail": type(exc).__name__},
+            )
 
     return app
 
