@@ -6,9 +6,12 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/debt/domain/entities/debt.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
+import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 import 'package:suuqii/shared/widgets/status_pill.dart';
@@ -41,7 +44,10 @@ class DebtDetailScreen extends ConsumerWidget {
               title: l.debtNotFound,
             );
           }
-          final paid = d.status == DebtStatus.paid;
+          // Collect/write-off only apply while there is an uncollected
+          // balance (open or partial; not paid, not already written off).
+          final canCollect =
+              d.status == DebtStatus.open || d.status == DebtStatus.partial;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -174,15 +180,29 @@ class DebtDetailScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              if (!paid)
+              if (canCollect)
                 SafeArea(
                   top: false,
                   child: Padding(
                     padding: const EdgeInsets.all(SuuqSpacing.md),
-                    child: FilledButton.icon(
-                      icon: const Icon(Icons.add_rounded),
-                      label: Text(l.debtCollectPayment),
-                      onPressed: () => _showCollect(context, ref, d),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton.icon(
+                          icon: const Icon(Icons.add_rounded),
+                          label: Text(l.debtCollectPayment),
+                          onPressed: () => _showCollect(context, ref, d),
+                        ),
+                        const SizedBox(height: SuuqSpacing.xs),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: scheme.error,
+                          ),
+                          icon: const Icon(Icons.money_off_rounded),
+                          label: Text(l.debtWriteOff),
+                          onPressed: () => _writeOff(context, ref, d),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -197,6 +217,9 @@ class DebtDetailScreen extends ConsumerWidget {
     if (d.status == DebtStatus.paid) {
       return StatusPill(label: l.debtStatusPaid, intent: PillIntent.success);
     }
+    if (d.status == DebtStatus.writtenOff) {
+      return StatusPill(label: l.debtStatusWrittenOff);
+    }
     if (d.isOverdue) {
       return StatusPill(label: l.debtStatusOverdue, intent: PillIntent.danger);
     }
@@ -204,6 +227,64 @@ class DebtDetailScreen extends ConsumerWidget {
       return StatusPill(label: l.debtStatusPartial, intent: PillIntent.info);
     }
     return StatusPill(label: l.debtStatusOpen);
+  }
+
+  Future<void> _writeOff(
+    BuildContext context,
+    WidgetRef ref,
+    Debt debt,
+  ) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final remainingText = context.money(debt.remaining);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.debtWriteOffConfirmTitle),
+        content: Text(l.debtWriteOffConfirmBody(remainingText)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.commonCancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.debtWriteOff),
+          ),
+        ],
+      ),
+    );
+    if (!(confirmed ?? false)) return;
+    if (!context.mounted) return;
+
+    // debt.writeoff is a sensitive op (docs/17-roles.md): owners proceed
+    // directly, cashiers must attach an owner-PIN challenge token.
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    final isOwner = auth is Authenticated && auth.isOwner;
+    String? challenge;
+    if (!isOwner) {
+      challenge = await requestOwnerChallenge(context, ref);
+      if (challenge == null) return;
+    }
+
+    try {
+      await ref.read(debtsRepositoryProvider).writeOff(
+            debtId: debt.id,
+            ownerChallengeToken: challenge,
+          );
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.debtWriteOffDone(remainingText))),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.debtActionFailed(localizedErrorMessage(l, e))),
+        ),
+      );
+    }
   }
 
   Future<void> _showCollect(

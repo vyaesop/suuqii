@@ -133,6 +133,31 @@ class AuthController extends _$AuthController {
     }
   }
 
+  /// Applies owner-edited shop settings to the in-memory auth state and its
+  /// persistence, so offline checks (credit limit, expense PIN gate) pick the
+  /// new thresholds up immediately without a re-login.
+  Future<void> applyShopSettings({
+    String? shopName,
+    String? debtThreshold,
+    String? expenseApprovalThreshold,
+  }) async {
+    final current = state.valueOrNull;
+    if (current is! Authenticated) return;
+    final repo = await ref.read(authRepositoryProvider.future);
+    await repo.saveShopSettings(
+      shopName: shopName,
+      debtThreshold: debtThreshold,
+      expenseApprovalThreshold: expenseApprovalThreshold,
+    );
+    state = AsyncData(
+      current.copyWith(
+        shopName: shopName,
+        debtThreshold: debtThreshold,
+        expenseApprovalThreshold: expenseApprovalThreshold,
+      ),
+    );
+  }
+
   Future<void> logout({bool force = false}) async {
     // Try to drain the queue first; if events remain, block the logout
     // (unless forced) instead of silently discarding local-only records.

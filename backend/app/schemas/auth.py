@@ -43,6 +43,10 @@ class TokenBundle(BaseModel):
     role: str
     shop_type: str = "regular"
     shop_name: str = ""
+    # Shop-configurable thresholds, mirrored to the client at login/refresh
+    # so offline checks use the shop's actual values, not hardcoded defaults.
+    debt_threshold: str = "500.00"
+    expense_approval_threshold: str = "500.00"
 
 
 class InviteRequest(BaseModel):

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.api.v1 import auth, audit, debts, expenses, products, reports, sales, shifts, supplies, sync
+from app.api.v1 import auth, audit, debts, expenses, products, reports, sales, shifts, shops, supplies, sync
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.rate_limit import limiter
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(debts.router, prefix=api)
     app.include_router(expenses.router, prefix=api)
     app.include_router(shifts.router, prefix=api)
+    app.include_router(shops.router, prefix=api)
     app.include_router(supplies.router, prefix=api)
     app.include_router(sync.router, prefix=api)
     app.include_router(audit.router, prefix=api)

@@ -137,6 +137,67 @@ class DebtsRepository {
     });
     unawaited(syncWorker.kick());
   }
+
+  /// Writes off an open/partial debt: marks it written_off locally, books the
+  /// uncollected balance as a local bad-debt expense, and enqueues a single
+  /// `debt.writeoff` sync event. The server creates its own bad-debt expense
+  /// from that event, so we deliberately do NOT enqueue `expense.create` —
+  /// doing so would double-book the expense server-side.
+  ///
+  /// Sensitive op (docs/17-roles.md): cashiers must pass an
+  /// [ownerChallengeToken]; owners may pass null.
+  Future<void> writeOff({
+    required String debtId,
+    String? ownerChallengeToken,
+  }) async {
+    final debt = await db.debtsDao.getById(debtId);
+    if (debt == null) throw StateError('Debt not found');
+    if (debt.status != DebtStatus.open && debt.status != DebtStatus.partial) {
+      throw StateError('Only open or partial debts can be written off');
+    }
+
+    final now = DateTime.now().toUtc();
+    final remaining = debt.remaining;
+
+    await db.transaction(() async {
+      await (db.update(db.debtsTable)..where((t) => t.id.equals(debtId))).write(
+        DebtsTableCompanion(
+          status: Value(debtStatusKey(DebtStatus.writtenOff)),
+          updatedAt: Value(now),
+        ),
+      );
+
+      // Local mirror of the server-side bad-debt expense. Title/category
+      // match what the server books so the next expenses pull upserts over
+      // this row instead of duplicating it visually.
+      await db.into(db.expensesTable).insert(
+            ExpensesTableCompanion.insert(
+              id: const Uuid().v4(),
+              shopId: shopId,
+              userId: userId,
+              title: 'Bad debt write-off: ${debt.customerName}',
+              amount: santimFromDecimal(remaining),
+              category: const Value('other'),
+              occurredAt: now,
+            ),
+          );
+
+      await db.into(db.syncEventsTable).insert(
+            SyncEventsTableCompanion.insert(
+              clientEventId: const Uuid().v4(),
+              op: 'debt.writeoff',
+              occurredAt: now,
+              payload: jsonEncode({
+                'debt_id': debtId,
+                'occurred_at': now.toIso8601String(),
+                if (ownerChallengeToken != null)
+                  'owner_challenge': ownerChallengeToken,
+              }),
+            ),
+          );
+    });
+    unawaited(syncWorker.kick());
+  }
 }
 
 @Riverpod(keepAlive: true)

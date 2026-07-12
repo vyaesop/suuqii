@@ -119,8 +119,11 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     // sync_service so offline entries don't fail later.
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.isOwner;
+    final threshold = auth is Authenticated
+        ? auth.expenseApprovalThresholdValue
+        : defaultExpenseApprovalThreshold;
     String? challenge;
-    if (!isOwner && result.amount > defaultExpenseApprovalThreshold) {
+    if (!isOwner && result.amount > threshold) {
       if (!context.mounted) return;
       challenge = await requestOwnerChallenge(context, ref);
       if (challenge == null) return;

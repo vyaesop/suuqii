@@ -17,10 +17,12 @@ import 'package:uuid/uuid.dart';
 
 part 'expenses_repository.g.dart';
 
-/// Mirrors Shop.expense_approval_threshold on the server (default 500 ETB;
-/// there is currently no API to change it). Cashier expenses at or below the
-/// threshold sync without a PIN; anything above needs an owner challenge, so
-/// the UI collects the PIN upfront instead of failing at sync time.
+/// Mirrors Shop.expense_approval_threshold's server default (500 ETB). Used
+/// only as a fallback — the live value comes from the auth state
+/// (`Authenticated.expenseApprovalThresholdValue`), fed by the TokenBundle
+/// and editable in Shop settings. Cashier expenses at or below the threshold
+/// sync without a PIN; anything above needs an owner challenge, so the UI
+/// collects the PIN upfront instead of failing at sync time.
 final Decimal defaultExpenseApprovalThreshold = Decimal.parse('500');
 
 class ExpensesRepository {

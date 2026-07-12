@@ -68,6 +68,8 @@ class AuthRepository {
       shopName: p.shopName,
       shopType: p.shopType,
       accessToken: '',
+      debtThreshold: p.debtThreshold,
+      expenseApprovalThreshold: p.expenseApprovalThreshold,
     );
   }
 
@@ -91,6 +93,18 @@ class AuthRepository {
 
   Future<String> verifyOwnerPin(String pin) => remote.verifyOwnerPin(pin);
 
+  /// Persists owner-edited shop settings so they survive app restarts.
+  Future<void> saveShopSettings({
+    String? shopName,
+    String? debtThreshold,
+    String? expenseApprovalThreshold,
+  }) =>
+      local.saveShopSettings(
+        shopName: shopName,
+        debtThreshold: debtThreshold,
+        expenseApprovalThreshold: expenseApprovalThreshold,
+      );
+
   Future<void> logout() async {
     tokens.access = null;
     await local.clear();
@@ -108,6 +122,12 @@ class AuthRepository {
     final shopId = bundle['shop_id'] as String;
     final role = bundle['role'] as String;
     final shopType = (bundle['shop_type'] as String?) ?? 'regular';
+    // TokenBundle carries the shop thresholds as decimal strings so offline
+    // checks (credit limit, expense PIN gate) match the server immediately.
+    final debtThreshold =
+        (bundle['debt_threshold'] as String?) ?? kDefaultThreshold;
+    final expenseApprovalThreshold =
+        (bundle['expense_approval_threshold'] as String?) ?? kDefaultThreshold;
 
     tokens.access = access;
     await local.saveTokens(refresh: refresh);
@@ -118,6 +138,8 @@ class AuthRepository {
       userName: userName,
       shopName: shopName,
       shopType: shopType,
+      debtThreshold: debtThreshold,
+      expenseApprovalThreshold: expenseApprovalThreshold,
     );
     return Authenticated(
       userId: userId,
@@ -127,6 +149,8 @@ class AuthRepository {
       shopName: shopName ?? '',
       shopType: shopType,
       accessToken: access,
+      debtThreshold: debtThreshold,
+      expenseApprovalThreshold: expenseApprovalThreshold,
     );
   }
 }

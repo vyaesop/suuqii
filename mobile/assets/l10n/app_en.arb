@@ -115,6 +115,8 @@
   "settingsEmployeesSubtitle": "Invite and manage cashiers",
   "settingsOpenShifts": "Open shifts",
   "settingsOpenShiftsSubtitle": "Force-close stale shifts",
+  "settingsShopSettings": "Shop settings",
+  "settingsShopSettingsSubtitle": "Shop name and approval thresholds",
   "settingsSectionSales": "Sales",
   "settingsRecentSales": "Recent sales",
   "settingsRecentSalesSubtitle": "View & refund recent transactions",
@@ -600,6 +602,30 @@
       }
     }
   },
+  "debtStatusWrittenOff": "WRITTEN OFF",
+  "@debtStatusWrittenOff": {
+    "description": "All-caps status pill for a debt written off as uncollectible"
+  },
+  "debtWriteOff": "Write off debt",
+  "debtWriteOffConfirmTitle": "Write off this debt?",
+  "debtWriteOffConfirmBody": "The uncollected balance of {amount} will be recorded as a bad-debt expense. This cannot be undone.",
+  "@debtWriteOffConfirmBody": {
+    "description": "Confirmation body before writing off a debt; {amount} is a pre-formatted money amount",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "debtWriteOffDone": "Wrote off {amount} as bad debt",
+  "@debtWriteOffDone": {
+    "description": "Snackbar after a debt write-off; {amount} is a pre-formatted money amount",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "expenseEmpty": "No expenses yet",
   "expenseAddTitle": "Add expense",
   "expenseAdded": "Expense added",
@@ -861,10 +887,91 @@
   "employeesEmptyTitle": "No employees yet",
   "employeesEmptyMessage": "Invite a cashier to share the till with you.",
   "employeesInviteCta": "Invite employee",
-  "employeesPillPending": "PENDING",
-  "@employeesPillPending": {
-    "description": "Status pill for an invited employee who has not activated their account yet (styled uppercase)"
+  "employeesPillInactive": "INACTIVE",
+  "@employeesPillInactive": {
+    "description": "Status pill for an employee who cannot log in — invited but not yet activated, or deactivated by the owner (styled uppercase)"
   },
+  "employeesMenuDeactivate": "Deactivate",
+  "employeesMenuReactivate": "Reactivate",
+  "employeesDeactivateTitle": "Deactivate {name}?",
+  "@employeesDeactivateTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesDeactivateBody": "They will be signed out on every device and cannot log in until you reactivate them.",
+  "employeesDeactivated": "{name} deactivated",
+  "@employeesDeactivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesReactivateTitle": "Reactivate {name}?",
+  "@employeesReactivateTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesReactivateBody": "They will be able to log in again.",
+  "employeesReactivated": "{name} reactivated",
+  "@employeesReactivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesActionFailed": "Failed: {error}",
+  "@employeesActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesTitle": "Devices",
+  "devicesLoadFailedTitle": "Couldn't load devices",
+  "devicesEmptyTitle": "No devices yet",
+  "devicesEmptyMessage": "Devices appear here after someone logs in.",
+  "devicesPillRevoked": "REVOKED",
+  "@devicesPillRevoked": {
+    "description": "Status pill for a remotely signed-out device session (styled uppercase)"
+  },
+  "devicesRevoke": "Revoke",
+  "devicesRevokeTitle": "Revoke this device?",
+  "devicesRevokeBody": "{user} will be signed out on this device and must log in again.",
+  "@devicesRevokeBody": {
+    "placeholders": {
+      "user": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesRevoked": "Device revoked",
+  "devicesLastSeen": "Last seen {when}",
+  "@devicesLastSeen": {
+    "description": "Device row subtitle; {when} is a localized relative time like 'just now' or '5 min ago'",
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "shopSettingsTitle": "Shop settings",
+  "shopSettingsLoadFailedTitle": "Couldn't load shop settings",
+  "shopSettingsNameLabel": "Shop name",
+  "shopSettingsNameRequired": "Shop name is required",
+  "shopSettingsDebtThresholdLabel": "Debt threshold",
+  "shopSettingsDebtThresholdHelp": "Credit sales that push a customer's outstanding balance above this need owner approval.",
+  "shopSettingsExpenseThresholdLabel": "Expense approval threshold",
+  "shopSettingsExpenseThresholdHelp": "Cashier expenses above this amount need the owner PIN.",
+  "shopSettingsSaved": "Shop settings saved",
   "employeesInviteReadyTitle": "Invite ready",
   "employeesInviteShareCode": "Share this 8-digit code with {name}.",
   "@employeesInviteShareCode": {

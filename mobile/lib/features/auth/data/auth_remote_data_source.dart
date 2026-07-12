@@ -116,6 +116,46 @@ class AuthRemoteDataSource {
     return raw.cast<Map<String, dynamic>>();
   }
 
+  /// Owner-only: blocks the user from logging in and revokes their device
+  /// sessions. Returns how many sessions were revoked.
+  Future<int> deactivateUser(String userId) async {
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/users/$userId/deactivate',
+      ),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+    return (res.data!['sessions_revoked'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Owner-only: lets a previously deactivated user log in again.
+  Future<void> activateUser(String userId) async {
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>('/v1/auth/users/$userId/activate'),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+  }
+
+  /// Owner-only: all device sessions for the shop.
+  Future<List<Map<String, dynamic>>> listDevices() async {
+    final res = await _request(
+      () => _dio.get<Map<String, dynamic>>('/v1/auth/devices'),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+    final raw = res.data!['items'] as List<dynamic>;
+    return raw.cast<Map<String, dynamic>>();
+  }
+
+  /// Owner-only: signs the device session out remotely.
+  Future<void> revokeDevice(String sessionId) async {
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/devices/$sessionId/revoke',
+      ),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+  }
+
   Future<({String code, String expiresAt})> invite({
     required String name,
     required String phone,

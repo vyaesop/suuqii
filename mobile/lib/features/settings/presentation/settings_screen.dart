@@ -37,6 +37,12 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => context.push('/owner'),
             ),
             ListTile(
+              leading: const Icon(Icons.storefront_outlined),
+              title: Text(l.settingsShopSettings),
+              subtitle: Text(l.settingsShopSettingsSubtitle),
+              onTap: () => context.push('/shop-settings'),
+            ),
+            ListTile(
               leading: const Icon(Icons.bar_chart_rounded),
               title: Text(l.settingsReports),
               subtitle: Text(l.settingsReportsSubtitle),

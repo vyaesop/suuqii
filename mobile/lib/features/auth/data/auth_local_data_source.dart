@@ -16,6 +16,11 @@ class AuthLocalDataSource {
   static const _kUserName = 'auth.user_name';
   static const _kShopName = 'auth.shop_name';
   static const _kShopType = 'auth.shop_type';
+  static const _kDebtThreshold = 'auth.debt_threshold';
+  static const _kExpenseApprovalThreshold = 'auth.expense_approval_threshold';
+
+  /// Mirrors the server default for both shop thresholds.
+  static const _kDefaultThreshold = '500.00';
 
   Future<void> saveTokens({required String refresh}) async {
     await _secure.writeRefresh(refresh);
@@ -30,6 +35,8 @@ class AuthLocalDataSource {
     String? userName,
     String? shopName,
     String? shopType,
+    String? debtThreshold,
+    String? expenseApprovalThreshold,
   }) async {
     await _prefs.setString(_kUserId, userId);
     await _prefs.setString(_kShopId, shopId);
@@ -37,6 +44,34 @@ class AuthLocalDataSource {
     if (userName != null) await _prefs.setString(_kUserName, userName);
     if (shopName != null) await _prefs.setString(_kShopName, shopName);
     if (shopType != null) await _prefs.setString(_kShopType, shopType);
+    if (debtThreshold != null) {
+      await _prefs.setString(_kDebtThreshold, debtThreshold);
+    }
+    if (expenseApprovalThreshold != null) {
+      await _prefs.setString(
+        _kExpenseApprovalThreshold,
+        expenseApprovalThreshold,
+      );
+    }
+  }
+
+  /// Updates only the shop-settings fields (owner edited them in-app),
+  /// leaving the rest of the persisted profile untouched.
+  Future<void> saveShopSettings({
+    String? shopName,
+    String? debtThreshold,
+    String? expenseApprovalThreshold,
+  }) async {
+    if (shopName != null) await _prefs.setString(_kShopName, shopName);
+    if (debtThreshold != null) {
+      await _prefs.setString(_kDebtThreshold, debtThreshold);
+    }
+    if (expenseApprovalThreshold != null) {
+      await _prefs.setString(
+        _kExpenseApprovalThreshold,
+        expenseApprovalThreshold,
+      );
+    }
   }
 
   ({
@@ -46,6 +81,8 @@ class AuthLocalDataSource {
     String userName,
     String shopName,
     String shopType,
+    String debtThreshold,
+    String expenseApprovalThreshold,
   })? readProfile() {
     final uid = _prefs.getString(_kUserId);
     final sid = _prefs.getString(_kShopId);
@@ -58,6 +95,9 @@ class AuthLocalDataSource {
       userName: _prefs.getString(_kUserName) ?? '',
       shopName: _prefs.getString(_kShopName) ?? '',
       shopType: _prefs.getString(_kShopType) ?? 'regular',
+      debtThreshold: _prefs.getString(_kDebtThreshold) ?? _kDefaultThreshold,
+      expenseApprovalThreshold:
+          _prefs.getString(_kExpenseApprovalThreshold) ?? _kDefaultThreshold,
     );
   }
 
@@ -69,5 +109,7 @@ class AuthLocalDataSource {
     await _prefs.remove(_kUserName);
     await _prefs.remove(_kShopName);
     await _prefs.remove(_kShopType);
+    await _prefs.remove(_kDebtThreshold);
+    await _prefs.remove(_kExpenseApprovalThreshold);
   }
 }

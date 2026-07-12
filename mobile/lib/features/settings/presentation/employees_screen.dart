@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/http/dio_client.dart';
@@ -13,13 +14,14 @@ import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 import 'package:suuqii/shared/widgets/status_pill.dart';
 
-final _authApiProvider = Provider<AuthRemoteDataSource>(
+/// Shared by the employees and devices (owner) screens.
+final authApiProvider = Provider<AuthRemoteDataSource>(
   (ref) => AuthRemoteDataSource(ref.watch(dioProvider)),
 );
 
 final _employeesProvider = FutureProvider.autoDispose<List<_Employee>>(
   (ref) async {
-    final api = ref.watch(_authApiProvider);
+    final api = ref.watch(authApiProvider);
     final rows = await api.listShopUsers();
     return rows.map(_Employee.fromJson).toList();
   },
@@ -58,7 +60,16 @@ class EmployeesScreen extends ConsumerWidget {
     final async = ref.watch(_employeesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l.settingsEmployees)),
+      appBar: AppBar(
+        title: Text(l.settingsEmployees),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.devices_rounded),
+            tooltip: l.devicesTitle,
+            onPressed: () => context.push('/employees/devices'),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.person_add_alt_1_rounded),
         onPressed: () => _invite(context, ref),
@@ -96,7 +107,11 @@ class EmployeesScreen extends ConsumerWidget {
               itemCount: list.length,
               separatorBuilder: (_, __) =>
                   const SizedBox(height: SuuqSpacing.xs),
-              itemBuilder: (_, i) => _EmployeeRow(employee: list[i]),
+              itemBuilder: (_, i) => _EmployeeRow(
+                employee: list[i],
+                onDeactivate: (e) => _deactivate(context, ref, e),
+                onReactivate: (e) => _reactivate(context, ref, e),
+              ),
             );
           },
         ),
@@ -115,11 +130,102 @@ class EmployeesScreen extends ConsumerWidget {
       ref.refresh(_employeesProvider);
     }
   }
+
+  Future<void> _deactivate(
+    BuildContext context,
+    WidgetRef ref,
+    _Employee e,
+  ) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.employeesDeactivateTitle(e.name)),
+        content: Text(l.employeesDeactivateBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.commonCancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.employeesMenuDeactivate),
+          ),
+        ],
+      ),
+    );
+    if (!(confirmed ?? false)) return;
+    try {
+      await ref.read(authApiProvider).deactivateUser(e.id);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.employeesDeactivated(e.name))),
+      );
+    } catch (err) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.employeesActionFailed(localizedErrorMessage(l, err))),
+        ),
+      );
+    }
+    // ignore: unused_result
+    ref.refresh(_employeesProvider);
+  }
+
+  Future<void> _reactivate(
+    BuildContext context,
+    WidgetRef ref,
+    _Employee e,
+  ) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.employeesReactivateTitle(e.name)),
+        content: Text(l.employeesReactivateBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.commonCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.employeesMenuReactivate),
+          ),
+        ],
+      ),
+    );
+    if (!(confirmed ?? false)) return;
+    try {
+      await ref.read(authApiProvider).activateUser(e.id);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.employeesReactivated(e.name))),
+      );
+    } catch (err) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.employeesActionFailed(localizedErrorMessage(l, err))),
+        ),
+      );
+    }
+    // ignore: unused_result
+    ref.refresh(_employeesProvider);
+  }
 }
 
 class _EmployeeRow extends StatelessWidget {
-  const _EmployeeRow({required this.employee});
+  const _EmployeeRow({
+    required this.employee,
+    required this.onDeactivate,
+    required this.onReactivate,
+  });
   final _Employee employee;
+  final void Function(_Employee) onDeactivate;
+  final void Function(_Employee) onReactivate;
 
   @override
   Widget build(BuildContext context) {
@@ -169,13 +275,32 @@ class _EmployeeRow extends StatelessWidget {
             const SizedBox(width: SuuqSpacing.sm),
             if (!employee.isActive)
               StatusPill(
-                label: l.employeesPillPending,
+                label: l.employeesPillInactive,
                 intent: PillIntent.warning,
               )
             else
               StatusPill(
                 label: _roleLabel(l, employee.role).toUpperCase(),
                 intent: isOwner ? PillIntent.info : PillIntent.neutral,
+              ),
+            if (!isOwner)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert_rounded),
+                onSelected: (v) => v == 'deactivate'
+                    ? onDeactivate(employee)
+                    : onReactivate(employee),
+                itemBuilder: (_) => [
+                  if (employee.isActive)
+                    PopupMenuItem(
+                      value: 'deactivate',
+                      child: Text(l.employeesMenuDeactivate),
+                    )
+                  else
+                    PopupMenuItem(
+                      value: 'reactivate',
+                      child: Text(l.employeesMenuReactivate),
+                    ),
+                ],
               ),
           ],
         ),
@@ -388,7 +513,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
       _error = null;
     });
     try {
-      final api = ref.read(_authApiProvider);
+      final api = ref.read(authApiProvider);
       final res = await api.invite(name: name, phone: phone);
       if (!mounted) return;
       setState(() {

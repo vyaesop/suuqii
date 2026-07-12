@@ -20,8 +20,10 @@ import 'package:suuqii/features/inventory/presentation/product_detail_screen.dar
 import 'package:suuqii/features/inventory/presentation/product_edit_screen.dart';
 import 'package:suuqii/features/sales/presentation/pos_screen.dart';
 import 'package:suuqii/features/sales/presentation/recent_sales_screen.dart';
+import 'package:suuqii/features/settings/presentation/devices_screen.dart';
 import 'package:suuqii/features/settings/presentation/employees_screen.dart';
 import 'package:suuqii/features/settings/presentation/settings_screen.dart';
+import 'package:suuqii/features/settings/presentation/shop_settings_screen.dart';
 import 'package:suuqii/features/shifts/presentation/open_shifts_screen.dart';
 import 'package:suuqii/features/shifts/presentation/shift_screen.dart';
 import 'package:suuqii/features/supplies/presentation/supplies_screen.dart';
@@ -38,6 +40,7 @@ const ownerOnlyPathPrefixes = [
   '/audit',
   '/employees',
   '/open-shifts',
+  '/shop-settings',
 ];
 
 /// Single reusable owner-only guard: returns the location to redirect a
@@ -165,6 +168,17 @@ GoRouter router(RouterRef ref) {
           GoRoute(
             path: '/employees',
             builder: (_, __) => const EmployeesScreen(),
+            routes: [
+              // Owner-only via the /employees redirect guard above.
+              GoRoute(
+                path: 'devices',
+                builder: (_, __) => const DevicesScreen(),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/shop-settings',
+            builder: (_, __) => const ShopSettingsScreen(),
           ),
           GoRoute(path: '/me', builder: (_, __) => const SettingsScreen()),
         ],

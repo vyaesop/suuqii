@@ -25,7 +25,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import AsyncSessionLocal
-from app.models import DeviceSession, Invite, Shop, User
+from app.models import AuditLog, DeviceSession, Invite, Shop, User
 from app.schemas.auth import (
     AcceptInviteRequest,
     InviteRequest,
@@ -136,6 +136,10 @@ async def _issue_token_bundle(
         user_id=user.id, shop_id=user.shop_id, role=user.role,
         shop_type=resolved_shop.shop_type if resolved_shop else "regular",
         shop_name=resolved_shop.name if resolved_shop else "",
+        debt_threshold=str(resolved_shop.debt_threshold)
+            if resolved_shop and resolved_shop.debt_threshold is not None else "500.00",
+        expense_approval_threshold=str(resolved_shop.expense_approval_threshold)
+            if resolved_shop and resolved_shop.expense_approval_threshold is not None else "500.00",
     )
 
 
@@ -356,6 +360,109 @@ async def list_shop_users(
             for u in rows
         ],
     )
+
+
+@router.get("/devices")
+async def list_devices(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """All device sessions for this shop's users. Owner-only — feeds the
+    employees screen so stolen/old phones can be spotted and revoked."""
+    if user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+    rows = (await db.execute(
+        select(DeviceSession, User)
+        .join(User, User.id == DeviceSession.user_id)
+        .where(User.shop_id == user.shop_id)
+        .order_by(DeviceSession.last_seen_at.desc().nulls_last())
+    )).all()
+    return {"items": [
+        {
+            "session_id": str(sess.id),
+            "user_id": str(u.id),
+            "user_name": u.name,
+            "user_role": u.role,
+            "device_label": sess.device_label,
+            "last_seen_at": sess.last_seen_at.isoformat() if sess.last_seen_at else None,
+            "created_at": sess.created_at.isoformat() if sess.created_at else None,
+            "revoked": sess.revoked_at is not None,
+        }
+        for sess, u in rows
+    ]}
+
+
+async def _get_shop_employee(db: AsyncSession, owner: User, user_id: UUID) -> User:
+    """Load a non-owner user of the caller's shop or raise."""
+    target = await db.get(User, user_id)
+    if not target or target.shop_id != owner.shop_id or target.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    if target.role == "owner":
+        raise DomainError("cannot modify an owner account", code="forbidden", status=403)
+    return target
+
+
+@router.post("/users/{user_id}/deactivate")
+async def deactivate_user(
+    user_id: UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Deactivate an employee: blocks login and all API access on the next
+    request, and revokes their device sessions so refresh tokens die too."""
+    if user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+    target = await _get_shop_employee(db, user, user_id)
+
+    target.is_active = False
+    now = datetime.now(UTC)
+    sessions = (await db.execute(
+        select(DeviceSession).where(
+            DeviceSession.user_id == target.id,
+            DeviceSession.revoked_at.is_(None),
+        )
+    )).scalars().all()
+    for sess in sessions:
+        sess.revoked_at = now
+
+    db.add(AuditLog(
+        shop_id=user.shop_id,
+        user_id=user.id,
+        action="user.deactivate",
+        entity_type="user",
+        entity_id=target.id,
+        old_value={"is_active": True},
+        new_value={"is_active": False, "sessions_revoked": len(sessions)},
+        created_at=now,
+    ))
+    await db.commit()
+    return {"ok": True, "sessions_revoked": len(sessions)}
+
+
+@router.post("/users/{user_id}/activate")
+async def activate_user(
+    user_id: UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Reactivate a previously deactivated employee (they log in fresh)."""
+    if user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+    target = await _get_shop_employee(db, user, user_id)
+
+    target.is_active = True
+    db.add(AuditLog(
+        shop_id=user.shop_id,
+        user_id=user.id,
+        action="user.activate",
+        entity_type="user",
+        entity_id=target.id,
+        old_value={"is_active": False},
+        new_value={"is_active": True},
+        created_at=datetime.now(UTC),
+    ))
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/devices/{session_id}/revoke")

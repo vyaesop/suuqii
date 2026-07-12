@@ -8,6 +8,21 @@ import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/data/auth_repository_impl.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 
+/// Returns a canned TokenBundle instead of hitting the network.
+class _FakeRemote extends AuthRemoteDataSource {
+  _FakeRemote(this.bundle) : super(Dio());
+  final Map<String, dynamic> bundle;
+
+  @override
+  Future<Map<String, dynamic>> login({
+    required String phone,
+    required String password,
+    required String deviceFingerprint,
+    String? deviceLabel,
+  }) async =>
+      bundle;
+}
+
 class _FakeSecureStorage extends SecureStorage {
   _FakeSecureStorage({this.refresh});
 
@@ -80,5 +95,69 @@ void main() {
     expect(resumed?.shopId, 's1');
     expect(resumed?.role, 'owner');
     expect(resumed?.shopName, 'Shop');
+    // No thresholds ever persisted → server defaults.
+    expect(resumed?.debtThreshold, '500.00');
+    expect(resumed?.expenseApprovalThreshold, '500.00');
+  });
+
+  test('login parses shop thresholds from the TokenBundle and persists them',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final storage = _FakeSecureStorage();
+    final local = AuthLocalDataSource(storage, prefs);
+    final repo = AuthRepository(
+      remote: _FakeRemote({
+        'access': 'a',
+        'refresh': 'r',
+        'user_id': 'u1',
+        'shop_id': 's1',
+        'role': 'owner',
+        'shop_type': 'regular',
+        'debt_threshold': '750.00',
+        'expense_approval_threshold': '120.50',
+      }),
+      local: local,
+      tokens: TokenStore(),
+    );
+
+    final auth = await repo.login(
+      phone: '0911',
+      password: 'pw',
+      deviceFingerprint: 'fp',
+    );
+    expect(auth.debtThreshold, '750.00');
+    expect(auth.expenseApprovalThreshold, '120.50');
+    expect(auth.debtThresholdValue.toString(), '750');
+    expect(auth.expenseApprovalThresholdValue.toString(), '120.5');
+
+    // Persisted: a resumed session keeps the shop's thresholds.
+    final resumed = await repo.resume();
+    expect(resumed?.debtThreshold, '750.00');
+    expect(resumed?.expenseApprovalThreshold, '120.50');
+  });
+
+  test('login falls back to 500.00 when the bundle omits thresholds',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final local = AuthLocalDataSource(_FakeSecureStorage(), prefs);
+    final repo = AuthRepository(
+      remote: _FakeRemote({
+        'access': 'a',
+        'refresh': 'r',
+        'user_id': 'u1',
+        'shop_id': 's1',
+        'role': 'cashier',
+      }),
+      local: local,
+      tokens: TokenStore(),
+    );
+
+    final auth = await repo.login(
+      phone: '0911',
+      password: 'pw',
+      deviceFingerprint: 'fp',
+    );
+    expect(auth.debtThreshold, '500.00');
+    expect(auth.expenseApprovalThreshold, '500.00');
   });
 }

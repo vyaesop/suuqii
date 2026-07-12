@@ -521,5 +521,6 @@ SalesRepository salesRepository(SalesRepositoryRef ref) {
     currentShiftId: shiftAsync.valueOrNull?.id,
     isBakery: auth.isBakery,
     isOwner: auth.isOwner,
+    debtThreshold: auth.debtThresholdValue,
   );
 }
