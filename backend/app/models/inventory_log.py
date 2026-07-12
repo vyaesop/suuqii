@@ -2,15 +2,29 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, new_uuid
 
+# Keep in sync with migration 0009. Declared on the model too so schema built
+# from metadata (tests) matches the migrated production schema — otherwise a
+# movement the CHECK rejects passes tests and fails only in production.
+_MOVEMENTS = (
+    "sale", "restock", "adjustment", "refund", "waste",
+    "receive", "spoilage", "production",
+)
+
 
 class InventoryLog(Base):
     __tablename__ = "inventory_logs"
+    __table_args__ = (
+        CheckConstraint(
+            "movement IN (" + ", ".join(f"'{m}'" for m in _MOVEMENTS) + ")",
+            name="inventory_logs_movement_check",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid)
     shop_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)

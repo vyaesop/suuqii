@@ -101,12 +101,20 @@ def run_migrations_online() -> None:
                     "ALTER TABLE alembic_version "
                     "ALTER COLUMN version_num TYPE VARCHAR(255)"
                 ))
-                conn.commit()
+
+        # The pre-flight probes above (SELECT/ALTER) open an implicit
+        # transaction in SQLAlchemy 2.0's commit-as-you-go mode. Commit it so
+        # the connection is clean before alembic starts: otherwise
+        # context.begin_transaction() runs *inside* our un-owned transaction,
+        # never commits it, and the outer `with conn:` rolls the whole
+        # migration back — silently, while alembic reports success.
+        conn.commit()
 
         # Fall through so any revisions after the bootstrap (0002+) are applied.
         context.configure(connection=conn, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
+        conn.commit()
 
 
 if context.is_offline_mode():

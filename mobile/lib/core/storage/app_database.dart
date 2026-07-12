@@ -73,7 +73,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -105,8 +105,32 @@ class AppDatabase extends _$AppDatabase {
             // Lot indexes are in _createIndexes (IF NOT EXISTS — re-runnable).
             await _createIndexes();
           }
+          if (from < 8) {
+            await _backfillOpeningLots();
+          }
         },
       );
+
+  /// v7 → v8: stock that existed before lot tracking has no batch, so it
+  /// would be invisible in the batch view and mis-costed on sale (FEFO would
+  /// fall through to the *current* last cost). Turn each in-stock product's
+  /// existing quantity into an "opening balance" lot at its current purchase
+  /// price. Idempotent: only for products that have no lot yet. The server
+  /// backfills independently (migration 0008); the next lot sync replaces
+  /// these local opening lots with the server's, so there is no double count.
+  Future<void> _backfillOpeningLots() async {
+    await customStatement(
+      'INSERT INTO stock_lots '
+      '(id, product_id, qty_received, qty_remaining, unit_cost_santim, '
+      ' expiry_date, received_at, note) '
+      "SELECT 'opening-' || p.id, p.id, p.stock, p.stock, p.purchase_price, "
+      "       NULL, COALESCE(p.created_at, CAST(strftime('%s','now') AS INTEGER)), "
+      "       'Opening balance' "
+      'FROM products p '
+      'WHERE p.stock > 0 AND p.deleted_at IS NULL '
+      '  AND NOT EXISTS (SELECT 1 FROM stock_lots l WHERE l.product_id = p.id)',
+    );
+  }
 
   /// v5 → v6: money columns move from REAL birr to INTEGER santim
   /// (1 birr = 100 santim) so SQL arithmetic over money is exact.
