@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import current_user, db_session
@@ -160,7 +161,11 @@ async def register_shop(request: Request, req: RegisterShopRequest) -> TokenBund
             owner_pin_hash=hash_password(req.owner_pin),
         )
         db.add(owner)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as e:
+            # Race with a concurrent registration using the same phone.
+            raise DomainError("phone already in use", code="phone_taken", status=409) from e
 
         bundle = await _issue_token_bundle(
             db,
@@ -230,6 +235,14 @@ async def invite(
     if req.role not in {"cashier"}:
         raise DomainError("unsupported role", code="bad_role")
 
+    # Phone numbers are globally unique (idx_users_phone_global); surface a
+    # clean 409 instead of an IntegrityError 500.
+    existing_phone = (await db.execute(
+        select(User).where(User.phone == req.phone)
+    )).scalar_one_or_none()
+    if existing_phone:
+        raise DomainError("phone already in use", code="phone_taken", status=409)
+
     code = f"{uuid4().int % 100_000_000:08d}"
     placeholder = User(
         shop_id=user.shop_id, name=req.name, phone=req.phone,
@@ -237,7 +250,10 @@ async def invite(
         role=req.role, is_active=False,
     )
     db.add(placeholder)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        raise DomainError("phone already in use", code="phone_taken", status=409) from e
     expires = datetime.now(UTC) + timedelta(minutes=30)
     db.add(Invite(
         shop_id=user.shop_id, user_id=placeholder.id,
@@ -311,7 +327,7 @@ async def verify_owner_pin(
         )
 
     await _reset_pin_attempts(db, user)
-    return {"ok": True, "challenge_token": issue_owner_challenge(user_id=user.id)}
+    return {"ok": True, "challenge_token": issue_owner_challenge(user_id=user.id, shop_id=user.shop_id)}
 
 
 @router.get("/users", response_model=ShopUsersResponse)
@@ -350,7 +366,16 @@ async def revoke_device(
 ):
     if user.role != "owner":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
-    sess = await db.get(DeviceSession, session_id)
+    # Scope to the caller's shop: an owner must not be able to revoke
+    # device sessions belonging to users of other shops.
+    sess = (await db.execute(
+        select(DeviceSession)
+        .join(User, User.id == DeviceSession.user_id)
+        .where(
+            DeviceSession.id == session_id,
+            User.shop_id == user.shop_id,
+        )
+    )).scalar_one_or_none()
     if not sess:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     sess.revoked_at = datetime.now(UTC)

@@ -1,16 +1,18 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.7
-pydantic-settings>=2.3
-sqlalchemy[asyncio]>=2.0
-asyncpg>=0.29
-psycopg[binary]>=3.2
-alembic>=1.13
-argon2-cffi>=23.1
-PyJWT>=2.9
-python-multipart>=0.0.9
-slowapi>=0.1.9
-httpx>=0.27
-sentry-sdk[fastapi]>=2.0
-structlog>=24.1
-python-dotenv>=1.0
+# Pinned to the versions the app is developed and tested against.
+# Bump deliberately (and run the test suite), not implicitly on deploy.
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
+pydantic==2.13.4
+pydantic-settings==2.14.1
+sqlalchemy[asyncio]==2.0.49
+asyncpg==0.31.0
+psycopg[binary]==3.3.4
+alembic==1.18.4
+argon2-cffi==25.1.0
+PyJWT==2.12.1
+python-multipart==0.0.28
+slowapi==0.1.9
+httpx==0.28.1
+sentry-sdk[fastapi]==2.60.0
+structlog==25.5.0
+python-dotenv==1.2.2

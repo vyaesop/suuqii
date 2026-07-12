@@ -2,9 +2,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1._pagination import decode_time_cursor, encode_cursor
 from app.core.deps import current_user, db_session
 from app.models import AuditLog, Product, Shift, User
 
@@ -24,7 +25,7 @@ async def list_audit(
     actor: str | None = Query(None, alias="user_id"),
     entity_id: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
-    cursor: int = Query(0, ge=0),
+    cursor: str | None = Query(None),
     user: User = Depends(current_user),
     db: AsyncSession = Depends(db_session),
 ):
@@ -41,22 +42,31 @@ async def list_audit(
         stmt = stmt.where(AuditLog.user_id == actor)
     if entity_id:
         stmt = stmt.where(AuditLog.entity_id == entity_id)
-    stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit)
+    decoded = decode_time_cursor(cursor)
+    if decoded:
+        stmt = stmt.where(tuple_(AuditLog.created_at, AuditLog.id) < decoded)
+    stmt = stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit + 1)
     rows = (await db.execute(stmt)).scalars().all()
-    return {"items": [
-        {
-            "id": str(r.id),
-            "action": r.action,
-            "entity_type": r.entity_type,
-            "entity_id": str(r.entity_id),
-            "user_id": str(r.user_id) if r.user_id else None,
-            "device_id": r.device_id,
-            "old": r.old_value,
-            "new": r.new_value,
-            "created_at": r.created_at.isoformat(),
-        }
-        for r in rows
-    ]}
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "action": r.action,
+                "entity_type": r.entity_type,
+                "entity_id": str(r.entity_id),
+                "user_id": str(r.user_id) if r.user_id else None,
+                "device_id": r.device_id,
+                "old": r.old_value,
+                "new": r.new_value,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ],
+        "next_cursor": encode_cursor(rows[-1].created_at, rows[-1].id) if has_more else None,
+        "has_more": has_more,
+    }
 
 
 @router.post("/scan-anomalies")

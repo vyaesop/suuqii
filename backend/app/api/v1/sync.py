@@ -29,8 +29,11 @@ async def push(
     svc = SyncService(db, shop_id=user.shop_id, user=user, device_id=device_id,
                       owner_challenge=owner_challenge)
     results = [await svc.apply(ev) for ev in req.events]
-    await db.commit()
+    # Cursor is computed before commit: the applied events are already
+    # flushed, and after commit the transaction-local RLS context
+    # (app.current_shop_id) is gone.
     cursor = await svc.current_cursor()
+    await db.commit()
     return SyncPushResponse(results=results, server_cursor=cursor)
 
 

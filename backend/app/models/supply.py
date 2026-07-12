@@ -1,7 +1,8 @@
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy import Date, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,3 +19,4 @@ class Supply(Base, TimestampMixin, SoftDeleteMixin):
     quantity_on_hand: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     reorder_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    expiry_date: Mapped[date | None] = mapped_column(Date)

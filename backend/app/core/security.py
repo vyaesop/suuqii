@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import Argon2Error, InvalidHashError
 
 from app.core.config import settings
 
@@ -16,9 +16,10 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    # A malformed/legacy hash must read as "wrong password", not a 500.
     try:
         return _ph.verify(hashed, plain)
-    except VerifyMismatchError:
+    except (Argon2Error, InvalidHashError, ValueError):
         return False
 
 
@@ -51,10 +52,11 @@ def issue_refresh_token(*, user_id: UUID, device_id: str) -> tuple[str, str]:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256"), jti
 
 
-def issue_owner_challenge(*, user_id: UUID) -> str:
+def issue_owner_challenge(*, user_id: UUID, shop_id: UUID) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
+        "shop_id": str(shop_id),
         "purpose": "owner_pin",
         "nonce": uuid4().hex,
         "iat": int(now.timestamp()),

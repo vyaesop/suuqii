@@ -1,13 +1,28 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import current_user, db_session
-from app.models import Debt, Expense, InventoryLog, Product, Sale, SaleItem, Shop, Supply, User
+from app.models import (
+    Debt,
+    Expense,
+    InventoryLog,
+    LotConsumption,
+    Product,
+    Sale,
+    SaleItem,
+    Shop,
+    StockLot,
+    Supply,
+    User,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -17,7 +32,12 @@ _EXPENSE_CATEGORIES = ("rent", "transport", "utilities", "salary", "supplies", "
 def _range_start(range_: str) -> datetime:
     now = datetime.now(UTC)
     if range_ == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # "Today" means the shop's local day (settings.timezone, e.g.
+        # Africa/Addis_Ababa = UTC+3), not the UTC day — otherwise the
+        # dashboard resets at 3 AM local and disagrees with sales_daily_mv.
+        tz = ZoneInfo(settings.timezone)
+        local_midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        return local_midnight.astimezone(UTC)
     if range_ == "7d":
         return now - timedelta(days=7)
     return now - timedelta(days=30)
@@ -87,7 +107,17 @@ async def dashboard(
         )
         total_expenses += Decimal(row.total)
 
-    net_profit = Decimal(gross_profit) - total_expenses
+    # ── Spoilage / waste (valued at lot cost at spoilage time) ───────────────
+    spoilage_cost = (await db.execute(
+        select(func.coalesce(func.sum(LotConsumption.quantity * LotConsumption.unit_cost), 0))
+        .where(
+            LotConsumption.shop_id == user.shop_id,
+            LotConsumption.movement == "spoilage",
+            LotConsumption.consumed_at >= start,
+        )
+    )).scalar_one()
+
+    net_profit = Decimal(gross_profit) - total_expenses - Decimal(spoilage_cost)
 
     # ── Credit sales & outstanding debt ──────────────────────────────────────
     credit_sales = (await db.execute(
@@ -142,6 +172,7 @@ async def dashboard(
         "profit": str(gross_profit),
         "expenses": str(total_expenses),
         "expenses_by_category": expenses_by_category,
+        "spoilage_cost": str(spoilage_cost),
         "net_profit": str(net_profit),
         "credit_sales": str(credit_sales),
         "outstanding_debt": str(all_outstanding),
@@ -663,3 +694,153 @@ async def cashier_performance(
     cashiers.sort(key=lambda c: Decimal(c["revenue"]), reverse=True)
 
     return {"range": range_, "cashiers": cashiers}
+
+
+@router.get("/batches")
+async def batch_report(
+    product_id: UUID | None = Query(None),
+    include_closed: bool = Query(False),
+    limit: int = Query(100, ge=1, le=500),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Per-batch economics: what each lot cost, what it sold for, what
+    spoiled, what's left. This is the answer to "the 10-birr sodas vs the
+    13-birr sodas". Owner-only (exposes purchase costs)."""
+    if user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+
+    stmt = select(StockLot).where(StockLot.shop_id == user.shop_id)
+    if product_id:
+        stmt = stmt.where(StockLot.product_id == product_id)
+    if not include_closed:
+        stmt = stmt.where(StockLot.qty_remaining > 0)
+    stmt = stmt.order_by(StockLot.received_at.desc()).limit(limit)
+    lots = (await db.execute(stmt)).scalars().all()
+
+    lot_ids = [lot.id for lot in lots]
+    sold: dict[UUID, Decimal] = {}
+    spoiled: dict[UUID, Decimal] = {}
+    revenue: dict[UUID, Decimal] = {}
+    if lot_ids:
+        # sale + refund_reversal rows net out refunds automatically
+        # (reversals carry negative quantities).
+        agg = (await db.execute(
+            select(
+                LotConsumption.lot_id,
+                LotConsumption.movement,
+                func.sum(LotConsumption.quantity).label("qty"),
+            )
+            .where(LotConsumption.lot_id.in_(lot_ids))
+            .group_by(LotConsumption.lot_id, LotConsumption.movement)
+        )).all()
+        for row in agg:
+            if row.movement in ("sale", "refund_reversal"):
+                sold[row.lot_id] = sold.get(row.lot_id, Decimal("0")) + Decimal(row.qty)
+            elif row.movement == "spoilage":
+                spoiled[row.lot_id] = spoiled.get(row.lot_id, Decimal("0")) + Decimal(row.qty)
+
+        rev = (await db.execute(
+            select(
+                LotConsumption.lot_id,
+                func.sum(LotConsumption.quantity * SaleItem.unit_price).label("revenue"),
+            )
+            .join(SaleItem, SaleItem.id == LotConsumption.sale_item_id)
+            .where(
+                LotConsumption.lot_id.in_(lot_ids),
+                LotConsumption.movement.in_(["sale", "refund_reversal"]),
+            )
+            .group_by(LotConsumption.lot_id)
+        )).all()
+        for row in rev:
+            revenue[row.lot_id] = Decimal(row.revenue)
+
+    product_names: dict[UUID, str] = {}
+    for lot in lots:
+        if lot.product_id not in product_names:
+            prod = await db.get(Product, lot.product_id)
+            product_names[lot.product_id] = prod.name if prod else "?"
+
+    items = []
+    for lot in lots:
+        sold_qty = sold.get(lot.id, Decimal("0"))
+        spoiled_qty = spoiled.get(lot.id, Decimal("0"))
+        rev_amt = revenue.get(lot.id, Decimal("0"))
+        cogs = sold_qty * lot.unit_cost
+        items.append({
+            "lot_id": str(lot.id),
+            "product_id": str(lot.product_id),
+            "product_name": product_names[lot.product_id],
+            "received_at": lot.received_at.isoformat(),
+            "expiry_date": lot.expiry_date.isoformat() if lot.expiry_date else None,
+            "unit_cost": str(lot.unit_cost),
+            "qty_received": str(lot.qty_received),
+            "qty_sold": str(sold_qty),
+            "qty_spoiled": str(spoiled_qty),
+            "qty_remaining": str(lot.qty_remaining),
+            "revenue": str(rev_amt),
+            "margin": str(rev_amt - cogs),
+            "spoilage_cost": str(spoiled_qty * lot.unit_cost),
+            "note": lot.note,
+        })
+    return {"items": items}
+
+
+@router.get("/expiring")
+async def expiring_report(
+    days: int = Query(7, ge=0, le=365),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Lots and supplies expiring within N days (or already expired), with
+    value at risk. Owner-only; cashiers see expiry badges from local data."""
+    if user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+    horizon = today + timedelta(days=days)
+
+    lots = (await db.execute(
+        select(StockLot).where(
+            StockLot.shop_id == user.shop_id,
+            StockLot.qty_remaining > 0,
+            StockLot.expiry_date.is_not(None),
+            StockLot.expiry_date <= horizon,
+        ).order_by(StockLot.expiry_date.asc())
+    )).scalars().all()
+
+    lot_items = []
+    for lot in lots:
+        prod = await db.get(Product, lot.product_id)
+        lot_items.append({
+            "lot_id": str(lot.id),
+            "product_id": str(lot.product_id),
+            "product_name": prod.name if prod else "?",
+            "expiry_date": lot.expiry_date.isoformat(),
+            "expired": lot.expiry_date < today,
+            "qty_remaining": str(lot.qty_remaining),
+            "value_at_risk": str(lot.qty_remaining * lot.unit_cost),
+        })
+
+    supplies = (await db.execute(
+        select(Supply).where(
+            Supply.shop_id == user.shop_id,
+            Supply.deleted_at.is_(None),
+            Supply.expiry_date.is_not(None),
+            Supply.expiry_date <= horizon,
+        ).order_by(Supply.expiry_date.asc())
+    )).scalars().all()
+
+    supply_items = [
+        {
+            "supply_id": str(s.id),
+            "name": s.name,
+            "expiry_date": s.expiry_date.isoformat(),
+            "expired": s.expiry_date < today,
+            "quantity_on_hand": str(s.quantity_on_hand),
+            "value_at_risk": str(s.quantity_on_hand * s.cost_per_unit),
+        }
+        for s in supplies
+    ]
+    return {"lots": lot_items, "supplies": supply_items, "days": days}

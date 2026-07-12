@@ -7,6 +7,7 @@ from app.models.recipe import RecipeItem
 from app.models.sale import Sale, SaleItem
 from app.models.shift import Shift
 from app.models.shop import Shop
+from app.models.stock_lot import LotConsumption, StockLot
 from app.models.supply import Supply
 from app.models.sync_event import SyncEvent
 from app.models.user import DeviceSession, Invite, User
@@ -15,4 +16,5 @@ __all__ = [
     "AuditLog", "Debt", "DebtPayment", "Expense", "InventoryLog",
     "Product", "RecipeItem", "Sale", "SaleItem", "Shift", "Shop",
     "Supply", "SyncEvent", "User", "DeviceSession", "Invite",
+    "StockLot", "LotConsumption",
 ]

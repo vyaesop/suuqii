@@ -1,6 +1,7 @@
 """
 Supplies (ingredient inventory) endpoints — bakery shops only.
 """
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -23,6 +24,7 @@ class SupplyOut(BaseModel):
     quantity_on_hand: Decimal
     reorder_threshold: Decimal
     cost_per_unit: Decimal
+    expiry_date: date | None = None
 
     model_config = {"from_attributes": True}
 

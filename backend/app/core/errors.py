@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class DomainError(Exception):
@@ -40,4 +41,20 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "detail": str(exc),
                 "code": exc.code,
             },
+        )
+
+    # HTTPException raised throughout the routers gets the same problem+json
+    # shape as DomainError, so clients only ever parse one error schema.
+    @app.exception_handler(StarletteHTTPException)
+    async def _http(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "type": "about:blank",
+                "title": "HTTPException",
+                "status": exc.status_code,
+                "detail": str(exc.detail),
+                "code": "http_error",
+            },
+            headers=getattr(exc, "headers", None),
         )

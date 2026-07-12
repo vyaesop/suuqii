@@ -14,12 +14,15 @@ from app.core.rate_limit import limiter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    if settings.sentry_dsn:
-        sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
     yield
 
 
 def create_app() -> FastAPI:
+    # Init at import time, not in lifespan — on serverless the lifespan hook
+    # is not guaranteed to run before the first request is handled.
+    if settings.sentry_dsn:
+        sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
+
     app = FastAPI(
         title="Suuqii",
         version="0.1.0",
@@ -29,10 +32,13 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+    # Wildcard origins + credentials is an invalid (and insecure) combination;
+    # browsers reject it. Only allow credentials for an explicit origin list.
+    wildcard = settings.allowed_origins == ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
-        allow_credentials=True,
+        allow_credentials=not wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )

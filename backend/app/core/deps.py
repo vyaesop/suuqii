@@ -10,11 +10,6 @@ from app.db.session import AsyncSessionLocal
 from app.models.user import User
 
 
-async def _open_session() -> AsyncIterator[AsyncSession]:
-    async with AsyncSessionLocal() as session:
-        yield session
-
-
 async def current_token_payload(
     authorization: str = Header(..., alias="Authorization"),
 ) -> dict:
