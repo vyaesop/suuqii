@@ -59,6 +59,8 @@ void main() {
       ],
       child: MaterialApp(
         theme: AppTheme.light(),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: const Scaffold(
           body: PosScreen(),
         ),
@@ -145,7 +147,8 @@ void main() {
 
     expect(find.text('Coffee added to cart'), findsOneWidget);
     expect(find.text('ETB 25'), findsWidgets);
-    expect(find.text('1 items across 1 line'), findsOneWidget);
+    // Proper ICU plural now renders "1 item" (was "1 items").
+    expect(find.text('1 item across 1 line'), findsOneWidget);
   });
 
   testWidgets('tapping a selected product removes it from the cart',
@@ -166,7 +169,8 @@ void main() {
 
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();
-    expect(find.text('1 items across 1 line'), findsOneWidget);
+    // Proper ICU plural now renders "1 item" (was "1 items").
+    expect(find.text('1 item across 1 line'), findsOneWidget);
 
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();

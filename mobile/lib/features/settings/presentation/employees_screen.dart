@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/http/dio_client.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -51,14 +54,15 @@ class EmployeesScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final async = ref.watch(_employeesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Employees')),
+      appBar: AppBar(title: Text(l.settingsEmployees)),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.person_add_alt_1_rounded),
         onPressed: () => _invite(context, ref),
-        label: const Text('Invite'),
+        label: Text(l.employeesInviteFab),
       ),
       body: RefreshIndicator(
         onRefresh: () async => ref.refresh(_employeesProvider.future),
@@ -66,19 +70,19 @@ class EmployeesScreen extends ConsumerWidget {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => EmptyState(
             icon: Icons.error_outline,
-            title: "Couldn't load employees",
-            message: '$e',
+            title: l.employeesLoadFailedTitle,
+            message: context.errorMessage(e),
           ),
           data: (list) {
             if (list.isEmpty) {
               return EmptyState(
                 icon: Icons.group_outlined,
-                title: 'No employees yet',
-                message: 'Invite a cashier to share the till with you.',
+                title: l.employeesEmptyTitle,
+                message: l.employeesEmptyMessage,
                 action: FilledButton.icon(
                   icon: const Icon(Icons.person_add_alt_1_rounded),
                   onPressed: () => _invite(context, ref),
-                  label: const Text('Invite employee'),
+                  label: Text(l.employeesInviteCta),
                 ),
               );
             }
@@ -119,6 +123,7 @@ class _EmployeeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     final isOwner = employee.role == 'owner';
@@ -163,16 +168,30 @@ class _EmployeeRow extends StatelessWidget {
             ),
             const SizedBox(width: SuuqSpacing.sm),
             if (!employee.isActive)
-              const StatusPill(label: 'PENDING', intent: PillIntent.warning)
+              StatusPill(
+                label: l.employeesPillPending,
+                intent: PillIntent.warning,
+              )
             else
               StatusPill(
-                label: employee.role.toUpperCase(),
+                label: _roleLabel(l, employee.role).toUpperCase(),
                 intent: isOwner ? PillIntent.info : PillIntent.neutral,
               ),
           ],
         ),
       ),
     );
+  }
+
+  String _roleLabel(AppLocalizations l, String role) {
+    switch (role) {
+      case 'owner':
+        return l.roleOwner;
+      case 'cashier':
+        return l.roleCashier;
+      default:
+        return role;
+    }
   }
 }
 
@@ -199,6 +218,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     if (_code != null) {
@@ -226,14 +246,14 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
             const SizedBox(height: SuuqSpacing.sm),
             Center(
               child: Text(
-                'Invite ready',
+                l.employeesInviteReadyTitle,
                 style: theme.textTheme.titleLarge,
               ),
             ),
             const SizedBox(height: 4),
             Center(
               child: Text(
-                'Share this 8-digit code with ${_name.text.trim()}.',
+                l.employeesInviteShareCode(_name.text.trim()),
                 style: theme.textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
@@ -256,7 +276,9 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                   ),
                   const SizedBox(height: SuuqSpacing.xs),
                   Text(
-                    'Expires ${_expiresAt ?? "soon"}',
+                    _expiresAt == null
+                        ? l.employeesInviteExpiresSoon
+                        : l.employeesInviteExpiresAt(_expiresAt!),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -264,9 +286,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
             ),
             const SizedBox(height: SuuqSpacing.md),
             Text(
-              'They open the app, tap "I have an invite code", '
-              'enter their phone, this code, and set a password. '
-              'Code is single-use and expires in 30 minutes.',
+              l.employeesInviteInstructions,
               style: theme.textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),
@@ -279,17 +299,17 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: _code!));
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Code copied')),
+                        SnackBar(content: Text(l.employeesCodeCopied)),
                       );
                     },
-                    label: const Text('Copy code'),
+                    label: Text(l.employeesCopyCode),
                   ),
                 ),
                 const SizedBox(width: SuuqSpacing.sm),
                 Expanded(
                   child: FilledButton(
                     onPressed: () => Navigator.of(context).pop(true),
-                    child: const Text('Done'),
+                    child: Text(l.commonDone),
                   ),
                 ),
               ],
@@ -304,18 +324,18 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('Invite employee', style: theme.textTheme.titleLarge),
+          Text(l.employeesInviteSheetTitle, style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'They will get an 8-digit code to set up their account.',
+            l.employeesInviteSheetSubtitle,
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: SuuqSpacing.md),
           TextField(
             controller: _name,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              prefixIcon: Icon(Icons.person_outline_rounded),
+            decoration: InputDecoration(
+              labelText: l.employeesNameLabel,
+              prefixIcon: const Icon(Icons.person_outline_rounded),
             ),
             textCapitalization: TextCapitalization.words,
           ),
@@ -323,9 +343,9 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
           TextField(
             controller: _phone,
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Phone',
-              prefixIcon: Icon(Icons.phone_iphone_rounded),
+            decoration: InputDecoration(
+              labelText: l.phone,
+              prefixIcon: const Icon(Icons.phone_iphone_rounded),
             ),
           ),
           if (_error != null) ...[
@@ -347,7 +367,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                     )
                   : const Icon(Icons.send_rounded),
               onPressed: _busy ? null : _submit,
-              label: const Text('Generate invite code'),
+              label: Text(l.employeesGenerateCode),
             ),
           ),
         ],
@@ -356,10 +376,11 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
   }
 
   Future<void> _submit() async {
+    final l = context.l10n;
     final name = _name.text.trim();
     final phone = _phone.text.trim();
     if (name.isEmpty || phone.isEmpty) {
-      setState(() => _error = 'Name and phone are required');
+      setState(() => _error = l.employeesNamePhoneRequired);
       return;
     }
     setState(() {
@@ -378,7 +399,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '$e';
+        _error = localizedErrorMessage(l, e);
         _busy = false;
       });
     }
@@ -387,7 +408,6 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
   String? _formatExpiry(String iso) {
     final dt = DateTime.tryParse(iso)?.toLocal();
     if (dt == null) return iso;
-    String p(int n) => n < 10 ? '0$n' : '$n';
-    return '${p(dt.hour)}:${p(dt.minute)}';
+    return context.timeShort(dt);
   }
 }

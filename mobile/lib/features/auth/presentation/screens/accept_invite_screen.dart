@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
@@ -32,6 +34,7 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -58,10 +61,10 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                     child: SuuqLogo(size: 30),
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
-                  Text('Join your shop', style: theme.textTheme.displaySmall),
+                  Text(l.inviteJoinTitle, style: theme.textTheme.displaySmall),
                   const SizedBox(height: SuuqSpacing.xs),
                   Text(
-                    'Your owner will share an 8-digit code with you.',
+                    l.inviteJoinSubtitle,
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
@@ -69,13 +72,15 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                     controller: _phone,
                     keyboardType: TextInputType.phone,
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Your phone number',
-                      helperText: 'Must match what your owner entered',
-                      prefixIcon: Icon(Icons.phone_iphone_rounded, size: 20),
+                    decoration: InputDecoration(
+                      labelText: l.invitePhoneLabel,
+                      helperText: l.invitePhoneHelper,
+                      prefixIcon:
+                          const Icon(Icons.phone_iphone_rounded, size: 20),
                     ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? l.commonRequired
+                        : null,
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   TextFormField(
@@ -91,13 +96,14 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                       fontWeight: FontWeight.w600,
                     ),
                     textAlign: TextAlign.center,
-                    decoration: const InputDecoration(
-                      labelText: 'Invite code',
-                      helperText: '8-digit code from your owner',
-                      prefixIcon: Icon(Icons.pin_outlined, size: 20),
+                    decoration: InputDecoration(
+                      labelText: l.inviteCodeLabel,
+                      helperText: l.inviteCodeHelper,
+                      prefixIcon: const Icon(Icons.pin_outlined, size: 20),
                     ),
-                    validator: (v) =>
-                        (v == null || v.length != 8) ? 'Enter the 8-digit code' : null,
+                    validator: (v) => (v == null || v.length != 8)
+                        ? l.inviteCodeInvalid
+                        : null,
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   TextFormField(
@@ -106,8 +112,8 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _submit(),
                     decoration: InputDecoration(
-                      labelText: 'Set a password',
-                      helperText: 'At least 8 characters',
+                      labelText: l.invitePasswordLabel,
+                      helperText: l.invitePasswordHelper,
                       prefixIcon:
                           const Icon(Icons.lock_outline_rounded, size: 20),
                       suffixIcon: IconButton(
@@ -122,7 +128,7 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                       ),
                     ),
                     validator: (v) => (v == null || v.length < 8)
-                        ? 'Min 8 characters'
+                        ? l.invitePasswordMin
                         : null,
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
@@ -137,12 +143,12 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text('Join shop'),
+                        : Text(l.inviteJoinCta),
                   ),
                   const SizedBox(height: SuuqSpacing.sm),
                   TextButton(
                     onPressed: _busy ? null : () => context.go('/login'),
-                    child: const Text('Back to sign in'),
+                    child: Text(l.inviteBackToSignIn),
                   ),
                 ],
               ),
@@ -156,6 +162,7 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
     try {
@@ -166,7 +173,9 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
           );
       router.go('/pos');
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
       if (mounted) setState(() => _busy = false);
     }
   }

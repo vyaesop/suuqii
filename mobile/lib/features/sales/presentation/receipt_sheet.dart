@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
@@ -35,6 +36,7 @@ class ReceiptSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
@@ -62,14 +64,14 @@ class ReceiptSheet extends StatelessWidget {
           const SizedBox(height: SuuqSpacing.sm),
           Center(
             child: Text(
-              'Sale recorded',
+              l.receiptSaleRecorded,
               style: theme.textTheme.titleLarge,
             ),
           ),
           const SizedBox(height: 2),
           Center(
             child: Text(
-              _formatDateTime(soldAt.toLocal()),
+              context.dateTimeShort(soldAt.toLocal()),
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -85,10 +87,10 @@ class ReceiptSheet extends StatelessWidget {
                 if (cart.discount > Decimal.zero) ...[
                   Row(
                     children: [
-                      Text('Subtotal', style: theme.textTheme.bodySmall),
+                      Text(l.receiptSubtotal, style: theme.textTheme.bodySmall),
                       const Spacer(),
                       Text(
-                        formatMoney(cart.subtotal),
+                        context.money(cart.subtotal),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -98,10 +100,10 @@ class ReceiptSheet extends StatelessWidget {
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Text('Discount', style: theme.textTheme.bodySmall),
+                      Text(l.cartDiscount, style: theme.textTheme.bodySmall),
                       const Spacer(),
                       Text(
-                        '- ${formatMoney(cart.discount)}',
+                        l.cartMinusAmount(context.money(cart.discount)),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: scheme.error,
                           fontFeatures: const [FontFeature.tabularFigures()],
@@ -114,14 +116,14 @@ class ReceiptSheet extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      'TOTAL',
+                      l.checkoutTotalCaps,
                       style: theme.textTheme.labelSmall?.copyWith(
                         letterSpacing: 1.2,
                       ),
                     ),
                     const Spacer(),
                     Text(
-                      formatMoney(cart.total),
+                      context.money(cart.total),
                       style: theme.textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         fontFeatures: const [FontFeature.tabularFigures()],
@@ -134,15 +136,15 @@ class ReceiptSheet extends StatelessWidget {
                   Divider(color: scheme.outlineVariant, height: 1),
                   const SizedBox(height: SuuqSpacing.sm),
                   _MoneyRow(
-                    label: 'Tendered',
-                    value: formatMoney(amountTendered!),
+                    label: l.tendered,
+                    value: context.money(amountTendered!),
                   ),
                   if (changeDue != null && changeDue! > Decimal.zero)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: _MoneyRow(
-                        label: 'Change',
-                        value: formatMoney(changeDue!),
+                        label: l.change,
+                        value: context.money(changeDue!),
                       ),
                     ),
                 ],
@@ -152,7 +154,7 @@ class ReceiptSheet extends StatelessWidget {
           const SizedBox(height: SuuqSpacing.sm),
           _MetaRow(
             icon: _paymentIcon(paymentMethod),
-            label: _paymentLabel(paymentMethod),
+            label: _paymentLabel(l, paymentMethod),
           ),
           if (customerName != null && customerName!.isNotEmpty)
             _MetaRow(
@@ -167,11 +169,11 @@ class ReceiptSheet extends StatelessWidget {
           if (dueDate != null)
             _MetaRow(
               icon: Icons.event_rounded,
-              label: 'Due ${_formatDate(dueDate!)}',
+              label: l.checkoutDueDate(context.dateShort(dueDate!)),
             ),
           const SizedBox(height: SuuqSpacing.md),
           Text(
-            'ITEMS',
+            l.receiptItemsCaps,
             style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: SuuqSpacing.xs),
@@ -202,9 +204,11 @@ class ReceiptSheet extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              '${_fmtQty(line.qty.toDouble())} '
-                              '${line.product.unit} x '
-                              '${formatMoney(line.product.sellingPrice)}',
+                              l.receiptQtyUnitPrice(
+                                _fmtQty(line.qty.toDouble()),
+                                line.product.unit,
+                                context.money(line.product.sellingPrice),
+                              ),
                               style: theme.textTheme.bodySmall,
                             ),
                           ],
@@ -212,7 +216,7 @@ class ReceiptSheet extends StatelessWidget {
                       ),
                       const SizedBox(width: SuuqSpacing.sm),
                       Text(
-                        formatMoney(line.lineTotal),
+                        context.money(line.lineTotal),
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -230,13 +234,13 @@ class ReceiptSheet extends StatelessWidget {
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.copy_rounded, size: 18),
                   onPressed: () {
-                    final text = _buildShareText();
+                    final text = _buildShareText(context);
                     Clipboard.setData(ClipboardData(text: text));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Receipt copied')),
+                      SnackBar(content: Text(l.receiptCopied)),
                     );
                   },
-                  label: const Text('Copy'),
+                  label: Text(l.receiptCopy),
                 ),
               ),
               const SizedBox(width: SuuqSpacing.sm),
@@ -245,7 +249,7 @@ class ReceiptSheet extends StatelessWidget {
                 child: FilledButton.icon(
                   icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
                   onPressed: () => Navigator.of(context).pop(),
-                  label: const Text('New sale'),
+                  label: Text(l.receiptNewSale),
                 ),
               ),
             ],
@@ -253,7 +257,7 @@ class ReceiptSheet extends StatelessWidget {
           const SizedBox(height: SuuqSpacing.xs),
           Center(
             child: Text(
-              '#${saleId.substring(0, 8)}',
+              l.receiptSaleNumber(saleId.substring(0, 8)),
               style: theme.textTheme.bodySmall?.copyWith(
                 letterSpacing: 1,
                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -265,36 +269,41 @@ class ReceiptSheet extends StatelessWidget {
     );
   }
 
-  String _buildShareText() {
+  String _buildShareText(BuildContext context) {
+    final l = context.l10n;
     final buf = StringBuffer()
-      ..writeln('Receipt #${saleId.substring(0, 8)}')
-      ..writeln(_formatDateTime(soldAt.toLocal()))
+      ..writeln(l.receiptShareHeader(saleId.substring(0, 8)))
+      ..writeln(context.dateTimeShort(soldAt.toLocal()))
       ..writeln();
     for (final line in cart.lines) {
       buf.writeln(
-        '${line.product.name}  '
-        '${_fmtQty(line.qty.toDouble())}${line.product.unit} x '
-        '${formatMoney(line.product.sellingPrice)} = ${formatMoney(line.lineTotal)}',
+        l.receiptShareLine(
+          line.product.name,
+          _fmtQty(line.qty.toDouble()),
+          line.product.unit,
+          context.money(line.product.sellingPrice),
+          context.money(line.lineTotal),
+        ),
       );
     }
     buf
       ..writeln()
-      ..writeln('Total: ${formatMoney(cart.total)}')
-      ..writeln('Payment: ${_paymentLabel(paymentMethod)}');
+      ..writeln(l.receiptShareTotal(context.money(cart.total)))
+      ..writeln(l.receiptSharePayment(_paymentLabel(l, paymentMethod)));
     if (amountTendered != null) {
-      buf.writeln('Tendered: ${formatMoney(amountTendered!)}');
+      buf.writeln(l.receiptShareTendered(context.money(amountTendered!)));
     }
     if (changeDue != null && changeDue! > Decimal.zero) {
-      buf.writeln('Change: ${formatMoney(changeDue!)}');
+      buf.writeln(l.receiptShareChange(context.money(changeDue!)));
     }
     if (customerName != null && customerName!.isNotEmpty) {
-      buf.writeln('Customer: $customerName');
+      buf.writeln(l.receiptShareCustomer(customerName!));
     }
     if (customerPhone != null && customerPhone!.isNotEmpty) {
-      buf.writeln('Phone: $customerPhone');
+      buf.writeln(l.receiptSharePhone(customerPhone!));
     }
     if (dueDate != null) {
-      buf.writeln('Due: ${_formatDate(dueDate!)}');
+      buf.writeln(l.receiptShareDue(context.dateShort(dueDate!)));
     }
     return buf.toString();
   }
@@ -310,16 +319,12 @@ class ReceiptSheet extends StatelessWidget {
         PaymentMethod.credit => Icons.access_time_rounded,
       };
 
-  String _paymentLabel(PaymentMethod method) => switch (method) {
-        PaymentMethod.cash => 'Paid in cash',
-        PaymentMethod.mobileMoney => 'Paid via mobile money',
-        PaymentMethod.credit => 'On credit',
+  String _paymentLabel(AppLocalizations l, PaymentMethod method) =>
+      switch (method) {
+        PaymentMethod.cash => l.receiptPaidCash,
+        PaymentMethod.mobileMoney => l.receiptPaidMobile,
+        PaymentMethod.credit => l.receiptOnCredit,
       };
-
-  String _formatDate(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
-  String _formatDateTime(DateTime d) =>
-      '${_formatDate(d)}  ${_p(d.hour)}:${_p(d.minute)}';
-  String _p(int n) => n < 10 ? '0$n' : '$n';
 }
 
 class _MetaRow extends StatelessWidget {

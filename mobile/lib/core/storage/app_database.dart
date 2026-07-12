@@ -11,10 +11,12 @@ import 'package:suuqii/core/storage/tables/products_table.dart';
 import 'package:suuqii/core/storage/tables/recipes_table.dart';
 import 'package:suuqii/core/storage/tables/sales_tables.dart';
 import 'package:suuqii/core/storage/tables/shifts_table.dart';
+import 'package:suuqii/core/storage/tables/stock_lots_table.dart';
 import 'package:suuqii/core/storage/tables/supplies_table.dart';
 import 'package:suuqii/core/storage/tables/sync_events_table.dart';
 import 'package:suuqii/features/debt/data/debts_dao.dart';
 import 'package:suuqii/features/expenses/data/expenses_dao.dart';
+import 'package:suuqii/features/inventory/data/lots_dao.dart';
 import 'package:suuqii/features/inventory/data/products_dao.dart';
 import 'package:suuqii/features/inventory/data/recipes_dao.dart';
 import 'package:suuqii/features/supplies/data/supplies_dao.dart';
@@ -39,15 +41,26 @@ int sqliteDateTimeParam(DateTime value) =>
     SyncEventsTable,
     SuppliesTable,
     RecipeItemsTable,
+    StockLotsTable,
+    LotConsumptionsTable,
   ],
-  daos: [SyncQueueDao, ProductsDao, DebtsDao, ExpensesDao, SuppliesDao, RecipesDao],
+  daos: [
+    SyncQueueDao,
+    ProductsDao,
+    DebtsDao,
+    ExpensesDao,
+    SuppliesDao,
+    RecipesDao,
+    LotsDao,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   factory AppDatabase.openOn(String filePath) {
     return AppDatabase(
-      NativeDatabase(
+      // createInBackground keeps sqlite work off the UI isolate.
+      NativeDatabase.createInBackground(
         File(filePath),
         setup: (db) {
           db
@@ -60,11 +73,14 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) async => m.createAll(),
+        onCreate: (m) async {
+          await m.createAll();
+          await _createIndexes();
+        },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await _repairLegacyDateTimes();
@@ -76,8 +92,72 @@ class AppDatabase extends _$AppDatabase {
           if (from < 4) {
             await m.addColumn(recipeItemsTable, recipeItemsTable.recipeUnit);
           }
+          if (from < 5) {
+            await _createIndexes();
+          }
+          if (from < 6) {
+            await _migrateMoneyToSantim();
+          }
+          if (from < 7) {
+            await m.createTable(stockLotsTable);
+            await m.createTable(lotConsumptionsTable);
+            await m.addColumn(suppliesTable, suppliesTable.expiryDate);
+            // Lot indexes are in _createIndexes (IF NOT EXISTS — re-runnable).
+            await _createIndexes();
+          }
         },
       );
+
+  /// v5 → v6: money columns move from REAL birr to INTEGER santim
+  /// (1 birr = 100 santim) so SQL arithmetic over money is exact.
+  ///
+  /// SQLite is dynamically typed, so rewriting the stored values in place
+  /// plus the new Dart-side int mapping is sufficient — no table rebuild.
+  /// ROUND() before CAST because CAST truncates toward zero.
+  Future<void> _migrateMoneyToSantim() async {
+    const moneyColumns = <String, List<String>>{
+      'products': ['purchase_price', 'selling_price'],
+      'sales': ['subtotal', 'discount', 'total', 'cost_total'],
+      'sale_items': ['unit_price', 'unit_cost'],
+      'debts': ['amount_owed', 'amount_paid'],
+      'debt_payments': ['amount'],
+      'expenses': ['amount'],
+      'shifts': [
+        'opening_cash',
+        'declared_closing_cash',
+        'expected_closing_cash',
+      ],
+      'supplies': ['cost_per_unit'],
+    };
+    for (final entry in moneyColumns.entries) {
+      for (final column in entry.value) {
+        await customStatement(
+          'UPDATE ${entry.key} '
+          'SET $column = CAST(ROUND($column * 100) AS INTEGER) '
+          'WHERE $column IS NOT NULL',
+        );
+      }
+    }
+  }
+
+  /// Hot-path indexes. IF NOT EXISTS so this is safe to run from both
+  /// onCreate and onUpgrade.
+  Future<void> _createIndexes() async {
+    const statements = [
+      'CREATE INDEX IF NOT EXISTS idx_sync_events_status_id ON sync_events (status, id)',
+      'CREATE INDEX IF NOT EXISTS idx_products_shop_id ON products (shop_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items (sale_id)',
+      'CREATE INDEX IF NOT EXISTS idx_inventory_logs_product_id ON inventory_logs (product_id)',
+      'CREATE INDEX IF NOT EXISTS idx_debts_shop_id ON debts (shop_id)',
+      'CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments (debt_id)',
+      'CREATE INDEX IF NOT EXISTS idx_stock_lots_product_id ON stock_lots (product_id)',
+      'CREATE INDEX IF NOT EXISTS idx_lot_consumptions_lot_id ON lot_consumptions (lot_id)',
+      'CREATE INDEX IF NOT EXISTS idx_lot_consumptions_sale_item_id ON lot_consumptions (sale_item_id)',
+    ];
+    for (final sql in statements) {
+      await customStatement(sql);
+    }
+  }
 
   /// Wipe all shop-scoped data. Called on logout or when a different shop
   /// account is detected on login, so stale data from a previous session never
@@ -85,6 +165,8 @@ class AppDatabase extends _$AppDatabase {
   Future<void> clearAllShopData() async {
     await transaction(() async {
       await customStatement('DELETE FROM sync_events');
+      await customStatement('DELETE FROM lot_consumptions');
+      await customStatement('DELETE FROM stock_lots');
       await customStatement('DELETE FROM inventory_logs');
       await customStatement('DELETE FROM sale_items');
       await customStatement('DELETE FROM sales');

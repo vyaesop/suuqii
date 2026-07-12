@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/http/dio_client.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/dashboard/data/dashboard_repository.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/status_pill.dart';
@@ -47,7 +49,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
               ),
               error: (e, _) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: SuuqSpacing.xl),
-                child: Center(child: Text('$e')),
+                child: Center(child: Text(context.errorMessage(e))),
               ),
               data: _buildSummary,
             ),
@@ -61,6 +63,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
 
   Widget _buildSummary(DashboardSummary s) {
     final theme = Theme.of(context);
+    final l = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -71,12 +74,12 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'NET PROFIT',
+                l.netProfit.toUpperCase(),
                 style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
               ),
               const SizedBox(height: 4),
               Text(
-                formatMoney(s.netProfit),
+                context.money(s.netProfit),
                 style: theme.textTheme.displayMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -85,11 +88,11 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
               const SizedBox(height: SuuqSpacing.sm),
               Row(
                 children: [
-                  _SmallStat(label: 'Revenue', value: formatMoney(s.revenue)),
+                  _SmallStat(label: l.revenue, value: context.money(s.revenue)),
                   const SizedBox(width: SuuqSpacing.md),
                   _SmallStat(
-                    label: 'Expenses',
-                    value: formatMoney(s.expenses),
+                    label: l.expenses,
+                    value: context.money(s.expenses),
                   ),
                 ],
               ),
@@ -101,33 +104,50 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
           children: [
             Expanded(
               child: _KpiTile(
-                label: 'Profit',
-                value: formatMoney(s.profit),
+                label: l.profit,
+                value: context.money(s.profit),
                 icon: Icons.trending_up_rounded,
               ),
             ),
             const SizedBox(width: SuuqSpacing.sm),
             Expanded(
               child: _KpiTile(
-                label: 'Credit sales',
-                value: formatMoney(s.creditSales),
+                label: l.dashboardCreditSales,
+                value: context.money(s.creditSales),
                 icon: Icons.access_time_rounded,
               ),
             ),
           ],
         ),
         const SizedBox(height: SuuqSpacing.sm),
-        _KpiTile(
-          label: 'Outstanding debt',
-          value: formatMoney(s.outstandingDebt),
-          icon: Icons.account_balance_wallet_rounded,
-          intent: s.outstandingDebt.toDouble() > 0
-              ? PillIntent.warning
-              : PillIntent.neutral,
+        Row(
+          children: [
+            Expanded(
+              child: _KpiTile(
+                label: l.outstandingDebt,
+                value: context.money(s.outstandingDebt),
+                icon: Icons.account_balance_wallet_rounded,
+                intent: s.outstandingDebt.toDouble() > 0
+                    ? PillIntent.warning
+                    : PillIntent.neutral,
+              ),
+            ),
+            const SizedBox(width: SuuqSpacing.sm),
+            Expanded(
+              child: _KpiTile(
+                label: l.dashboardWaste,
+                value: context.money(s.spoilageCost),
+                icon: Icons.auto_delete_outlined,
+                intent: s.spoilageCost.toDouble() > 0
+                    ? PillIntent.warning
+                    : PillIntent.neutral,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: SuuqSpacing.lg),
         Text(
-          'LOW STOCK',
+          l.lowStock.toUpperCase(),
           style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
         ),
         const SizedBox(height: SuuqSpacing.xs),
@@ -141,7 +161,10 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                   size: 20,
                 ),
                 const SizedBox(width: SuuqSpacing.xs),
-                Text('All stock healthy', style: theme.textTheme.bodyMedium),
+                Text(
+                  l.dashboardAllStockHealthy,
+                  style: theme.textTheme.bodyMedium,
+                ),
               ],
             ),
           )
@@ -159,7 +182,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                     ),
                     title: Text(s.lowStock[i].name),
                     trailing: StatusPill(
-                      label: '${s.lowStock[i].stock} left',
+                      label: l.dashboardStockLeft('${s.lowStock[i].stock}'),
                       intent: PillIntent.warning,
                     ),
                   ),
@@ -172,6 +195,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
   }
 
   Future<void> _scanAnomalies() async {
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
     try {
       final res = await ref.read(dioProvider).post<Map<String, dynamic>>(
@@ -182,20 +206,21 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
         SnackBar(
           content: Text(
             written == 0
-                ? 'Scan complete — nothing unusual'
-                : '$written anomaly${written == 1 ? "" : " entries"} '
-                  'written to audit',
+                ? l.dashboardScanNothingUnusual
+                : l.dashboardAnomaliesWritten(written),
           ),
           action: written > 0
               ? SnackBarAction(
-                  label: 'View',
+                  label: l.dashboardScanView,
                   onPressed: () => context.push('/audit'),
                 )
               : null,
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Scan failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.dashboardScanFailed(localizedErrorMessage(l, e)))),
+      );
     }
   }
 }
@@ -215,6 +240,7 @@ class _AnomalyScanCardState extends State<_AnomalyScanCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l = context.l10n;
     return SectionCard(
       child: Row(
         children: [
@@ -238,11 +264,11 @@ class _AnomalyScanCardState extends State<_AnomalyScanCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Anomaly scan',
+                  l.dashboardAnomalyScanTitle,
                   style: theme.textTheme.titleSmall,
                 ),
                 Text(
-                  'Check for oversells, large variances, stale shifts.',
+                  l.dashboardAnomalyScanSubtitle,
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -266,7 +292,7 @@ class _AnomalyScanCardState extends State<_AnomalyScanCard> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Scan'),
+                : Text(l.dashboardScanButton),
           ),
         ],
       ),
@@ -281,11 +307,21 @@ class _RangeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return SegmentedButton<DashboardRange>(
-      segments: const [
-        ButtonSegment(value: DashboardRange.today, label: Text('Today')),
-        ButtonSegment(value: DashboardRange.week, label: Text('7 days')),
-        ButtonSegment(value: DashboardRange.month, label: Text('30 days')),
+      segments: [
+        ButtonSegment(
+          value: DashboardRange.today,
+          label: Text(l.commonToday),
+        ),
+        ButtonSegment(
+          value: DashboardRange.week,
+          label: Text(l.dashboardRange7Days),
+        ),
+        ButtonSegment(
+          value: DashboardRange.month,
+          label: Text(l.dashboardRange30Days),
+        ),
       ],
       selected: {value},
       onSelectionChanged: (s) => onChanged(s.first),
@@ -390,6 +426,7 @@ class _OfflineBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l = context.l10n;
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: SuuqSpacing.md,
@@ -407,8 +444,10 @@ class _OfflineBanner extends StatelessWidget {
           Expanded(
             child: Text(
               fetchedAt == null
-                  ? 'Showing offline snapshot'
-                  : 'Offline snapshot — updated ${_relative(fetchedAt!)}',
+                  ? l.dashboardOfflineSnapshot
+                  : l.dashboardOfflineSnapshotUpdated(
+                      _relative(l, fetchedAt!),
+                    ),
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -417,11 +456,11 @@ class _OfflineBanner extends StatelessWidget {
     );
   }
 
-  static String _relative(DateTime when) {
+  static String _relative(AppLocalizations l, DateTime when) {
     final diff = DateTime.now().toUtc().difference(when.toUtc());
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    if (diff.inMinutes < 1) return l.dashboardJustNow;
+    if (diff.inMinutes < 60) return l.dashboardMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return l.dashboardHoursAgo(diff.inHours);
+    return l.dashboardDaysAgo(diff.inDays);
   }
 }

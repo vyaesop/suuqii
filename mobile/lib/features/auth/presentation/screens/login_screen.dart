@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:suuqii/l10n/app_localizations.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -29,7 +30,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
+    final l = context.l10n;
     final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
@@ -51,12 +52,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.xxl),
                   Text(
-                    'Welcome back',
+                    l.loginWelcomeTitle,
                     style: theme.textTheme.displaySmall,
                   ),
                   const SizedBox(height: SuuqSpacing.xs),
                   Text(
-                    'Sign in to your shop to keep selling.',
+                    l.loginWelcomeSubtitle,
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
@@ -121,7 +122,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     onPressed: _busy
                         ? null
                         : () => context.go('/accept-invite'),
-                    child: const Text('I have an invite code'),
+                    child: Text(l.loginHaveInviteCode),
                   ),
                 ],
               ),
@@ -133,9 +134,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    final l = context.l10n;
     if (_phone.text.trim().isEmpty || _pwd.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter phone and password')),
+        SnackBar(content: Text(l.loginEnterPhonePassword)),
       );
       return;
     }
@@ -148,10 +150,57 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             password: _pwd.text,
           );
       router.go('/pos');
+    } on PendingSyncException catch (e) {
+      // Signing into a different shop would wipe unsynced local records.
+      final discard = await _confirmDiscard(e.pendingCount);
+      if (discard) {
+        try {
+          await ref.read(authControllerProvider.notifier).login(
+                phone: _phone.text.trim(),
+                password: _pwd.text,
+                force: true,
+              );
+          router.go('/pos');
+        } catch (e) {
+          messenger.showSnackBar(
+            SnackBar(content: Text(localizedErrorMessage(l, e))),
+          );
+        }
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<bool> _confirmDiscard(int count) async {
+    if (!mounted) return false;
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final l = ctx.l10n;
+        return AlertDialog(
+          title: Text(l.loginUnsyncedTitle),
+          content: Text(l.loginUnsyncedBody(count)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l.commonCancel),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(l.loginSwitchAnyway),
+            ),
+          ],
+        );
+      },
+    );
+    return discard ?? false;
   }
 }

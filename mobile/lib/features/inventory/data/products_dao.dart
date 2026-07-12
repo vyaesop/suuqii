@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/products_table.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
 
 part 'products_dao.g.dart';
@@ -43,12 +44,18 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<void> upsertAll(List<Product> products) async {
+    final now = DateTime.now();
     await batch((b) {
       for (final p in products) {
+        // DoUpdate (instead of insertOrReplace) so columns absent from the
+        // companion — notably created_at — keep their existing values on
+        // conflict rather than being reset to defaults.
         b.insert(
           productsTable,
           _fromDomain(p),
-          mode: InsertMode.insertOrReplace,
+          onConflict: DoUpdate(
+            (_) => _fromDomain(p).copyWith(updatedAt: Value(now)),
+          ),
         );
       }
     });
@@ -72,8 +79,8 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         shopId: r.shopId,
         name: r.name,
         category: r.category,
-        purchasePrice: Decimal.parse(r.purchasePrice.toString()),
-        sellingPrice: Decimal.parse(r.sellingPrice.toString()),
+        purchasePrice: decimalFromSantim(r.purchasePrice),
+        sellingPrice: decimalFromSantim(r.sellingPrice),
         stock: Decimal.parse(r.stock.toString()),
         lowStockThreshold: Decimal.parse(r.lowStockThreshold.toString()),
         unit: r.unit,
@@ -87,8 +94,8 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         shopId: Value(p.shopId),
         name: Value(p.name),
         category: Value(p.category),
-        purchasePrice: Value(p.purchasePrice.toDouble()),
-        sellingPrice: Value(p.sellingPrice.toDouble()),
+        purchasePrice: Value(santimFromDecimal(p.purchasePrice)),
+        sellingPrice: Value(santimFromDecimal(p.sellingPrice)),
         stock: Value(p.stock.toDouble()),
         lowStockThreshold: Value(p.lowStockThreshold.toDouble()),
         unit: Value(p.unit),

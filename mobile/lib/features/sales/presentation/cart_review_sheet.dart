@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
@@ -18,6 +19,7 @@ class CartReviewSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final cart = ref.watch(cartControllerProvider);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -60,14 +62,14 @@ class CartReviewSheet extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Cart',
+                      l.cartTitle,
                       style: theme.textTheme.titleLarge,
                     ),
                   ),
                   TextButton.icon(
                     icon: const Icon(Icons.delete_outline_rounded, size: 18),
                     onPressed: () => _confirmClear(context, ref),
-                    label: const Text('Clear'),
+                    label: Text(l.cartClear),
                   ),
                 ],
               ),
@@ -120,14 +122,15 @@ class CartReviewSheet extends ConsumerWidget {
                   Row(
                     children: [
                       Text(
-                        '${_formatCartQty(cart.itemCount)} items across '
-                        '${cart.lineCount} '
-                        '${cart.lineCount == 1 ? "line" : "lines"}',
+                        l.posCartItemsSummary(
+                          _qtyAsNum(cart.itemCount),
+                          cart.lineCount,
+                        ),
                         style: theme.textTheme.bodySmall,
                       ),
                       const Spacer(),
                       Text(
-                        formatMoney(cart.subtotal),
+                        context.money(cart.subtotal),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -150,14 +153,14 @@ class CartReviewSheet extends ConsumerWidget {
                           const SizedBox(width: 6),
                           Text(
                             cart.discount > Decimal.zero
-                                ? 'Discount'
-                                : 'Add discount',
+                                ? l.cartDiscount
+                                : l.cartAddDiscount,
                             style: theme.textTheme.bodySmall,
                           ),
                           const Spacer(),
                           if (cart.discount > Decimal.zero)
                             Text(
-                              '- ${formatMoney(cart.discount)}',
+                              l.cartMinusAmount(context.money(cart.discount)),
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: scheme.error,
                                 fontFeatures: const [
@@ -178,10 +181,10 @@ class CartReviewSheet extends ConsumerWidget {
                   Divider(color: scheme.outlineVariant, height: SuuqSpacing.md),
                   Row(
                     children: [
-                      Text('Total', style: theme.textTheme.bodyMedium),
+                      Text(l.total, style: theme.textTheme.bodyMedium),
                       const Spacer(),
                       Text(
-                        formatMoney(cart.total),
+                        context.money(cart.total),
                         style: theme.textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                           fontFeatures: const [FontFeature.tabularFigures()],
@@ -195,7 +198,7 @@ class CartReviewSheet extends ConsumerWidget {
                     child: FilledButton.icon(
                       icon: const Icon(Icons.arrow_forward_rounded),
                       onPressed: () => Navigator.pop(context, true),
-                      label: const Text('Continue to checkout'),
+                      label: Text(l.cartContinueToCheckout),
                     ),
                   ),
                 ],
@@ -217,39 +220,42 @@ class CartReviewSheet extends ConsumerWidget {
     );
     final result = await showDialog<Decimal?>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Discount'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Amount',
-            prefixText: 'ETB  ',
-            helperText: 'Subtotal: ${formatMoney(cart.subtotal)}',
-          ),
-        ),
-        actions: [
-          if (cart.discount > Decimal.zero)
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, Decimal.zero),
-              child: const Text('Clear'),
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(dl.cartDiscount),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: dl.cartAmountLabel,
+              prefixText: 'ETB  ',
+              helperText: dl.cartSubtotalHelper(ctx.money(cart.subtotal)),
             ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () {
-              final value = Decimal.tryParse(
-                controller.text.trim().replaceAll(',', '.'),
-              );
-              Navigator.pop(ctx, value ?? Decimal.zero);
-            },
-            child: const Text('Set'),
-          ),
-        ],
-      ),
+          actions: [
+            if (cart.discount > Decimal.zero)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, Decimal.zero),
+                child: Text(dl.cartClear),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = Decimal.tryParse(
+                  controller.text.trim().replaceAll(',', '.'),
+                );
+                Navigator.pop(ctx, value ?? Decimal.zero);
+              },
+              child: Text(dl.posSetButton),
+            ),
+          ],
+        );
+      },
     );
 
     if (result == null) return;
@@ -258,7 +264,8 @@ class CartReviewSheet extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Discount cannot exceed subtotal ${formatMoney(cart.subtotal)}',
+            context.l10n
+                .cartDiscountExceedsSubtotal(context.money(cart.subtotal)),
           ),
         ),
       );
@@ -270,20 +277,23 @@ class CartReviewSheet extends ConsumerWidget {
   Future<void> _confirmClear(BuildContext context, WidgetRef ref) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clear cart?'),
-        content: const Text('Remove all items from the cart.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(dl.cartClearConfirmTitle),
+          content: Text(dl.cartClearConfirmBody),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(dl.cartKeep),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(dl.cartClear),
+            ),
+          ],
+        );
+      },
     );
     if (confirm ?? false) {
       ref.read(cartControllerProvider.notifier).clear();
@@ -331,12 +341,14 @@ class _CartLineTile extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  '${formatMoney(line.product.sellingPrice)} / '
-                  '${line.product.unit}',
+                  context.l10n.cartPricePerUnit(
+                    context.money(line.product.sellingPrice),
+                    line.product.unit,
+                  ),
                   style: theme.textTheme.bodySmall,
                 ),
                 Text(
-                  formatMoney(line.lineTotal),
+                  context.money(line.lineTotal),
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: scheme.primary,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -371,33 +383,38 @@ class _CartLineTile extends ConsumerWidget {
     final controller = TextEditingController(text: _fmtQty(line.qty));
     final result = await showDialog<Decimal?>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(line.product.name),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Quantity (${line.product.unit})',
-            helperText: isBakery ? null : 'In stock: ${_fmtQty(line.product.stock)}',
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(line.product.name),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: dl.posQuantityLabel(line.product.unit),
+              helperText: isBakery
+                  ? null
+                  : dl.posInStockHelper(_fmtQty(line.product.stock)),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = Decimal.tryParse(
-                controller.text.trim().replaceAll(',', '.'),
-              );
-              Navigator.pop(ctx, value);
-            },
-            child: const Text('Set'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = Decimal.tryParse(
+                  controller.text.trim().replaceAll(',', '.'),
+                );
+                Navigator.pop(ctx, value);
+              },
+              child: Text(dl.posSetButton),
+            ),
+          ],
+        );
+      },
     );
 
     if (result == null) return;
@@ -410,7 +427,10 @@ class _CartLineTile extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Only ${_fmtQty(line.product.stock)} ${line.product.unit} in stock',
+            context.l10n.posOnlyQtyInStock(
+              _fmtQty(line.product.stock),
+              line.product.unit,
+            ),
           ),
         ),
       );
@@ -508,8 +528,9 @@ class _RoundIconBtn extends StatelessWidget {
   }
 }
 
-String _formatCartQty(Decimal value) {
+/// Whole quantities as int (renders "3"), fractional as double ("2.5") —
+/// for ICU plural placeholders.
+num _qtyAsNum(Decimal value) {
   final n = value.toDouble();
-  if (n == n.roundToDouble()) return n.toInt().toString();
-  return n.toStringAsFixed(2);
+  return n == n.roundToDouble() ? n.toInt() : n;
 }

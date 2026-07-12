@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/expenses/data/expenses_remote_data_source.dart';
@@ -15,6 +16,12 @@ import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
 part 'expenses_repository.g.dart';
+
+/// Mirrors Shop.expense_approval_threshold on the server (default 500 ETB;
+/// there is currently no API to change it). Cashier expenses at or below the
+/// threshold sync without a PIN; anything above needs an owner challenge, so
+/// the UI collects the PIN upfront instead of failing at sync time.
+final Decimal defaultExpenseApprovalThreshold = Decimal.parse('500');
 
 class ExpensesRepository {
   ExpensesRepository({
@@ -63,7 +70,7 @@ class ExpensesRepository {
               userId: userId,
               shiftId: Value(shift),
               title: title,
-              amount: amount.toDouble(),
+              amount: santimFromDecimal(amount),
               category: Value(category),
               description: Value(description),
               occurredAt: at,

@@ -10,8 +10,9 @@ class DebtsTable extends Table {
   TextColumn get saleId => text().nullable()();
   TextColumn get customerName => text()();
   TextColumn get customerPhone => text().nullable()();
-  RealColumn get amountOwed => real()();
-  RealColumn get amountPaid => real().withDefault(const Constant(0))();
+  /// Money columns are stored as int64 santim (1 birr = 100 santim).
+  IntColumn get amountOwed => integer()();
+  IntColumn get amountPaid => integer().withDefault(const Constant(0))();
   DateTimeColumn get dueDate => dateTime().nullable()();
   TextColumn get status => text().withDefault(const Constant('open'))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -32,7 +33,8 @@ class DebtPaymentsTable extends Table {
       text().references(DebtsTable, #id, onDelete: KeyAction.cascade)();
   TextColumn get shopId => text()();
   TextColumn get shiftId => text().nullable()();
-  RealColumn get amount => real()();
+  /// Money: int64 santim (1 birr = 100 santim).
+  IntColumn get amount => integer()();
   DateTimeColumn get paidAt => dateTime()();
   TextColumn get method => text()();
   TextColumn get userId => text()();

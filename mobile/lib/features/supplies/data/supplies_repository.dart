@@ -6,6 +6,8 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/inventory/domain/entities/stock_lot.dart'
+    show expiryDateString;
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
@@ -37,6 +39,7 @@ class SuppliesRepository {
     required Decimal quantityOnHand,
     required Decimal reorderThreshold,
     required Decimal costPerUnit,
+    DateTime? expiryDate,
     String? ownerChallengeToken,
   }) async {
     final id = const Uuid().v4();
@@ -49,6 +52,7 @@ class SuppliesRepository {
       quantityOnHand: quantityOnHand,
       reorderThreshold: reorderThreshold,
       costPerUnit: costPerUnit,
+      expiryDate: expiryDate,
     );
 
     await db.transaction(() async {
@@ -65,6 +69,8 @@ class SuppliesRepository {
                 'quantity_on_hand': quantityOnHand.toString(),
                 'reorder_threshold': reorderThreshold.toString(),
                 'cost_per_unit': costPerUnit.toString(),
+                if (expiryDate != null)
+                  'expiry_date': expiryDateString(expiryDate),
                 if (ownerChallengeToken != null)
                   'owner_challenge': ownerChallengeToken,
               }),
@@ -82,6 +88,7 @@ class SuppliesRepository {
     required Decimal quantityOnHand,
     required Decimal reorderThreshold,
     required Decimal costPerUnit,
+    DateTime? expiryDate,
     String? ownerChallengeToken,
   }) async {
     final existing = await db.suppliesDao.getById(id);
@@ -95,6 +102,7 @@ class SuppliesRepository {
       quantityOnHand: quantityOnHand,
       reorderThreshold: reorderThreshold,
       costPerUnit: costPerUnit,
+      expiryDate: expiryDate,
     );
 
     await db.transaction(() async {
@@ -111,6 +119,10 @@ class SuppliesRepository {
                 'quantity_on_hand': quantityOnHand.toString(),
                 'reorder_threshold': reorderThreshold.toString(),
                 'cost_per_unit': costPerUnit.toString(),
+                // Always sent (null clears): the server only touches
+                // expiry_date when the key is present in the payload.
+                'expiry_date':
+                    expiryDate == null ? null : expiryDateString(expiryDate),
                 if (ownerChallengeToken != null)
                   'owner_challenge': ownerChallengeToken,
               }),

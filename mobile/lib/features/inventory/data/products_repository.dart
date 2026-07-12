@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/products_remote_data_source.dart';
@@ -63,10 +64,8 @@ class ProductsRepository {
           shopId: r.read<String>('shop_id'),
           name: r.read<String>('name'),
           category: r.readNullable<String>('category'),
-          purchasePrice:
-              Decimal.parse(r.read<double>('purchase_price').toString()),
-          sellingPrice:
-              Decimal.parse(r.read<double>('selling_price').toString()),
+          purchasePrice: decimalFromSantim(r.read<int>('purchase_price')),
+          sellingPrice: decimalFromSantim(r.read<int>('selling_price')),
           stock: Decimal.parse(r.read<double>('stock').toString()),
           lowStockThreshold: Decimal.parse(
             r.read<double>('low_stock_threshold').toString(),
@@ -128,10 +127,18 @@ class ProductsRepository {
   }
 
   /// Pull fresh products from server, replace local cache.
+  ///
+  /// Products touched by still-pending sync events are skipped: the server
+  /// hasn't seen those local changes yet, so its rows would clobber queued
+  /// stock decrements / edits. Local wins until the queue drains.
   Future<int> refreshFromServer() async {
     final remoteList = await remote.list(shopId: shopId);
-    await db.productsDao.upsertAll(remoteList);
-    return remoteList.length;
+    final dirty = await productIdsWithPendingChanges(db);
+    final toUpsert = dirty.isEmpty
+        ? remoteList
+        : remoteList.where((p) => !dirty.contains(p.id)).toList();
+    await db.productsDao.upsertAll(toUpsert);
+    return toUpsert.length;
   }
 
   /// Create a new product locally + enqueue sync event.
@@ -257,8 +264,12 @@ class ProductsRepository {
     unawaited(syncWorker.kick());
   }
 
-  /// Stock adjustment: positive delta = restock, negative = waste/correction.
-  /// Owner-only or audited.
+  /// Manual stock correction (count fix / shrinkage): positive delta adds,
+  /// negative removes. Owner-only or audited.
+  ///
+  /// Mirrors the server's lot handling for `inventory.adjust`: a positive
+  /// delta creates a local lot at the product's last cost, a negative delta
+  /// consumes lots FEFO — keeping `stock ≈ Σ lots.qty_remaining` locally.
   Future<void> adjustStock({
     required String productId,
     required Decimal delta,
@@ -266,9 +277,30 @@ class ProductsRepository {
     String? ownerChallengeToken,
   }) async {
     final now = DateTime.now().toUtc();
+    final product = await db.productsDao.getById(productId);
     await db.transaction(() async {
       // Apply locally
       await db.productsDao.applyStockDelta(productId, delta);
+      if (product != null) {
+        if (delta > Decimal.zero) {
+          await db.lotsDao.insertLot(
+            id: const Uuid().v4(),
+            productId: productId,
+            quantity: delta,
+            unitCostSantim: santimFromDecimal(product.purchasePrice),
+            receivedAt: now,
+            note: reason ?? 'adjustment',
+          );
+        } else if (delta < Decimal.zero) {
+          await db.lotsDao.consumeFefo(
+            productId: productId,
+            quantity: -delta,
+            movement: 'adjustment',
+            fallbackCostSantim: santimFromDecimal(product.purchasePrice),
+            now: now,
+          );
+        }
+      }
       await db.into(db.inventoryLogsTable).insert(
             InventoryLogsTableCompanion.insert(
               id: const Uuid().v4(),
@@ -297,6 +329,52 @@ class ProductsRepository {
     });
     unawaited(syncWorker.kick());
   }
+}
+
+/// Product ids referenced by pending sync events (ops that create, edit or
+/// move stock on a product). Shared by the products and lots mirror passes so
+/// server state never clobbers queued local changes.
+Future<Set<String>> productIdsWithPendingChanges(AppDatabase db) async {
+  final pending = await (db.select(db.syncEventsTable)
+        ..where((t) => t.status.equals('pending')))
+      .get();
+  final ids = <String>{};
+  for (final ev in pending) {
+    final payload = jsonDecode(ev.payload) as Map<String, dynamic>;
+    switch (ev.op) {
+      case 'product.create':
+      case 'product.update':
+        final id = payload['id'];
+        if (id is String) ids.add(id);
+      case 'inventory.adjust':
+      case 'stock.receive':
+      case 'stock.spoil':
+      case 'production.record':
+        final id = payload['product_id'];
+        if (id is String) ids.add(id);
+      case 'sale.create':
+        final items = payload['items'];
+        if (items is List) {
+          for (final item in items) {
+            if (item is Map<String, dynamic>) {
+              final id = item['product_id'];
+              if (id is String) ids.add(id);
+            }
+          }
+        }
+      case 'sale.refund':
+        // Refunds restore stock locally; the payload only carries the sale
+        // id, so resolve the affected products from local sale items.
+        final saleId = payload['sale_id'];
+        if (saleId is String) {
+          final rows = await (db.select(db.saleItemsTable)
+                ..where((t) => t.saleId.equals(saleId)))
+              .get();
+          ids.addAll(rows.map((r) => r.productId));
+        }
+    }
+  }
+  return ids;
 }
 
 @Riverpod(keepAlive: true)

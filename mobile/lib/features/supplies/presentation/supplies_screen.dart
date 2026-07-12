@@ -3,29 +3,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/supplies/data/supplies_repository.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
+import 'package:suuqii/shared/widgets/expiry_badge.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 
 const _supplyUnits = ['piece', 'kg', 'quintal', 'g', 'liter', 'ml', 'cup', 'pack'];
+
+/// Display label for a machine unit value (the value itself is persisted and
+/// must stay in English). Falls back to the raw value for unknown units.
+String _unitDisplayLabel(AppLocalizations l, String unit) {
+  switch (unit) {
+    case 'piece':
+      return l.unitPiece;
+    case 'kg':
+      return l.unitKg;
+    case 'g':
+      return l.unitG;
+    case 'mg':
+      return l.unitMg;
+    case 'quintal':
+      return l.unitQuintal;
+    case 'liter':
+      return l.unitLiter;
+    case 'ml':
+      return l.unitMl;
+    case 'cup':
+      return l.unitCup;
+    case 'pack':
+      return l.unitPack;
+    case 'm':
+      return l.unitMeter;
+    default:
+      return unit;
+  }
+}
 
 class SuppliesScreen extends ConsumerWidget {
   const SuppliesScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final asyncList = ref.watch(watchSuppliesProvider);
     final lowAsync = ref.watch(watchLowSuppliesProvider);
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    // Cost-per-unit is financially sensitive; cashiers see quantities only
+    // (same masking rule as product purchase prices in docs/17-roles.md).
+    final isOwner = auth is Authenticated && auth.isOwner;
 
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () async {},
         child: asyncList.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('$e')),
+          error: (e, _) => Center(child: Text(context.errorMessage(e))),
           data: (items) {
             final lowCount = lowAsync.valueOrNull?.length ?? 0;
             return CustomScrollView(
@@ -35,18 +72,18 @@ class SuppliesScreen extends ConsumerWidget {
                     child: _LowStockBanner(count: lowCount),
                   ),
                 if (items.isEmpty)
-                  const SliverFillRemaining(
+                  SliverFillRemaining(
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.inventory_2_outlined, size: 48),
-                          SizedBox(height: 12),
-                          Text('No supplies yet'),
-                          SizedBox(height: 4),
+                          const Icon(Icons.inventory_2_outlined, size: 48),
+                          const SizedBox(height: 12),
+                          Text(l.suppliesEmptyTitle),
+                          const SizedBox(height: 4),
                           Text(
-                            'Add your ingredients to track costs',
-                            style: TextStyle(fontSize: 12),
+                            l.suppliesEmptyMessage,
+                            style: const TextStyle(fontSize: 12),
                           ),
                         ],
                       ),
@@ -58,6 +95,7 @@ class SuppliesScreen extends ConsumerWidget {
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (ctx, i) => _SupplyTile(
                       supply: items[i],
+                      showCost: isOwner,
                       onTap: () => _showEdit(ctx, ref, supply: items[i]),
                     ),
                   ),
@@ -68,7 +106,7 @@ class SuppliesScreen extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add),
-        label: const Text('Add supply'),
+        label: Text(l.suppliesAddButton),
         onPressed: () => _showEdit(context, ref),
       ),
     );
@@ -79,6 +117,7 @@ class SuppliesScreen extends ConsumerWidget {
     WidgetRef ref, {
     Supply? supply,
   }) async {
+    final l = context.l10n;
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
 
@@ -107,9 +146,10 @@ class SuppliesScreen extends ConsumerWidget {
           quantityOnHand: result.quantityOnHand,
           reorderThreshold: result.reorderThreshold,
           costPerUnit: result.costPerUnit,
+          expiryDate: result.expiryDate,
           ownerChallengeToken: challenge,
         );
-        messenger.showSnackBar(const SnackBar(content: Text('Supply added')));
+        messenger.showSnackBar(SnackBar(content: Text(l.suppliesAdded)));
       } else {
         await repo.update(
           id: supply.id,
@@ -118,12 +158,15 @@ class SuppliesScreen extends ConsumerWidget {
           quantityOnHand: result.quantityOnHand,
           reorderThreshold: result.reorderThreshold,
           costPerUnit: result.costPerUnit,
+          expiryDate: result.expiryDate,
           ownerChallengeToken: challenge,
         );
-        messenger.showSnackBar(const SnackBar(content: Text('Supply updated')));
+        messenger.showSnackBar(SnackBar(content: Text(l.suppliesUpdated)));
       }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     }
   }
 }
@@ -151,7 +194,7 @@ class _LowStockBanner extends StatelessWidget {
           const SizedBox(width: SuuqSpacing.sm),
           Expanded(
             child: Text(
-              '$count ${count == 1 ? 'supply is' : 'supplies are'} running low',
+              context.l10n.suppliesRunningLow(count),
               style: TextStyle(
                 color: scheme.onErrorContainer,
                 fontWeight: FontWeight.w500,
@@ -165,8 +208,13 @@ class _LowStockBanner extends StatelessWidget {
 }
 
 class _SupplyTile extends StatelessWidget {
-  const _SupplyTile({required this.supply, required this.onTap});
+  const _SupplyTile({
+    required this.supply,
+    required this.showCost,
+    required this.onTap,
+  });
   final Supply supply;
+  final bool showCost;
   final VoidCallback onTap;
 
   @override
@@ -186,6 +234,13 @@ class _SupplyTile extends StatelessWidget {
       title: Row(
         children: [
           Expanded(child: Text(supply.name)),
+          if (supply.expiryDate != null && supply.expiresWithin(7)) ...[
+            ExpiryBadge(
+              expiryDate: supply.expiryDate!,
+              daysToExpiry: supply.daysToExpiry ?? 0,
+            ),
+            const SizedBox(width: SuuqSpacing.xs),
+          ],
           if (isLow)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -194,7 +249,7 @@ class _SupplyTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                'Low',
+                context.l10n.suppliesLowBadge,
                 style: TextStyle(
                   fontSize: 11,
                   color: scheme.onErrorContainer,
@@ -205,8 +260,16 @@ class _SupplyTile extends StatelessWidget {
         ],
       ),
       subtitle: Text(
-        '${supply.quantityOnHand.toStringAsFixed(2)} ${supply.unit}'
-        '  ·  ${formatMoney(supply.costPerUnit)} per ${supply.unit}',
+        showCost
+            ? context.l10n.suppliesTileSubtitle(
+                supply.quantityOnHand.toStringAsFixed(2),
+                supply.unit,
+                context.money(supply.costPerUnit),
+              )
+            : context.l10n.suppliesTileSubtitleNoCost(
+                supply.quantityOnHand.toStringAsFixed(2),
+                supply.unit,
+              ),
       ),
       trailing: const Icon(Icons.chevron_right_rounded, size: 18),
     );
@@ -220,12 +283,14 @@ class _SupplyFormResult {
     required this.quantityOnHand,
     required this.reorderThreshold,
     required this.costPerUnit,
+    this.expiryDate,
   });
   final String name;
   final String unit;
   final Decimal quantityOnHand;
   final Decimal reorderThreshold;
   final Decimal costPerUnit;
+  final DateTime? expiryDate;
 }
 
 class _SupplyFormSheet extends StatefulWidget {
@@ -242,6 +307,7 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
   final _reorder = TextEditingController(text: '0');
   final _cost = TextEditingController(text: '0');
   String _unit = 'piece';
+  DateTime? _expiry;
 
   @override
   void initState() {
@@ -253,7 +319,19 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
       _reorder.text = s.reorderThreshold.toStringAsFixed(2);
       _cost.text = s.costPerUnit.toStringAsFixed(2);
       _unit = s.unit;
+      _expiry = s.expiryDate;
     }
+  }
+
+  Future<void> _pickExpiry() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _expiry ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (picked != null) setState(() => _expiry = picked);
   }
 
   @override
@@ -267,6 +345,7 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final isEdit = widget.supply != null;
     return Padding(
@@ -282,21 +361,26 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                isEdit ? 'Edit supply' : 'New supply',
+                isEdit ? l.suppliesEditTitle : l.suppliesNewTitle,
                 style: theme.textTheme.titleLarge,
               ),
               const SizedBox(height: SuuqSpacing.md),
               TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Name'),
+                decoration: InputDecoration(labelText: l.suppliesNameLabel),
                 textCapitalization: TextCapitalization.sentences,
               ),
               const SizedBox(height: SuuqSpacing.sm),
               DropdownButtonFormField<String>(
                 initialValue: _unit,
-                decoration: const InputDecoration(labelText: 'Unit'),
+                decoration: InputDecoration(labelText: l.suppliesUnitLabel),
                 items: _supplyUnits
-                    .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                    .map(
+                      (u) => DropdownMenuItem(
+                        value: u,
+                        child: Text(_unitDisplayLabel(l, u)),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) => setState(() => _unit = v ?? _unit),
               ),
@@ -308,7 +392,7 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
                       controller: _qty,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
-                        labelText: 'On hand',
+                        labelText: l.suppliesOnHandLabel,
                         suffixText: _unit,
                       ),
                     ),
@@ -319,9 +403,9 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
                       controller: _reorder,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
-                        labelText: 'Alert below',
+                        labelText: l.suppliesAlertBelowLabel,
                         suffixText: _unit,
-                        helperText: 'Low-stock threshold',
+                        helperText: l.suppliesAlertBelowHelper,
                       ),
                     ),
                   ),
@@ -332,15 +416,38 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
                 controller: _cost,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
-                  labelText: 'Cost per $_unit',
+                  labelText: l.suppliesCostPerUnitLabel(_unit),
                   prefixText: 'ETB  ',
                 ),
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
+              const SizedBox(height: SuuqSpacing.sm),
+              InkWell(
+                onTap: _pickExpiry,
+                borderRadius: BorderRadius.circular(SuuqRadius.sm),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: l.stockReceiveExpiryLabel,
+                    suffixIcon: _expiry == null
+                        ? const Icon(Icons.event_rounded)
+                        : IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () => setState(() => _expiry = null),
+                          ),
+                  ),
+                  child: Text(
+                    _expiry == null
+                        ? l.stockReceiveNoExpiry
+                        : context.dateShort(_expiry!),
+                  ),
+                ),
+              ),
               const SizedBox(height: SuuqSpacing.lg),
               FilledButton(
                 onPressed: _submit,
-                child: Text(isEdit ? 'Save changes' : 'Add supply'),
+                child: Text(
+                  isEdit ? l.commonSaveChanges : l.suppliesAddButton,
+                ),
               ),
             ],
           ),
@@ -351,8 +458,9 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
 
   void _submit() {
     if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Name required')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.suppliesNameRequired)),
+      );
       return;
     }
     final qty = Decimal.tryParse(_qty.text.trim()) ?? Decimal.zero;
@@ -367,6 +475,7 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
         quantityOnHand: qty,
         reorderThreshold: reorder,
         costPerUnit: cost,
+        expiryDate: _expiry,
       ),
     );
   }

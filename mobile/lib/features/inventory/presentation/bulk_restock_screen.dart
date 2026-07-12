@@ -3,17 +3,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
-/// Multi-product restock flow. Owner (or cashier with PIN) adds quantities
-/// to many products at once — useful when a supplier delivery arrives and
-/// you want one operation instead of N tap-tap-tap stock adjustments.
+/// One pending receive line: quantity plus optional per-line unit cost and
+/// expiry date. Cost defaults to the product's last cost at submit time.
+class _RestockLine {
+  _RestockLine({required this.qty, this.unitCost, this.expiryDate});
+  final Decimal qty;
+  final Decimal? unitCost;
+  final DateTime? expiryDate;
+
+  _RestockLine copyWith({Decimal? qty}) => _RestockLine(
+        qty: qty ?? this.qty,
+        unitCost: unitCost,
+        expiryDate: expiryDate,
+      );
+}
+
+/// Multi-product receive flow. Owner (or cashier with PIN) receives a
+/// supplier delivery as proper batches — each line becomes a stock lot with
+/// its own cost and expiry, one operation instead of N stock adjustments.
 class BulkRestockScreen extends ConsumerStatefulWidget {
   const BulkRestockScreen({super.key});
 
@@ -22,8 +41,8 @@ class BulkRestockScreen extends ConsumerStatefulWidget {
 }
 
 class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
-  /// productId -> qty delta entered so far.
-  final Map<String, Decimal> _draft = {};
+  /// productId -> pending line.
+  final Map<String, _RestockLine> _draft = {};
   final _search = TextEditingController();
   String _query = '';
   String _reason = 'supplier delivery';
@@ -39,17 +58,19 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final productsAsync = ref.watch(watchProductsProvider(query: _query));
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final lineCount = _draft.values.where((v) => v > Decimal.zero).length;
+    final lineCount =
+        _draft.values.where((v) => v.qty > Decimal.zero).length;
     final totalUnits = _draft.values.fold<Decimal>(
       Decimal.zero,
-      (a, b) => a + b,
+      (a, b) => a + b.qty,
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Bulk restock')),
+      appBar: AppBar(title: Text(l.bulkRestockTitle)),
       body: Column(
         children: [
           Padding(
@@ -60,7 +81,7 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
               controller: _search,
               onChanged: (v) => setState(() => _query = v),
               decoration: InputDecoration(
-                hintText: 'Search products',
+                hintText: l.inventorySearchHint,
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _query.isEmpty
                     ? null
@@ -80,9 +101,14 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
             ),
             child: DropdownButtonFormField<String>(
               initialValue: _reason,
-              decoration: const InputDecoration(labelText: 'Reason'),
+              decoration: InputDecoration(labelText: l.stockAdjustReasonLabel),
               items: _reasons
-                  .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                  .map(
+                    (r) => DropdownMenuItem(
+                      value: r,
+                      child: Text(_reasonLabel(l, r)),
+                    ),
+                  )
                   .toList(),
               onChanged: (v) => setState(() => _reason = v ?? _reason),
             ),
@@ -93,14 +119,14 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
                   const Center(child: CircularProgressIndicator()),
               error: (e, _) => EmptyState(
                 icon: Icons.error_outline,
-                title: 'Failed to load',
-                message: '$e',
+                title: l.inventoryLoadFailedTitle,
+                message: context.errorMessage(e),
               ),
               data: (products) {
                 if (products.isEmpty) {
-                  return const EmptyState(
+                  return EmptyState(
                     icon: Icons.inventory_2_outlined,
-                    title: 'No products to restock',
+                    title: l.bulkRestockEmptyTitle,
                   );
                 }
                 return ListView.separated(
@@ -112,16 +138,17 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
                       const SizedBox(height: SuuqSpacing.xs),
                   itemBuilder: (_, i) {
                     final p = products[i];
-                    final qty = _draft[p.id] ?? Decimal.zero;
+                    final line = _draft[p.id];
                     return _BulkRow(
                       product: p,
-                      qty: qty,
+                      line: line,
                       onChange: (delta) => _bump(p.id, delta),
-                      onSet: (value) => setState(() {
-                        if (value <= Decimal.zero) {
+                      onSet: (result) => setState(() {
+                        if (result == null ||
+                            result.qty <= Decimal.zero) {
                           _draft.remove(p.id);
                         } else {
-                          _draft[p.id] = value;
+                          _draft[p.id] = result;
                         }
                       }),
                     );
@@ -151,12 +178,11 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '$lineCount '
-                              '${lineCount == 1 ? "product" : "products"}',
+                              l.bulkRestockLineCount(lineCount),
                               style: theme.textTheme.bodySmall,
                             ),
                             Text(
-                              '+${_fmtQty(totalUnits)} units',
+                              l.bulkRestockTotalUnits(_fmtQty(totalUnits)),
                               style:
                                   theme.textTheme.titleLarge?.copyWith(
                                 color: scheme.primary,
@@ -184,7 +210,7 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
                                 )
                               : const Icon(Icons.check_rounded),
                           onPressed: _submitting ? null : _submit,
-                          label: const Text('Apply restock'),
+                          label: Text(l.bulkRestockApply),
                         ),
                       ),
                     ],
@@ -197,17 +223,35 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
 
   void _bump(String productId, Decimal delta) {
     setState(() {
-      final current = _draft[productId] ?? Decimal.zero;
-      final next = current + delta;
+      final current = _draft[productId];
+      final next = (current?.qty ?? Decimal.zero) + delta;
       if (next <= Decimal.zero) {
         _draft.remove(productId);
+      } else if (current == null) {
+        _draft[productId] = _RestockLine(qty: next);
       } else {
-        _draft[productId] = next;
+        _draft[productId] = current.copyWith(qty: next);
       }
     });
   }
 
+  /// Display label for a machine reason value (the value itself is persisted
+  /// and must stay in English).
+  String _reasonLabel(AppLocalizations l, String reason) {
+    switch (reason) {
+      case 'restock':
+        return l.stockAdjustReasonRestock;
+      case 'supplier delivery':
+        return l.stockAdjustReasonSupplierDelivery;
+      case 'transfer in':
+        return l.stockAdjustReasonTransferIn;
+      default:
+        return reason;
+    }
+  }
+
   Future<void> _submit() async {
+    final l = context.l10n;
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
     final messenger = ScaffoldMessenger.of(context);
@@ -221,24 +265,36 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
 
     setState(() => _submitting = true);
     final entries = _draft.entries
-        .where((e) => e.value > Decimal.zero)
+        .where((e) => e.value.qty > Decimal.zero)
         .toList();
-    final repo = ref.read(productsRepositoryProvider);
+    final lotsRepo = ref.read(lotsRepositoryProvider);
+    final productsRepo = ref.read(productsRepositoryProvider);
     try {
       for (final entry in entries) {
-        await repo.adjustStock(
+        final line = entry.value;
+        // Per-line cost when entered, otherwise the product's last cost.
+        var cost = line.unitCost;
+        if (cost == null) {
+          final product = await productsRepo.byId(entry.key);
+          cost = product?.purchasePrice ?? Decimal.zero;
+        }
+        await lotsRepo.receiveStock(
           productId: entry.key,
-          delta: entry.value,
-          reason: _reason,
+          quantity: line.qty,
+          unitCost: cost,
+          expiryDate: line.expiryDate,
+          note: _reason,
           ownerChallengeToken: challenge,
         );
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('Restocked ${entries.length} products')),
+        SnackBar(content: Text(l.bulkRestockSuccess(entries.length))),
       );
       router.pop();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -254,20 +310,25 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
 class _BulkRow extends StatelessWidget {
   const _BulkRow({
     required this.product,
-    required this.qty,
+    required this.line,
     required this.onChange,
     required this.onSet,
   });
   final Product product;
-  final Decimal qty;
+  final _RestockLine? line;
   final ValueChanged<Decimal> onChange;
-  final ValueChanged<Decimal> onSet;
+  final ValueChanged<_RestockLine?> onSet;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final qty = line?.qty ?? Decimal.zero;
     final hasQty = qty > Decimal.zero;
+    final details = <String>[
+      if (line?.unitCost != null) context.money(line!.unitCost!),
+      if (line?.expiryDate != null) context.dateShort(line!.expiryDate!),
+    ];
     return Material(
       color: scheme.surfaceContainer,
       borderRadius: BorderRadius.circular(SuuqRadius.md),
@@ -304,8 +365,15 @@ class _BulkRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    '${_fmtQty(product.stock)} ${product.unit} in stock',
+                    details.isEmpty
+                        ? context.l10n.bulkRestockInStock(
+                            _fmtQty(product.stock),
+                            product.unit,
+                          )
+                        : details.join(' · '),
                     style: theme.textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -323,40 +391,106 @@ class _BulkRow extends StatelessWidget {
     );
   }
 
+  /// Line editor: quantity + optional unit cost (prefilled with the last
+  /// cost) + optional expiry date for this batch.
   Future<void> _showCustom(
     BuildContext context,
     Product product,
-    ValueChanged<Decimal> onSet,
+    ValueChanged<_RestockLine?> onSet,
   ) async {
-    final controller = TextEditingController(
+    final qty = line?.qty ?? Decimal.zero;
+    final qtyController = TextEditingController(
       text: qty > Decimal.zero ? _fmtQty(qty) : '',
     );
-    final result = await showDialog<Decimal?>(
+    final prefillCost = line?.unitCost ?? product.purchasePrice;
+    final costController = TextEditingController(
+      text: prefillCost > Decimal.zero ? prefillCost.toStringAsFixed(2) : '',
+    );
+    var expiry = line?.expiryDate;
+    final result = await showDialog<_RestockLine?>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Restock ${product.name}'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Quantity (${product.unit})',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Text(ctx.l10n.bulkRestockDialogTitle(product.name)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: qtyController,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: ctx.l10n.bulkRestockQuantityLabel(product.unit),
+                ),
+              ),
+              const SizedBox(height: SuuqSpacing.sm),
+              TextField(
+                controller: costController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: ctx.l10n.stockReceiveUnitCostLabel,
+                  prefixText: 'ETB  ',
+                ),
+              ),
+              const SizedBox(height: SuuqSpacing.sm),
+              InkWell(
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: expiry ?? now,
+                    firstDate: DateTime(now.year, now.month, now.day),
+                    lastDate: DateTime(now.year + 5),
+                  );
+                  if (picked != null) setState(() => expiry = picked);
+                },
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: ctx.l10n.stockReceiveExpiryLabel,
+                    suffixIcon: expiry == null
+                        ? const Icon(Icons.event_rounded)
+                        : IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () => setState(() => expiry = null),
+                          ),
+                  ),
+                  child: Text(
+                    expiry == null
+                        ? ctx.l10n.stockReceiveNoExpiry
+                        : ctx.dateShort(expiry!),
+                  ),
+                ),
+              ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(ctx.l10n.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final v = Decimal.tryParse(qtyController.text.trim());
+                if (v == null || v <= Decimal.zero) {
+                  Navigator.pop(ctx);
+                  return;
+                }
+                Navigator.pop(
+                  ctx,
+                  _RestockLine(
+                    qty: v,
+                    unitCost:
+                        Decimal.tryParse(costController.text.trim()),
+                    expiryDate: expiry,
+                  ),
+                );
+              },
+              child: Text(ctx.l10n.bulkRestockSet),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final v = Decimal.tryParse(controller.text.trim());
-              Navigator.pop(ctx, v);
-            },
-            child: const Text('Set'),
-          ),
-        ],
       ),
     );
     if (result != null) onSet(result);

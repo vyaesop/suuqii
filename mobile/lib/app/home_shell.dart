@@ -35,7 +35,7 @@ class HomeShell extends ConsumerWidget {
       _NavItem(icon: Icons.point_of_sale_rounded, label: l.navSell),
       _NavItem(icon: Icons.inventory_2_rounded, label: l.navInventory),
       if (isBakery)
-        const _NavItem(icon: Icons.egg_alt_rounded, label: 'Supplies')
+        _NavItem(icon: Icons.egg_alt_rounded, label: l.navSupplies)
       else
         _NavItem(icon: Icons.account_balance_wallet_rounded, label: l.navDebts),
       _NavItem(icon: Icons.timelapse_rounded, label: l.navShift),
@@ -69,7 +69,7 @@ class HomeShell extends ConsumerWidget {
                       Icons.menu_rounded,
                       color: scheme.onSurfaceVariant,
                     ),
-                    tooltip: 'Settings',
+                    tooltip: l.navSettings,
                     onPressed: () => context.push('/me'),
                   ),
               ],
@@ -106,13 +106,13 @@ class HomeShell extends ConsumerWidget {
     if (location.startsWith('/pos')) return l.navSell;
     if (location.startsWith('/inventory')) return l.navInventory;
     if (location.startsWith('/debts')) return l.navDebts;
-    if (location.startsWith('/supplies')) return 'Supplies';
+    if (location.startsWith('/supplies')) return l.navSupplies;
     if (location.startsWith('/shift')) return l.navShift;
     if (location.startsWith('/owner')) return l.navDashboard;
     if (location.startsWith('/me')) return l.navSettings;
-    if (location.startsWith('/expenses')) return 'Expenses';
-    if (location.startsWith('/audit')) return 'Audit';
-    return 'Suuqii';
+    if (location.startsWith('/expenses')) return l.expenses;
+    if (location.startsWith('/audit')) return l.auditTitle;
+    return l.appTitle;
   }
 }
 

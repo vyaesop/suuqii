@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/presentation/providers.dart';
 
@@ -63,11 +64,11 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Owner PIN required',
+                context.l10n.ownerPinRequired,
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 8),
-              const Text('This action requires the shop owner to authorize.'),
+              Text(context.l10n.ownerPinExplain),
               const SizedBox(height: 20),
               TextField(
                 controller: _pin,
@@ -79,14 +80,14 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
                 style: const TextStyle(fontSize: 24, letterSpacing: 6),
                 textAlign: TextAlign.center,
                 decoration: InputDecoration(
-                  labelText: 'PIN (4–8 digits)',
+                  labelText: context.l10n.ownerPinLabel,
                   errorText: _error,
                 ),
               ),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: _busy ? null : _submit,
-                child: const Text('Authorize'),
+                child: Text(context.l10n.ownerPinAuthorize),
               ),
             ],
           ),
@@ -96,9 +97,10 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
   }
 
   Future<void> _submit() async {
+    final l = context.l10n;
     final pin = _pin.text.trim();
     if (pin.length < 4) {
-      setState(() => _error = 'Enter 4–8 digits');
+      setState(() => _error = l.ownerPinEnterDigits);
       return;
     }
     setState(() {
@@ -122,7 +124,7 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = 'Network error — try again';
+          _error = l.errNetwork;
         });
       }
     }

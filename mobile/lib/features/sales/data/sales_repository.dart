@@ -5,6 +5,7 @@ import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
@@ -17,6 +18,10 @@ import 'package:uuid/uuid.dart';
 
 part 'sales_repository.g.dart';
 
+/// Mirrors Shop.debt_threshold's server default (500 ETB). Used when the
+/// repository is not given a shop-specific threshold.
+final Decimal defaultDebtThreshold = Decimal.parse('500');
+
 class SalesRepository {
   SalesRepository({
     required this.db,
@@ -25,6 +30,7 @@ class SalesRepository {
     required this.currentShopId,
     required this.currentShiftId,
     this.isBakery = false,
+    this.isOwner = false,
     this.debtThreshold,
   });
 
@@ -34,11 +40,53 @@ class SalesRepository {
   final String currentShopId;
   final String? currentShiftId;
   final bool isBakery;
+
+  /// Owners may extend credit past the threshold without a PIN and may see
+  /// every user's sales; cashiers need an owner challenge and only see their
+  /// own (docs/17-roles.md).
+  final bool isOwner;
+
   /// Mirrors Shop.debt_threshold from the server. Credit sales that would push
   /// a customer's cumulative outstanding above this value are blocked locally
   /// so the cashier gets immediate feedback rather than a deferred sync error.
   /// Defaults to 500 ETB when not provided.
   final Decimal? debtThreshold;
+
+  Decimal get effectiveDebtThreshold => debtThreshold ?? defaultDebtThreshold;
+
+  /// Whether a credit sale of [saleTotal] to the customer identified by
+  /// [customerPhone] would push their cumulative outstanding balance above
+  /// the shop's debt threshold — i.e. whether the sale needs an owner (PIN
+  /// challenge for cashiers) before it can be submitted.
+  Future<bool> creditSaleNeedsOwnerApproval({
+    required String? customerPhone,
+    required Decimal saleTotal,
+  }) async {
+    // Mirrors the server: the cumulative check is keyed by phone number, so
+    // sales without a phone are not threshold-checked.
+    if (customerPhone == null || customerPhone.isEmpty) return false;
+    final outstanding = await _outstandingByPhone(customerPhone);
+    return outstanding + saleTotal > effectiveDebtThreshold;
+  }
+
+  Future<Decimal> _outstandingByPhone(String phone) async {
+    // Money is stored as int64 santim, so this SUM is exact integer math.
+    final rows = await db.customSelect(
+      'SELECT COALESCE(SUM(amount_owed - amount_paid), 0) AS outstanding '
+      'FROM debts '
+      'WHERE shop_id = ? AND customer_phone = ? '
+      "AND status IN ('open', 'partial') AND deleted_at IS NULL",
+      variables: [
+        Variable.withString(currentShopId),
+        Variable.withString(phone),
+      ],
+      readsFrom: {db.debtsTable},
+    ).get();
+    final outstandingVal = rows.firstOrNull?.read<int>('outstanding');
+    return outstandingVal != null
+        ? decimalFromSantim(outstandingVal)
+        : Decimal.zero;
+  }
 
   /// Atomic local write: sale + items + stock decrement + inventory log
   /// + (optional) debt + sync event. Returns the persisted sale id.
@@ -48,6 +96,7 @@ class SalesRepository {
     String? customerName,
     String? customerPhone,
     DateTime? dueDate,
+    String? ownerChallengeToken,
   }) async {
     if (cart.isEmpty) {
       throw StateError('Cart is empty');
@@ -121,21 +170,41 @@ class SalesRepository {
               shopId: currentShopId,
               shiftId: Value(shift),
               userId: currentUserId,
-              subtotal: subtotal.toDouble(),
-              discount: Value(discount.toDouble()),
-              total: total.toDouble(),
-              costTotal: costTotal.toDouble(),
+              subtotal: santimFromDecimal(subtotal),
+              discount: Value(santimFromDecimal(discount)),
+              total: santimFromDecimal(total),
+              costTotal: santimFromDecimal(costTotal),
               paymentMethod: method,
               occurredAt: now,
               synced: const Value(false),
             ),
           );
 
+      var lotCostTotal = Decimal.zero;
       for (final line in cart.lines) {
         final itemId = const Uuid().v4();
-        final lineUnitCost = isBakery
-            ? (productUnitCosts[line.product.id] ?? Decimal.zero)
-            : line.product.purchasePrice;
+        final int lineUnitCostSantim;
+        if (isBakery) {
+          lineUnitCostSantim = santimFromDecimal(
+            productUnitCosts[line.product.id] ?? Decimal.zero,
+          );
+        } else {
+          // FEFO lot consumption: COGS is the weighted cost of the batches
+          // this line actually drew from (earliest expiry first, then oldest
+          // receipt). Unlotted stock falls back to product.purchasePrice;
+          // the server recomputes authoritatively at sync-apply time.
+          lineUnitCostSantim = await db.lotsDao.consumeFefo(
+            productId: line.product.id,
+            quantity: line.qty,
+            movement: 'sale',
+            saleItemId: itemId,
+            fallbackCostSantim:
+                santimFromDecimal(line.product.purchasePrice),
+            now: now,
+          );
+        }
+        final lineUnitCost = decimalFromSantim(lineUnitCostSantim);
+        lotCostTotal += lineUnitCost * line.qty;
         await db.into(db.saleItemsTable).insert(
               SaleItemsTableCompanion.insert(
                 id: itemId,
@@ -143,8 +212,8 @@ class SalesRepository {
                 productId: line.product.id,
                 productNameSnapshot: line.product.name,
                 quantity: line.qty.toDouble(),
-                unitPrice: line.product.sellingPrice.toDouble(),
-                unitCost: lineUnitCost.toDouble(),
+                unitPrice: santimFromDecimal(line.product.sellingPrice),
+                unitCost: lineUnitCostSantim,
               ),
             );
 
@@ -187,6 +256,17 @@ class SalesRepository {
         });
       }
 
+      // Non-bakery COGS comes from the lots actually consumed above, which
+      // can differ from the cart's cached purchase prices. Reconcile the sale
+      // row (and the payload total below) with the lot-based figure.
+      if (!isBakery && lotCostTotal != costTotal) {
+        costTotal = lotCostTotal;
+        await (db.update(db.salesTable)..where((t) => t.id.equals(saleId)))
+            .write(
+          SalesTableCompanion(costTotal: Value(santimFromDecimal(costTotal))),
+        );
+      }
+
       // Bakery: deduct ingredient supplies consumed by this sale.
       // Reuses cachedRecipes and cachedSupplies pre-loaded above.
       final supplyDeductionsPayload = <Map<String, dynamic>>[];
@@ -213,26 +293,16 @@ class SalesRepository {
 
       String? debtId;
       if (paymentMethod == PaymentMethod.credit) {
-        // Per-customer cumulative credit exposure check.
-        // Query the local debts table to prevent extending credit beyond the
-        // shop's debt_threshold before the event even reaches the server.
-        if (customerPhone != null && customerPhone.isNotEmpty) {
-          final rows = await db.customSelect(
-            'SELECT COALESCE(SUM(amount_owed - amount_paid), 0.0) AS outstanding '
-            'FROM debts '
-            'WHERE shop_id = ? AND customer_phone = ? '
-            "AND status IN ('open', 'partial') AND deleted_at IS NULL",
-            variables: [
-              Variable.withString(currentShopId),
-              Variable.withString(customerPhone),
-            ],
-            readsFrom: {db.debtsTable},
-          ).get();
-          final outstandingVal = rows.firstOrNull?.read<double>('outstanding');
-          final outstanding = outstandingVal != null
-              ? Decimal.parse(outstandingVal.toStringAsFixed(2))
-              : Decimal.zero;
-          final effective = debtThreshold ?? Decimal.parse('500');
+        // Per-customer cumulative credit exposure check, mirroring the
+        // server: owners may exceed the threshold freely; cashiers need an
+        // owner challenge attached (collected upfront by the POS) or the
+        // sale is blocked locally before the event even reaches the server.
+        if (customerPhone != null &&
+            customerPhone.isNotEmpty &&
+            !isOwner &&
+            ownerChallengeToken == null) {
+          final outstanding = await _outstandingByPhone(customerPhone);
+          final effective = effectiveDebtThreshold;
           if (outstanding + total > effective) {
             throw StateError(
               'Customer credit limit exceeded: '
@@ -253,7 +323,7 @@ class SalesRepository {
                 saleId: Value(saleId),
                 customerName: customerName!,
                 customerPhone: Value(customerPhone),
-                amountOwed: total.toDouble(),
+                amountOwed: santimFromDecimal(total),
                 dueDate: Value(dueDate),
               ),
             );
@@ -285,6 +355,11 @@ class SalesRepository {
                     if (dueDate != null)
                       'due_date': dueDate.toIso8601String().split('T').first,
                   },
+                // Over-threshold credit sales by cashiers carry the owner
+                // challenge so the server accepts them (sale.create itself
+                // is not blanket-sensitive).
+                if (ownerChallengeToken != null)
+                  'owner_challenge': ownerChallengeToken,
               }),
             ),
           );
@@ -301,8 +376,10 @@ class SalesRepository {
         PaymentMethod.credit => 'credit',
       };
 
-  /// Returns the most recent N completed sales by this shop, with item
-  /// summaries for the recent-sales list / refund picker.
+  /// Returns the most recent N completed sales, with item summaries for the
+  /// recent-sales list / refund picker. Owners see every sale recorded on
+  /// this device; cashiers only see their own (docs/17-roles.md: "view own
+  /// recent sales" vs "view all sales").
   Stream<List<RecentSale>> watchRecent({int limit = 50}) {
     return db.customSelect(
       'SELECT s.id, s.total, s.payment_method, s.status, s.occurred_at, '
@@ -310,10 +387,12 @@ class SalesRepository {
       'FROM sales s '
       'LEFT JOIN sale_items i ON i.sale_id = s.id '
       'WHERE s.shop_id = ? AND s.deleted_at IS NULL '
+      '${isOwner ? '' : 'AND s.user_id = ? '}'
       'GROUP BY s.id '
       'ORDER BY s.occurred_at DESC LIMIT ?',
       variables: [
         Variable.withString(currentShopId),
+        if (!isOwner) Variable.withString(currentUserId),
         Variable.withInt(limit),
       ],
       readsFrom: {db.salesTable, db.saleItemsTable},
@@ -321,7 +400,7 @@ class SalesRepository {
       (rows) => rows.map((r) {
         return RecentSale(
           id: r.read<String>('id'),
-          total: Decimal.parse(r.read<double>('total').toString()),
+          total: decimalFromSantim(r.read<int>('total')),
           paymentMethod: r.read<String>('payment_method'),
           status: r.read<String>('status'),
           occurredAt: r.read<DateTime>('occurred_at'),
@@ -357,6 +436,10 @@ class SalesRepository {
       // Bakery tracks ingredient supplies, not product stock — skip the
       // stock restore and inventory log (supply restoration happens server-side).
       if (!isBakery) {
+        // Put quantities back on the exact lots this sale consumed
+        // (movement 'refund_reversal', negative qty) so batch reports stay
+        // truthful after refunds.
+        await db.lotsDao.reverseSaleConsumptions(saleId, now: now);
         for (final item in items) {
           await db.customUpdate(
             'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?',
@@ -437,5 +520,6 @@ SalesRepository salesRepository(SalesRepositoryRef ref) {
     currentShopId: auth.shopId,
     currentShiftId: shiftAsync.valueOrNull?.id,
     isBakery: auth.isBakery,
+    isOwner: auth.isOwner,
   );
 }

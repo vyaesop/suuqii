@@ -13,6 +13,7 @@ import 'package:suuqii/features/dashboard/presentation/reports_screen.dart';
 import 'package:suuqii/features/debt/presentation/debt_detail_screen.dart';
 import 'package:suuqii/features/debt/presentation/debts_screen.dart';
 import 'package:suuqii/features/expenses/presentation/expenses_screen.dart';
+import 'package:suuqii/features/inventory/presentation/batch_report_screen.dart';
 import 'package:suuqii/features/inventory/presentation/bulk_restock_screen.dart';
 import 'package:suuqii/features/inventory/presentation/inventory_screen.dart';
 import 'package:suuqii/features/inventory/presentation/product_detail_screen.dart';
@@ -26,6 +27,25 @@ import 'package:suuqii/features/shifts/presentation/shift_screen.dart';
 import 'package:suuqii/features/supplies/presentation/supplies_screen.dart';
 
 part 'router.g.dart';
+
+/// Route prefixes that only owners may visit (see docs/17-roles.md).
+/// Cashiers are redirected to the POS both from navigation and deep links.
+/// This is UX only — the server independently enforces every owner-only
+/// endpoint.
+const ownerOnlyPathPrefixes = [
+  '/owner',
+  '/reports',
+  '/audit',
+  '/employees',
+  '/open-shifts',
+];
+
+/// Single reusable owner-only guard: returns the location to redirect a
+/// non-owner to, or null when [location] is allowed for their role.
+String? ownerOnlyRedirect(String location, {required bool isOwner}) {
+  if (isOwner) return null;
+  return ownerOnlyPathPrefixes.any(location.startsWith) ? '/pos' : null;
+}
 
 class _RouterRefreshNotifier extends ChangeNotifier {
   void trigger() => notifyListeners();
@@ -54,13 +74,8 @@ GoRouter router(RouterRef ref) {
       final isAuthed = auth is Authenticated;
       if (!isAuthed && !publicPaths.contains(loc)) return '/login';
       if (isAuthed && publicPaths.contains(loc)) return '/pos';
-      final isOwner = isAuthed && auth.role == 'owner';
-      if (loc.startsWith('/owner') && !isOwner) return '/pos';
-      if (loc == '/audit' && !isOwner) return '/pos';
-      if (loc.startsWith('/employees') && !isOwner) return '/pos';
-      if (loc.startsWith('/reports') && !isOwner) return '/pos';
-      if (loc.startsWith('/open-shifts') && !isOwner) return '/pos';
-      return null;
+      final isOwner = isAuthed && auth.isOwner;
+      return ownerOnlyRedirect(loc, isOwner: isOwner);
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
@@ -124,6 +139,15 @@ GoRouter router(RouterRef ref) {
           GoRoute(
             path: '/reports',
             builder: (_, __) => const ReportsScreen(),
+            routes: [
+              // Owner-only via the /reports redirect guard above.
+              GoRoute(
+                path: 'batches',
+                builder: (_, state) => BatchReportScreen(
+                  productId: state.uri.queryParameters['product'],
+                ),
+              ),
+            ],
           ),
           GoRoute(
             path: '/open-shifts',

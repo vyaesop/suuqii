@@ -10,7 +10,8 @@ class ExpensesTable extends Table {
   TextColumn get userId => text()();
   TextColumn get shiftId => text().nullable()();
   TextColumn get title => text()();
-  RealColumn get amount => real()();
+  /// Money: int64 santim (1 birr = 100 santim).
+  IntColumn get amount => integer()();
   TextColumn get category => text().withDefault(const Constant('other'))();
   TextColumn get description => text().nullable()();
   DateTimeColumn get occurredAt => dateTime()();

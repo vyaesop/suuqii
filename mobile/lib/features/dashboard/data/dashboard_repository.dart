@@ -30,6 +30,7 @@ class DashboardSummary {
     required this.creditSales,
     required this.outstandingDebt,
     required this.lowStock,
+    required this.spoilageCost,
     this.fetchedAt,
     this.fromCache = false,
   });
@@ -49,6 +50,9 @@ class DashboardSummary {
       netProfit: Decimal.parse(data['net_profit'] as String),
       creditSales: Decimal.parse(data['credit_sales'] as String),
       outstandingDebt: Decimal.parse(data['outstanding_debt'] as String),
+      // Absent on cached snapshots written before the lots feature.
+      spoilageCost:
+          Decimal.parse((data['spoilage_cost'] as String?) ?? '0'),
       lowStock: low
           .map(
             (j) => LowStockItem(
@@ -72,6 +76,10 @@ class DashboardSummary {
   final Decimal outstandingDebt;
   final List<LowStockItem> lowStock;
 
+  /// Waste line: units spoiled in the range, valued at lot cost at spoilage
+  /// time. Already subtracted from [netProfit] server-side.
+  final Decimal spoilageCost;
+
   /// When this snapshot was fetched from the server. Present on both live
   /// and cached results. UI can show "Updated 5 min ago" when offline.
   final DateTime? fetchedAt;
@@ -88,6 +96,7 @@ class DashboardSummary {
         'net_profit': netProfit.toString(),
         'credit_sales': creditSales.toString(),
         'outstanding_debt': outstandingDebt.toString(),
+        'spoilage_cost': spoilageCost.toString(),
         'low_stock': lowStock
             .map(
               (l) => {
@@ -269,6 +278,7 @@ extension on DashboardSummary {
         creditSales: creditSales,
         outstandingDebt: outstandingDebt,
         lowStock: lowStock,
+        spoilageCost: spoilageCost,
         fetchedAt: DateTime.now().toUtc(),
       );
 }

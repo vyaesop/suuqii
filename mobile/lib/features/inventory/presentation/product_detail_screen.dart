@@ -4,13 +4,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/domain/entities/stock_lot.dart';
+import 'package:suuqii/features/inventory/presentation/production_sheet.dart';
+import 'package:suuqii/features/inventory/presentation/spoilage_sheet.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
+import 'package:suuqii/shared/widgets/expiry_badge.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -22,19 +29,27 @@ class ProductDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final productAsync = ref.watch(watchProductProvider(productId));
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final canEdit = auth is Authenticated;
     final isOwner = canEdit && auth.role == 'owner';
+    final isBakery = canEdit && auth.isBakery;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Product'),
+        title: Text(l.productDetailTitle),
         actions: [
           if (canEdit)
             IconButton(
+              icon: const Icon(Icons.auto_delete_outlined),
+              tooltip: l.spoilageTitle,
+              onPressed: () => _recordSpoilage(context, ref, isOwner: isOwner),
+            ),
+          if (canEdit)
+            IconButton(
               icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit',
+              tooltip: l.commonEdit,
               onPressed: () => context.push('/inventory/edit/$productId'),
             ),
         ],
@@ -43,39 +58,65 @@ class ProductDetailScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => EmptyState(
           icon: Icons.error_outline,
-          title: 'Failed to load',
-          message: '$e',
+          title: l.inventoryLoadFailedTitle,
+          message: context.errorMessage(e),
         ),
         data: (product) {
           if (product == null) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.search_off_rounded,
-              title: 'Product not found',
+              title: l.productNotFoundTitle,
             );
           }
-          return _DetailBody(product: product, isOwner: isOwner);
+          return _DetailBody(
+            product: product,
+            isOwner: isOwner,
+            onMarkLotSpoiled: (lot) => _recordSpoilage(
+              context,
+              ref,
+              isOwner: isOwner,
+              lot: lot,
+            ),
+          );
         },
       ),
       floatingActionButton: canEdit
-          ? FloatingActionButton.extended(
-              icon: const Icon(Icons.tune_rounded),
-              onPressed: () => _adjustStock(context, ref, isOwner: isOwner),
-              label: const Text('Adjust stock'),
-            )
+          ? (isBakery
+              ? FloatingActionButton.extended(
+                  icon: const Icon(Icons.bakery_dining_outlined),
+                  onPressed: () => _recordProduction(
+                    context,
+                    ref,
+                    isOwner: isOwner,
+                  ),
+                  label: Text(l.productionTitle),
+                )
+              : FloatingActionButton.extended(
+                  icon: const Icon(Icons.tune_rounded),
+                  onPressed: () =>
+                      _adjustStock(context, ref, isOwner: isOwner),
+                  label: Text(l.stockAdjustTitle),
+                ))
           : null,
     );
   }
 
+  /// Receive a batch (Add segment) or apply a manual correction (Remove
+  /// segment). Both are PIN-sensitive for cashiers.
   Future<void> _adjustStock(
     BuildContext context,
     WidgetRef ref, {
     required bool isOwner,
   }) async {
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
-    final result = await showModalBottomSheet<({Decimal delta, String reason})>(
+    final product =
+        await ref.read(productsRepositoryProvider).byId(productId);
+    if (product == null || !context.mounted) return;
+    final result = await showModalBottomSheet<StockAdjustResult>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const StockAdjustSheet(),
+      builder: (_) => StockAdjustSheet(product: product),
     );
     if (result == null) return;
 
@@ -87,31 +128,149 @@ class ProductDetailScreen extends ConsumerWidget {
     }
 
     try {
-      await ref.read(productsRepositoryProvider).adjustStock(
+      switch (result) {
+        case ReceiveStockResult():
+          await ref.read(lotsRepositoryProvider).receiveStock(
+                productId: productId,
+                quantity: result.quantity,
+                unitCost: result.unitCost,
+                expiryDate: result.expiryDate,
+                spoiledQuantity: result.spoiledQuantity,
+                note: result.note,
+                ownerChallengeToken: challenge,
+              );
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(l.stockReceiveSuccess('${result.quantity}')),
+            ),
+          );
+        case RemoveStockResult():
+          await ref.read(productsRepositoryProvider).adjustStock(
+                productId: productId,
+                delta: -result.quantity,
+                reason: result.reason,
+                ownerChallengeToken: challenge,
+              );
+          messenger.showSnackBar(
+            SnackBar(content: Text(l.stockAdjustSuccess('-${result.quantity}'))),
+          );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
+    }
+  }
+
+  /// Record spoilage — quantity, reason, optional specific batch. When [lot]
+  /// is given (one-tap from an expired batch) the sheet is pre-filled.
+  Future<void> _recordSpoilage(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool isOwner,
+    StockLot? lot,
+  }) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final product =
+        await ref.read(productsRepositoryProvider).byId(productId);
+    if (product == null || !context.mounted) return;
+    final result = await showModalBottomSheet<SpoilageResult>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SpoilageSheet(
+        productId: productId,
+        productUnit: product.unit,
+        initialLotId: lot?.id,
+        initialQuantity: lot?.qtyRemaining,
+        initialReason: (lot?.isExpired ?? false) ? 'expired' : null,
+      ),
+    );
+    if (result == null) return;
+
+    String? challenge;
+    if (!isOwner) {
+      if (!context.mounted) return;
+      challenge = await requestOwnerChallenge(context, ref);
+      if (challenge == null) return;
+    }
+
+    try {
+      await ref.read(lotsRepositoryProvider).recordSpoilage(
             productId: productId,
-            delta: result.delta,
+            quantity: result.quantity,
             reason: result.reason,
+            lotId: result.lotId,
             ownerChallengeToken: challenge,
           );
-      messenger.showSnackBar(
-        SnackBar(content: Text('Stock adjusted by ${result.delta}')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l.spoilageSuccess)));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
+    }
+  }
+
+  /// Bakery: record a production run (produced + spoiled + expiry).
+  Future<void> _recordProduction(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool isOwner,
+  }) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final product =
+        await ref.read(productsRepositoryProvider).byId(productId);
+    if (product == null || !context.mounted) return;
+    final result = await showModalBottomSheet<ProductionResult>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ProductionSheet(productUnit: product.unit),
+    );
+    if (result == null) return;
+
+    String? challenge;
+    if (!isOwner) {
+      if (!context.mounted) return;
+      challenge = await requestOwnerChallenge(context, ref);
+      if (challenge == null) return;
+    }
+
+    try {
+      await ref.read(lotsRepositoryProvider).recordProduction(
+            productId: productId,
+            quantityProduced: result.produced,
+            quantitySpoiled: result.spoiled,
+            expiryDate: result.expiryDate,
+            note: result.note,
+            ownerChallengeToken: challenge,
+          );
+      messenger.showSnackBar(SnackBar(content: Text(l.productionSuccess)));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     }
   }
 }
 
 class _DetailBody extends ConsumerWidget {
-  const _DetailBody({required this.product, required this.isOwner});
+  const _DetailBody({
+    required this.product,
+    required this.isOwner,
+    required this.onMarkLotSpoiled,
+  });
   final Product product;
   final bool isOwner;
+  final ValueChanged<StockLot> onMarkLotSpoiled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final logsAsync = ref.watch(watchInventoryLogProvider(product.id));
+    final lotsAsync = ref.watch(watchProductLotsProvider(product.id));
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -154,7 +313,7 @@ class _DetailBody extends ConsumerWidget {
                     Row(
                       children: [
                         Text(
-                          formatMoney(product.sellingPrice),
+                          context.money(product.sellingPrice),
                           style: theme.textTheme.headlineSmall?.copyWith(
                             color: scheme.primary,
                             fontWeight: FontWeight.w700,
@@ -165,8 +324,8 @@ class _DetailBody extends ConsumerWidget {
                         ),
                         const SizedBox(width: SuuqSpacing.xs),
                         if (product.isLowStock)
-                          const StatusPill(
-                            label: 'LOW',
+                          StatusPill(
+                            label: l.productLowPill,
                             intent: PillIntent.warning,
                           ),
                       ],
@@ -184,7 +343,7 @@ class _DetailBody extends ConsumerWidget {
             Expanded(
               child: _Stat(
                 icon: Icons.inventory_2_outlined,
-                label: 'In stock',
+                label: l.productInStockLabel,
                 value: '${_fmtNum(product.stock)} ${product.unit}',
                 emphasize: product.isLowStock,
               ),
@@ -193,7 +352,7 @@ class _DetailBody extends ConsumerWidget {
             Expanded(
               child: _Stat(
                 icon: Icons.warning_amber_rounded,
-                label: 'Low at',
+                label: l.productLowAtLabel,
                 value:
                     '${_fmtNum(product.lowStockThreshold)} ${product.unit}',
               ),
@@ -204,21 +363,78 @@ class _DetailBody extends ConsumerWidget {
           const SizedBox(height: SuuqSpacing.sm),
           _Stat(
             icon: Icons.shopping_cart_outlined,
-            label: 'Purchase price',
-            value: formatMoney(product.purchasePrice),
+            label: l.productPurchasePriceLabel,
+            value: context.money(product.purchasePrice),
           ),
         ],
         if (product.barcode != null && product.barcode!.isNotEmpty) ...[
           const SizedBox(height: SuuqSpacing.sm),
           _Stat(
             icon: Icons.qr_code_scanner_rounded,
-            label: 'Barcode',
+            label: l.productBarcodeLabel,
             value: product.barcode!,
           ),
         ],
         const SizedBox(height: SuuqSpacing.lg),
+        // Open batches (lots): received date, remaining, expiry badge; cost
+        // is financially sensitive and owner-only.
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l.productBatchesTitle.toUpperCase(),
+                style:
+                    theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
+              ),
+            ),
+            if (isOwner)
+              TextButton(
+                onPressed: () =>
+                    context.push('/reports/batches?product=${product.id}'),
+                child: Text(l.productViewBatches),
+              ),
+          ],
+        ),
+        const SizedBox(height: SuuqSpacing.xs),
+        lotsAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error: (e, _) => Text(context.errorMessage(e)),
+          data: (lots) {
+            if (lots.isEmpty) {
+              return SectionCard(
+                child: Center(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: SuuqSpacing.md),
+                    child: Text(
+                      l.productNoBatches,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return SectionCard(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  for (var i = 0; i < lots.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _LotTile(
+                      lot: lots[i],
+                      unit: product.unit,
+                      isOwner: isOwner,
+                      onMarkSpoiled: () => onMarkLotSpoiled(lots[i]),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: SuuqSpacing.lg),
         Text(
-          'STOCK HISTORY',
+          l.productStockHistoryTitle,
           style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
         ),
         const SizedBox(height: SuuqSpacing.xs),
@@ -227,7 +443,7 @@ class _DetailBody extends ConsumerWidget {
             padding: EdgeInsets.all(SuuqSpacing.md),
             child: Center(child: CircularProgressIndicator()),
           ),
-          error: (e, _) => Text('$e'),
+          error: (e, _) => Text(context.errorMessage(e)),
           data: (logs) {
             if (logs.isEmpty) {
               return SectionCard(
@@ -236,7 +452,7 @@ class _DetailBody extends ConsumerWidget {
                     padding:
                         const EdgeInsets.symmetric(vertical: SuuqSpacing.md),
                     child: Text(
-                      'No movements yet',
+                      l.productNoMovements,
                       style: theme.textTheme.bodyMedium,
                     ),
                   ),
@@ -261,6 +477,81 @@ class _DetailBody extends ConsumerWidget {
   }
 
   static String _fmtNum(Decimal d) {
+    final n = d.toDouble();
+    if (n == n.roundToDouble()) return n.toInt().toString();
+    return n.toStringAsFixed(2);
+  }
+}
+
+class _LotTile extends StatelessWidget {
+  const _LotTile({
+    required this.lot,
+    required this.unit,
+    required this.isOwner,
+    required this.onMarkSpoiled,
+  });
+  final StockLot lot;
+  final String unit;
+  final bool isOwner;
+  final VoidCallback onMarkSpoiled;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final theme = Theme.of(context);
+    final days = lot.daysToExpiry;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: SuuqSpacing.md,
+        vertical: SuuqSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l.lotReceivedOn(
+                    context.dateShort(lot.receivedAt.toLocal()),
+                  ),
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    l.lotQtyLeft(_fmt(lot.qtyRemaining), unit),
+                    if (isOwner) context.money(lot.unitCost),
+                    if (lot.note != null && lot.note!.isNotEmpty) lot.note!,
+                  ].join(' · '),
+                  style: theme.textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: SuuqSpacing.xs),
+          if (lot.expiryDate != null && days != null) ...[
+            ExpiryBadge(expiryDate: lot.expiryDate!, daysToExpiry: days),
+            if (days < 0) ...[
+              const SizedBox(width: SuuqSpacing.xs),
+              TextButton(
+                onPressed: onMarkSpoiled,
+                style: TextButton.styleFrom(
+                  foregroundColor: theme.colorScheme.error,
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: Text(l.lotMarkSpoiled),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(Decimal d) {
     final n = d.toDouble();
     if (n == n.roundToDouble()) return n.toInt().toString();
     return n.toStringAsFixed(2);
@@ -332,10 +623,11 @@ class _MovementTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final positive = movement.quantityDelta > Decimal.zero;
-    final (icon, label) = _iconAndLabelFor(movement.movement);
+    final (icon, label) = _iconAndLabelFor(l, movement.movement);
     final color = positive ? scheme.primary : scheme.error;
 
     return Padding(
@@ -365,8 +657,9 @@ class _MovementTile extends StatelessWidget {
                 Text(label, style: theme.textTheme.titleSmall),
                 Text(
                   [
-                    if (movement.reason != null) movement.reason!,
-                    _formatDateTime(movement.createdAt.toLocal()),
+                    if (movement.reason != null)
+                      _reasonLabel(l, movement.reason!),
+                    context.dateTimeShort(movement.createdAt.toLocal()),
                   ].join(' · '),
                   style: theme.textTheme.bodySmall,
                 ),
@@ -386,18 +679,59 @@ class _MovementTile extends StatelessWidget {
     );
   }
 
-  (IconData, String) _iconAndLabelFor(String movement) {
+  (IconData, String) _iconAndLabelFor(AppLocalizations l, String movement) {
     switch (movement) {
       case 'restock':
-        return (Icons.arrow_downward_rounded, 'Restock');
+        return (Icons.arrow_downward_rounded, l.productMovementRestock);
+      case 'receive':
+        return (Icons.arrow_downward_rounded, l.productMovementReceive);
       case 'sale':
-        return (Icons.point_of_sale_rounded, 'Sale');
+        return (Icons.point_of_sale_rounded, l.productMovementSale);
       case 'refund':
-        return (Icons.undo_rounded, 'Refund');
+        return (Icons.undo_rounded, l.productMovementRefund);
       case 'adjustment':
-        return (Icons.tune_rounded, 'Adjustment');
+        return (Icons.tune_rounded, l.productMovementAdjustment);
+      case 'spoilage':
+        return (Icons.auto_delete_outlined, l.productMovementSpoilage);
+      case 'production':
+        return (Icons.bakery_dining_outlined, l.productMovementProduction);
       default:
         return (Icons.swap_horiz_rounded, movement);
+    }
+  }
+
+  /// Display label for a machine reason code; falls back to the raw value
+  /// for reasons we don't recognise (free-form/legacy data).
+  String _reasonLabel(AppLocalizations l, String reason) {
+    switch (reason) {
+      case 'restock':
+        return l.stockAdjustReasonRestock;
+      case 'supplier delivery':
+        return l.stockAdjustReasonSupplierDelivery;
+      case 'transfer in':
+        return l.stockAdjustReasonTransferIn;
+      case 'count correction':
+        return l.stockAdjustReasonCountCorrection;
+      case 'waste':
+        return l.stockAdjustReasonWaste;
+      case 'damaged':
+        return l.stockAdjustReasonDamaged;
+      case 'theft':
+        return l.stockAdjustReasonTheft;
+      case 'transfer out':
+        return l.stockAdjustReasonTransferOut;
+      case 'expired':
+        return l.spoilageReasonExpired;
+      case 'day-old':
+        return l.spoilageReasonDayOld;
+      case 'other':
+        return l.spoilageReasonOther;
+      case 'spoiled on receive':
+        return l.spoilageOnReceiveReason;
+      case 'spoiled in production':
+        return l.spoilageInProductionReason;
+      default:
+        return reason;
     }
   }
 
@@ -405,10 +739,5 @@ class _MovementTile extends StatelessWidget {
     final n = d.toDouble().abs();
     if (n == n.roundToDouble()) return n.toInt().toString();
     return n.toStringAsFixed(2);
-  }
-
-  String _formatDateTime(DateTime d) {
-    String p(int n) => n < 10 ? '0$n' : '$n';
-    return '${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
   }
 }

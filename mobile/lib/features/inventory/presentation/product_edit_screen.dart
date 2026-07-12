@@ -7,10 +7,14 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/services/cloudinary_service.dart';
+import 'package:suuqii/core/utils/formats.dart';
+import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:suuqii/core/utils/unit_conversion.dart';
+import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/data/recipes_repository.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
@@ -20,6 +24,35 @@ import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
 const _units = <String>['piece', 'kg', 'quintal', 'liter', 'pack', 'm'];
+
+/// Display label for a machine unit value (the value itself is persisted and
+/// must stay in English). Falls back to the raw value for user-typed units.
+String _unitDisplayLabel(AppLocalizations l, String unit) {
+  switch (unit) {
+    case 'piece':
+      return l.unitPiece;
+    case 'kg':
+      return l.unitKg;
+    case 'g':
+      return l.unitG;
+    case 'mg':
+      return l.unitMg;
+    case 'quintal':
+      return l.unitQuintal;
+    case 'liter':
+      return l.unitLiter;
+    case 'ml':
+      return l.unitMl;
+    case 'cup':
+      return l.unitCup;
+    case 'pack':
+      return l.unitPack;
+    case 'm':
+      return l.unitMeter;
+    default:
+      return unit;
+  }
+}
 
 class ProductEditScreen extends ConsumerStatefulWidget {
   const ProductEditScreen({super.key, this.productId});
@@ -50,7 +83,6 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   bool _busy = false;
   bool _uploading = false;
   double _uploadProgress = 0;
-  Decimal? _originalSelling;
 
   @override
   void initState() {
@@ -80,21 +112,26 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
         .read(productsRepositoryProvider)
         .byId(widget.productId!);
     if (!mounted || p == null) return;
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    final isOwner = auth is Authenticated && auth.isOwner;
     _name.text = p.name;
     _category.text = p.category ?? '';
-    _purchase.text = p.purchasePrice.toString();
+    // Purchase price is owner-only data. The server already masks it to 0 in
+    // cashier list responses, but never pre-fill it for cashiers regardless:
+    // the field is hidden for them and the value is omitted from update
+    // payloads (see ProductsRepository.update), so '0' can never leak or
+    // overwrite the real cost.
+    _purchase.text = isOwner ? p.purchasePrice.toString() : '0';
     _selling.text = p.sellingPrice.toString();
     _stock.text = p.stock.toString();
     _threshold.text = p.lowStockThreshold.toString();
     _barcode.text = p.barcode ?? '';
     _imageUrl.text = p.imageUrl ?? '';
     _unit = p.unit;
-    _originalSelling = p.sellingPrice;
 
     // Load existing recipe for bakery shops.
     // getForProduct already enriches items with supply name/unit/cost, so we
     // don't need a separate getAll() call here.
-    final auth = ref.read(authControllerProvider).valueOrNull;
     if (auth is Authenticated && auth.isBakery) {
       final existingRecipe = await ref
           .read(recipesRepositoryProvider)
@@ -129,19 +166,22 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       _ensureLoaded();
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final l = context.l10n;
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
     final isBakery = auth is Authenticated && auth.isBakery;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isCreating ? 'New product' : 'Edit product'),
+        title: Text(
+          widget.isCreating ? l.productEditNewTitle : l.productEditEditTitle,
+        ),
         actions: [
           if (!widget.isCreating)
             TextButton.icon(
               onPressed: () => _showStockSheet(context, isOwner: isOwner),
               icon: const Icon(Icons.tune_rounded, size: 18),
-              label: const Text('Adjust stock'),
+              label: Text(l.stockAdjustTitle),
             ),
         ],
       ),
@@ -156,12 +196,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _Section(
-                  title: 'Details',
+                  title: l.productSectionDetails,
                   children: [
                     TextFormField(
                       controller: _name,
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(labelText: 'Name'),
+                      decoration:
+                          InputDecoration(labelText: l.productNameLabel),
                       validator: _required,
                     ),
                     const SizedBox(height: SuuqSpacing.sm),
@@ -175,12 +216,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                     const SizedBox(height: SuuqSpacing.sm),
                     DropdownButtonFormField<String>(
                       initialValue: _unit,
-                      decoration: const InputDecoration(labelText: 'Unit'),
+                      decoration:
+                          InputDecoration(labelText: l.productUnitLabel),
                       items: _units
                           .map(
                             (u) => DropdownMenuItem(
                               value: u,
-                              child: Text(u),
+                              child: Text(_unitDisplayLabel(l, u)),
                             ),
                           )
                           .toList(),
@@ -191,7 +233,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 ),
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
-                  title: 'Pricing',
+                  title: l.productSectionPricing,
                   children: [
                     Row(
                       children: [
@@ -203,8 +245,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                               controller: _purchase,
                               keyboardType: const TextInputType
                                   .numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: 'Purchase',
+                              decoration: InputDecoration(
+                                labelText: l.productPurchaseLabel,
                                 prefixText: 'ETB  ',
                               ),
                               validator: _decimal,
@@ -217,8 +259,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                             controller: _selling,
                             keyboardType: const TextInputType
                                 .numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Selling price',
+                            decoration: InputDecoration(
+                              labelText: l.productSellingPriceLabel,
                               prefixText: 'ETB  ',
                             ),
                             validator: _decimal,
@@ -246,7 +288,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 ],
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
-                  title: 'Stock',
+                  title: l.productSectionStock,
                   children: [
                     Row(
                       children: [
@@ -258,11 +300,11 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                                 .numberWithOptions(decimal: true),
                             decoration: InputDecoration(
                               labelText: widget.isCreating
-                                  ? 'Initial stock'
-                                  : 'Current stock',
+                                  ? l.productInitialStockLabel
+                                  : l.productCurrentStockLabel,
                               helperText: widget.isCreating
                                   ? null
-                                  : 'Use Adjust stock to change',
+                                  : l.productStockHelper,
                             ),
                             validator: _decimal,
                           ),
@@ -273,9 +315,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                             controller: _threshold,
                             keyboardType: const TextInputType
                                 .numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Low at',
-                              helperText: 'Alert below this',
+                            decoration: InputDecoration(
+                              labelText: l.productLowAtLabel,
+                              helperText: l.productLowAtHelper,
                             ),
                             validator: _decimal,
                           ),
@@ -286,7 +328,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 ),
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
-                  title: 'Image',
+                  title: l.productSectionImage,
                   children: [
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,8 +379,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                                 ),
                                 label: Text(
                                   _normalizedImageUrl == null
-                                      ? 'Upload photo'
-                                      : 'Change photo',
+                                      ? l.productUploadPhoto
+                                      : l.productChangePhoto,
                                 ),
                               ),
                               if (_normalizedImageUrl != null) ...[
@@ -350,7 +392,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                                     Icons.delete_outline,
                                     size: 16,
                                   ),
-                                  label: const Text('Remove'),
+                                  label: Text(l.commonRemove),
                                   style: TextButton.styleFrom(
                                     foregroundColor:
                                         Theme.of(context).colorScheme.error,
@@ -366,13 +408,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 ),
                 const SizedBox(height: SuuqSpacing.lg),
                 _Section(
-                  title: 'Identifiers',
+                  title: l.productSectionIdentifiers,
                   children: [
                     TextFormField(
                       controller: _barcode,
-                      decoration: const InputDecoration(
-                        labelText: 'Barcode (optional)',
-                        prefixIcon: Icon(
+                      decoration: InputDecoration(
+                        labelText: l.productBarcodeOptionalLabel,
+                        prefixIcon: const Icon(
                           Icons.qr_code_scanner_rounded,
                           size: 20,
                         ),
@@ -400,7 +442,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                   )
                 : const Icon(Icons.check_rounded),
             onPressed: _busy ? null : () => _save(isOwner: isOwner, isBakery: isBakery),
-            label: Text(widget.isCreating ? 'Create product' : 'Save changes'),
+            label: Text(
+              widget.isCreating ? l.productCreateButton : l.commonSaveChanges,
+            ),
           ),
         ),
       ),
@@ -408,31 +452,32 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   }
 
   String? _required(String? v) =>
-      (v == null || v.trim().isEmpty) ? 'Required' : null;
+      (v == null || v.trim().isEmpty) ? context.l10n.commonRequired : null;
 
   String? _decimal(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Required';
+    if (v == null || v.trim().isEmpty) return context.l10n.commonRequired;
     final d = Decimal.tryParse(v.trim());
-    if (d == null || d < Decimal.zero) return 'Invalid number';
+    if (d == null || d < Decimal.zero) return context.l10n.productInvalidNumber;
     return null;
   }
 
   Future<void> _addRecipeLine(BuildContext context) async {
+    final l = context.l10n;
     final supplies = await ref.read(suppliesRepositoryProvider).getAll();
     if (!context.mounted) return;
     if (supplies.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Add supplies first before building a recipe'),
+        SnackBar(
+          content: Text(l.productRecipeAddSuppliesFirst),
         ),
       );
       return;
     }
-    final existing = _recipeLines.map((l) => l.supply.id).toSet();
+    final existing = _recipeLines.map((line) => line.supply.id).toSet();
     final available = supplies.where((s) => !existing.contains(s.id)).toList();
     if (available.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All supplies already added')),
+        SnackBar(content: Text(l.productRecipeAllSuppliesAdded)),
       );
       return;
     }
@@ -456,6 +501,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   }
 
   Future<void> _pickAndUploadImage() async {
+    final l = context.l10n;
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -464,12 +510,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Take a photo'),
+              title: Text(ctx.l10n.productTakePhoto),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
+              title: Text(ctx.l10n.productChooseFromGallery),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
           ],
@@ -499,7 +545,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: $e')),
+          SnackBar(content: Text(l.productUploadFailed(localizedErrorMessage(l, e)))),
         );
       }
     } finally {
@@ -509,7 +555,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
 
   String get _previewName {
     final name = _name.text.trim();
-    return name.isEmpty ? 'Preview' : name;
+    return name.isEmpty ? context.l10n.productImagePreviewName : name;
   }
 
   String? get _normalizedImageUrl {
@@ -532,13 +578,15 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
         : _category.text.trim();
     final barcode = _barcode.text.trim().isEmpty ? null : _barcode.text.trim();
     final imageUrl = _normalizedImageUrl;
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
 
-    final priceChanged = !widget.isCreating &&
-        _originalSelling != null &&
-        _originalSelling != selling;
-    final needsPin = !isOwner && (widget.isCreating || priceChanged);
+    // product.create and product.update are blanket-sensitive server-side
+    // (SENSITIVE_OPS): any cashier create/edit — even a name or category
+    // change — must carry an owner challenge or the sync op is rejected.
+    // Collect the PIN upfront so offline edits don't fail hours later.
+    final needsPin = !isOwner;
     String? challenge;
     if (needsPin) {
       challenge = await requestOwnerChallenge(context, ref);
@@ -602,21 +650,29 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
 
       router.pop();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  /// Receive a batch (Add) or apply a manual correction (Remove) from the
+  /// edit screen's app-bar action. Mirrors the product-detail flow.
   Future<void> _showStockSheet(
     BuildContext context, {
     required bool isOwner,
   }) async {
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
-    final result = await showModalBottomSheet<({Decimal delta, String reason})>(
+    final product =
+        await ref.read(productsRepositoryProvider).byId(widget.productId!);
+    if (product == null || !context.mounted) return;
+    final result = await showModalBottomSheet<StockAdjustResult>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const StockAdjustSheet(),
+      builder: (_) => StockAdjustSheet(product: product),
     );
     if (result == null) return;
 
@@ -628,17 +684,39 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     }
 
     try {
-      await ref.read(productsRepositoryProvider).adjustStock(
-            productId: widget.productId!,
-            delta: result.delta,
-            reason: result.reason,
-            ownerChallengeToken: challenge,
+      switch (result) {
+        case ReceiveStockResult():
+          await ref.read(lotsRepositoryProvider).receiveStock(
+                productId: widget.productId!,
+                quantity: result.quantity,
+                unitCost: result.unitCost,
+                expiryDate: result.expiryDate,
+                spoiledQuantity: result.spoiledQuantity,
+                note: result.note,
+                ownerChallengeToken: challenge,
+              );
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(l.stockReceiveSuccess('${result.quantity}')),
+            ),
           );
-      messenger.showSnackBar(
-        SnackBar(content: Text('Stock adjusted by ${result.delta}')),
-      );
+        case RemoveStockResult():
+          await ref.read(productsRepositoryProvider).adjustStock(
+                productId: widget.productId!,
+                delta: -result.quantity,
+                reason: result.reason,
+                ownerChallengeToken: challenge,
+              );
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(l.stockAdjustSuccess('-${result.quantity}')),
+            ),
+          );
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     }
   }
 }
@@ -662,6 +740,7 @@ class _RecipeSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
 
@@ -683,7 +762,7 @@ class _RecipeSection extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'RECIPE',
+                  l.productRecipeTitle,
                   style: theme.textTheme.labelSmall?.copyWith(
                     letterSpacing: 1.2,
                   ),
@@ -691,7 +770,7 @@ class _RecipeSection extends StatelessWidget {
               ),
               if (lines.isNotEmpty)
                 Text(
-                  'Cost: ETB ${totalCost.toStringAsFixed(2)}',
+                  l.productRecipeCost(context.money(totalCost)),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.primary,
                     fontWeight: FontWeight.w600,
@@ -711,8 +790,7 @@ class _RecipeSection extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(SuuqSpacing.md),
                   child: Text(
-                    'No ingredients added yet.\n'
-                    'Add supplies to calculate cost automatically.',
+                    l.productRecipeEmpty,
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
@@ -735,7 +813,7 @@ class _RecipeSection extends StatelessWidget {
               TextButton.icon(
                 onPressed: onAddLine,
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add ingredient'),
+                label: Text(l.productRecipeAddIngredient),
               ),
             ],
           ),
@@ -802,7 +880,12 @@ class _RecipeLine extends StatelessWidget {
               DropdownButton<String>(
                 value: units.contains(selectedUnit) ? selectedUnit : units.first,
                 items: units
-                    .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                    .map(
+                      (u) => DropdownMenuItem(
+                        value: u,
+                        child: Text(_unitDisplayLabel(context.l10n, u)),
+                      ),
+                    )
                     .toList(),
                 onChanged: (u) {
                   if (u != null) onUnitChanged(u);
@@ -843,7 +926,7 @@ class _SupplyPickerSheet extends StatelessWidget {
               SuuqSpacing.lg, SuuqSpacing.md, SuuqSpacing.lg, 0,
             ),
             child: Text(
-              'Pick an ingredient',
+              context.l10n.productRecipePickIngredient,
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -852,7 +935,10 @@ class _SupplyPickerSheet extends StatelessWidget {
             (s) => ListTile(
               title: Text(s.name),
               subtitle: Text(
-                '${s.quantityOnHand.toStringAsFixed(2)} ${s.unit} on hand',
+                context.l10n.productSupplyOnHand(
+                  s.quantityOnHand.toStringAsFixed(2),
+                  s.unit,
+                ),
               ),
               onTap: () => Navigator.pop(context, s),
             ),
@@ -925,7 +1011,7 @@ class _CategoryField extends StatelessWidget {
           onChanged: (v) => controller.text = v,
           onFieldSubmitted: (_) => onSubmit(),
           decoration: InputDecoration(
-            labelText: 'Category (optional)',
+            labelText: ctx.l10n.productCategoryOptionalLabel,
             suffixIcon: categories.isNotEmpty
                 ? const Icon(Icons.expand_more, size: 18)
                 : null,

@@ -1,9 +1,12 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/dashboard/data/dashboard_repository.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 
@@ -22,9 +25,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final seriesAsync = ref.watch(salesSeriesProvider(range: _range));
     final topAsync = ref.watch(topProductsProvider(range: _range));
     final mixAsync = ref.watch(paymentMixProvider(range: _range));
+    final l = context.l10n;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Reports')),
+      appBar: AppBar(title: Text(l.settingsReports)),
       body: RefreshIndicator(
         onRefresh: () async {
           ref
@@ -41,33 +45,39 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ),
           children: [
             SegmentedButton<DashboardRange>(
-              segments: const [
-                ButtonSegment(value: DashboardRange.week, label: Text('7 days')),
-                ButtonSegment(value: DashboardRange.month, label: Text('30 days')),
+              segments: [
+                ButtonSegment(
+                  value: DashboardRange.week,
+                  label: Text(l.dashboardRange7Days),
+                ),
+                ButtonSegment(
+                  value: DashboardRange.month,
+                  label: Text(l.dashboardRange30Days),
+                ),
               ],
               selected: {_range},
               onSelectionChanged: (s) => setState(() => _range = s.first),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            const _SectionHeader('SALES OVER TIME'),
+            _SectionHeader(l.reportSalesOverTime),
             const SizedBox(height: SuuqSpacing.xs),
             seriesAsync.when(
               loading: _loadingCard,
-              error: (e, _) => _errorCard('$e'),
+              error: (e, _) => _errorCard(context.errorMessage(e)),
               data: (points) => points.isEmpty
-                  ? _emptyCard('No sales recorded yet.')
+                  ? _emptyCard(l.reportNoSalesYet)
                   : SectionCard(
                       child: _SalesBarChart(points: points),
                     ),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            const _SectionHeader('TOP PRODUCTS'),
+            _SectionHeader(l.reportTopProducts),
             const SizedBox(height: SuuqSpacing.xs),
             topAsync.when(
               loading: _loadingCard,
-              error: (e, _) => _errorCard('$e'),
+              error: (e, _) => _errorCard(context.errorMessage(e)),
               data: (items) => items.isEmpty
-                  ? _emptyCard('No sold products in this range.')
+                  ? _emptyCard(l.reportNoSoldProducts)
                   : SectionCard(
                       padding: EdgeInsets.zero,
                       child: Column(
@@ -85,13 +95,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     ),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            const _SectionHeader('PAYMENT MIX'),
+            _SectionHeader(l.reportPaymentMix),
             const SizedBox(height: SuuqSpacing.xs),
             mixAsync.when(
               loading: _loadingCard,
-              error: (e, _) => _errorCard('$e'),
+              error: (e, _) => _errorCard(context.errorMessage(e)),
               data: (mix) => mix.isEmpty
-                  ? _emptyCard('No sales in this range.')
+                  ? _emptyCard(l.reportNoSalesInRange)
                   : SectionCard(child: _PaymentMixView(mix: mix)),
             ),
           ],
@@ -145,6 +155,7 @@ class _SalesBarChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l = context.l10n;
     final maxRevenue = points
         .map((p) => p.revenue.toDouble())
         .fold<double>(0, (a, b) => b > a ? b : a);
@@ -166,9 +177,9 @@ class _SalesBarChart extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Revenue', style: theme.textTheme.bodySmall),
+                  Text(l.revenue, style: theme.textTheme.bodySmall),
                   Text(
-                    formatMoney(totalRevenue),
+                    context.money(totalRevenue),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                       fontFeatures: const [FontFeature.tabularFigures()],
@@ -181,9 +192,9 @@ class _SalesBarChart extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Profit', style: theme.textTheme.bodySmall),
+                  Text(l.profit, style: theme.textTheme.bodySmall),
                   Text(
-                    formatMoney(totalProfit),
+                    context.money(totalProfit),
                     style: theme.textTheme.titleLarge?.copyWith(
                       color: scheme.primary,
                       fontWeight: FontWeight.w700,
@@ -209,7 +220,7 @@ class _SalesBarChart extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Tooltip(
                     message:
-                        '${_shortDate(p.date)}\n${formatMoney(p.revenue)}',
+                        '${context.dateShort(p.date)}\n${context.money(p.revenue)}',
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
@@ -243,7 +254,7 @@ class _SalesBarChart extends StatelessWidget {
             return Expanded(
               child: Center(
                 child: Text(
-                  _dayLabel(p.date),
+                  _dayLabel(context, p.date),
                   style: theme.textTheme.labelSmall,
                 ),
               ),
@@ -254,15 +265,8 @@ class _SalesBarChart extends StatelessWidget {
     );
   }
 
-  static String _shortDate(DateTime d) {
-    String p(int n) => n < 10 ? '0$n' : '$n';
-    return '${d.year}-${p(d.month)}-${p(d.day)}';
-  }
-
-  static String _dayLabel(DateTime d) {
-    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return weekdays[d.weekday - 1].substring(0, 1);
-  }
+  static String _dayLabel(BuildContext context, DateTime d) =>
+      DateFormat.E(context.intlLocale).format(d).substring(0, 1);
 }
 
 class _TopProductTile extends StatelessWidget {
@@ -279,6 +283,7 @@ class _TopProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l = context.l10n;
     final ratio = maxRevenue == Decimal.zero
         ? 0.0
         : (product.revenue.toDouble() / maxRevenue.toDouble()).clamp(0.0, 1.0);
@@ -292,7 +297,7 @@ class _TopProductTile extends StatelessWidget {
           SizedBox(
             width: 28,
             child: Text(
-              '#$rank',
+              l.reportRank(rank),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.onSurfaceVariant,
                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -321,8 +326,10 @@ class _TopProductTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${_fmtQty(product.qtySold)} sold · '
-                  'profit ${formatMoney(product.profit)}',
+                  l.reportSoldAndProfit(
+                    _fmtQty(product.qtySold),
+                    context.money(product.profit),
+                  ),
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -330,7 +337,7 @@ class _TopProductTile extends StatelessWidget {
           ),
           const SizedBox(width: SuuqSpacing.sm),
           Text(
-            formatMoney(product.revenue),
+            context.money(product.revenue),
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
               fontFeatures: const [FontFeature.tabularFigures()],
@@ -356,6 +363,7 @@ class _PaymentMixView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l = context.l10n;
     final total = mix.fold<Decimal>(
       Decimal.zero,
       (a, m) => a + m.total,
@@ -365,19 +373,19 @@ class _PaymentMixView extends StatelessWidget {
     final methods = [
       (
         key: 'cash',
-        label: 'Cash',
+        label: l.paymentCash,
         icon: Icons.payments_rounded,
         color: scheme.primary,
       ),
       (
         key: 'mobile_money',
-        label: 'Mobile money',
+        label: l.paymentMobileMoney,
         icon: Icons.phone_iphone_rounded,
         color: scheme.tertiary,
       ),
       (
         key: 'credit',
-        label: 'Credit',
+        label: l.paymentCredit,
         icon: Icons.access_time_rounded,
         color: scheme.error,
       ),
@@ -431,7 +439,7 @@ class _PaymentMixView extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    formatMoney(byMethod[m.key]!.total),
+                    context.money(byMethod[m.key]!.total),
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),

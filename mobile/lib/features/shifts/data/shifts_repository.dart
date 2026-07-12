@@ -5,6 +5,7 @@ import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/shifts/domain/entities/shift.dart';
@@ -51,7 +52,7 @@ class ShiftsRepository {
               shopId: shopId,
               userId: userId,
               openedAt: openedAt,
-              openingCash: openingCash.toDouble(),
+              openingCash: santimFromDecimal(openingCash),
             ),
           );
       await db.into(db.syncEventsTable).insert(
@@ -86,7 +87,7 @@ class ShiftsRepository {
 
     final breakdown = await computeBreakdown(
       shiftId,
-      Decimal.parse(row.openingCash.toString()),
+      decimalFromSantim(row.openingCash),
     );
     final now = DateTime.now().toUtc();
 
@@ -94,8 +95,8 @@ class ShiftsRepository {
       await (db.update(db.shiftsTable)..where((t) => t.id.equals(shiftId)))
           .write(
         ShiftsTableCompanion(
-          declaredClosingCash: Value(declaredCash.toDouble()),
-          expectedClosingCash: Value(breakdown.expected.toDouble()),
+          declaredClosingCash: Value(santimFromDecimal(declaredCash)),
+          expectedClosingCash: Value(santimFromDecimal(breakdown.expected)),
           closedAt: Value(now),
           note: Value(note),
           updatedAt: Value(now),
@@ -128,7 +129,9 @@ class ShiftsRepository {
     String shiftId,
     Decimal openingCash,
   ) async {
-    Decimal asDec(double? v) => Decimal.parse((v ?? 0).toString());
+    // Money is stored as int64 santim, so each SUM below is exact
+    // integer math and converts back losslessly.
+    Decimal asDec(int? v) => decimalFromSantim(v ?? 0);
 
     final cashSales = await db.customSelect(
       'SELECT COALESCE(SUM(total), 0) AS t FROM sales '
@@ -154,10 +157,10 @@ class ShiftsRepository {
 
     return ShiftBreakdown(
       openingCash: openingCash,
-      cashSales: asDec(cashSales.read<double?>('t')),
-      debtCollected: asDec(debtCollected.read<double?>('t')),
-      expenses: asDec(expenses.read<double?>('t')),
-      cashRefunds: asDec(cashRefunds.read<double?>('t')),
+      cashSales: asDec(cashSales.read<int?>('t')),
+      debtCollected: asDec(debtCollected.read<int?>('t')),
+      expenses: asDec(expenses.read<int?>('t')),
+      cashRefunds: asDec(cashRefunds.read<int?>('t')),
     );
   }
 
@@ -167,13 +170,13 @@ class ShiftsRepository {
         userId: r.userId,
         openedAt: r.openedAt,
         closedAt: r.closedAt,
-        openingCash: Decimal.parse(r.openingCash.toString()),
+        openingCash: decimalFromSantim(r.openingCash),
         declaredClosingCash: r.declaredClosingCash == null
             ? null
-            : Decimal.parse(r.declaredClosingCash.toString()),
+            : decimalFromSantim(r.declaredClosingCash!),
         expectedClosingCash: r.expectedClosingCash == null
             ? null
-            : Decimal.parse(r.expectedClosingCash.toString()),
+            : decimalFromSantim(r.expectedClosingCash!),
         note: r.note,
       );
 }

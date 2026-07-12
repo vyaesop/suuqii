@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/debt/data/debts_remote_data_source.dart';
@@ -46,17 +47,18 @@ class DebtsRepository {
   /// the cashier before extending more credit to an already-indebted customer.
   Future<Decimal> outstandingByPhone(String phone) async {
     if (phone.isEmpty) return Decimal.zero;
+    // Money is stored as int64 santim, so the SUM is exact integer math.
     final rows = await db.customSelect(
-      'SELECT COALESCE(SUM(amount_owed - amount_paid), 0.0) AS outstanding '
+      'SELECT COALESCE(SUM(amount_owed - amount_paid), 0) AS outstanding '
       'FROM debts '
       'WHERE shop_id = ? AND customer_phone = ? '
       "AND status IN ('open', 'partial') AND deleted_at IS NULL",
       variables: [Variable.withString(shopId), Variable.withString(phone)],
       readsFrom: {db.debtsTable},
     ).get();
-    final val = rows.firstOrNull?.read<double>('outstanding');
+    final val = rows.firstOrNull?.read<int>('outstanding');
     if (val == null) return Decimal.zero;
-    return Decimal.parse(val.toStringAsFixed(2));
+    return decimalFromSantim(val);
   }
 
   Future<int> refreshFromServer() async {
@@ -98,7 +100,7 @@ class DebtsRepository {
               debtId: debtId,
               shopId: shopId,
               shiftId: Value(shift),
-              amount: amount.toDouble(),
+              amount: santimFromDecimal(amount),
               paidAt: now,
               method: method,
               userId: userId,
@@ -109,7 +111,7 @@ class DebtsRepository {
       // Update local debt state (server is authoritative; we mirror eagerly)
       await (db.update(db.debtsTable)..where((t) => t.id.equals(debtId))).write(
         DebtsTableCompanion(
-          amountPaid: Value(newPaid.toDouble()),
+          amountPaid: Value(santimFromDecimal(newPaid)),
           status: Value(debtStatusKey(newStatus)),
           updatedAt: Value(now),
         ),

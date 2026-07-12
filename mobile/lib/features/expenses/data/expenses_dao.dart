@@ -1,7 +1,7 @@
-import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/expenses_table.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/expenses/domain/entities/expense.dart';
 
 part 'expenses_dao.g.dart';
@@ -31,7 +31,7 @@ class ExpensesDao extends DatabaseAccessor<AppDatabase> with _$ExpensesDaoMixin 
             userId: e.userId,
             shiftId: Value(e.shiftId),
             title: e.title,
-            amount: e.amount.toDouble(),
+            amount: santimFromDecimal(e.amount),
             category: Value(e.category),
             description: Value(e.description),
             occurredAt: e.occurredAt,
@@ -48,7 +48,7 @@ class ExpensesDao extends DatabaseAccessor<AppDatabase> with _$ExpensesDaoMixin 
         userId: r.userId,
         shiftId: r.shiftId,
         title: r.title,
-        amount: Decimal.parse(r.amount.toString()),
+        amount: decimalFromSantim(r.amount),
         category: r.category,
         description: r.description,
         occurredAt: r.occurredAt,

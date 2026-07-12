@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/debt/domain/entities/debt.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
@@ -41,6 +43,7 @@ class _DebtsScreenState extends ConsumerState<DebtsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return Scaffold(
       body: Column(
         children: [
@@ -48,10 +51,10 @@ class _DebtsScreenState extends ConsumerState<DebtsScreen>
             padding: const EdgeInsets.symmetric(horizontal: SuuqSpacing.md),
             child: TabBar(
               controller: _tabs,
-              tabs: const [
-                Tab(text: 'Open'),
-                Tab(text: 'Partial'),
-                Tab(text: 'Paid'),
+              tabs: [
+                Tab(text: l.debtTabOpen),
+                Tab(text: l.debtTabPartial),
+                Tab(text: l.debtTabPaid),
               ],
             ),
           ),
@@ -78,14 +81,15 @@ class _DebtList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final debtsAsync = ref.watch(watchDebtsProvider(status: status));
+    final l = context.l10n;
     return RefreshIndicator(
       onRefresh: () => ref.read(debtsSyncProvider.notifier).refresh(),
       child: debtsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => EmptyState(
           icon: Icons.error_outline,
-          title: 'Failed to load',
-          message: '$e',
+          title: l.debtFailedToLoad,
+          message: context.errorMessage(e),
         ),
         data: (items) {
           if (items.isEmpty) {
@@ -97,14 +101,14 @@ class _DebtList extends ConsumerWidget {
                 DebtStatus.writtenOff => Icons.cancel_outlined,
               },
               title: switch (status) {
-                DebtStatus.open => 'No open debts',
-                DebtStatus.partial => 'No partial debts',
-                DebtStatus.paid => 'No paid debts yet',
-                DebtStatus.writtenOff => 'No written-off debts',
+                DebtStatus.open => l.debtEmptyOpenTitle,
+                DebtStatus.partial => l.debtEmptyPartialTitle,
+                DebtStatus.paid => l.debtEmptyPaidTitle,
+                DebtStatus.writtenOff => l.debtEmptyWrittenOffTitle,
               },
               message: status == DebtStatus.paid
-                  ? 'Collected payments will appear here.'
-                  : 'Credit sales will show up here.',
+                  ? l.debtEmptyPaidMessage
+                  : l.debtEmptyMessage,
             );
           }
           return ListView.separated(
@@ -130,6 +134,7 @@ class _DebtRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
+    final l = context.l10n;
     final fraction = debt.amountOwed.toDouble() == 0
         ? 0.0
         : (debt.amountPaid.toDouble() / debt.amountOwed.toDouble())
@@ -182,7 +187,7 @@ class _DebtRow extends StatelessWidget {
                           [
                             if (debt.customerPhone != null) debt.customerPhone!,
                             if (debt.dueDate != null)
-                              'Due ${_short(debt.dueDate!)}',
+                              l.debtDueShort(context.dateShort(debt.dueDate!)),
                           ].join(' · '),
                           style: theme.textTheme.bodySmall,
                         ),
@@ -190,8 +195,8 @@ class _DebtRow extends StatelessWidget {
                     ),
                   ),
                   if (debt.isOverdue)
-                    const StatusPill(
-                      label: 'OVERDUE',
+                    StatusPill(
+                      label: l.debtStatusOverdue,
                       intent: PillIntent.danger,
                     ),
                 ],
@@ -211,11 +216,11 @@ class _DebtRow extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${formatMoney(debt.amountPaid)} / ${formatMoney(debt.amountOwed)}',
+                    '${context.money(debt.amountPaid)} / ${context.money(debt.amountOwed)}',
                     style: theme.textTheme.bodySmall,
                   ),
                   Text(
-                    formatMoney(debt.remaining),
+                    context.money(debt.remaining),
                     style: theme.textTheme.titleMedium?.copyWith(
                       color: debt.isOverdue
                           ? scheme.error
@@ -231,7 +236,4 @@ class _DebtRow extends StatelessWidget {
       ),
     );
   }
-
-  String _short(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
-  String _p(int n) => n < 10 ? '0$n' : '$n';
 }

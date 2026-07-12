@@ -9,8 +9,11 @@ class ProductsTable extends Table {
   TextColumn get shopId => text()();
   TextColumn get name => text()();
   TextColumn get category => text().nullable()();
-  RealColumn get purchasePrice => real()();
-  RealColumn get sellingPrice => real()();
+  /// Money columns are stored as int64 santim (1 birr = 100 santim) so SQL
+  /// arithmetic stays exact. Convert at the DAO boundary via
+  /// santimFromDecimal / decimalFromSantim.
+  IntColumn get purchasePrice => integer()();
+  IntColumn get sellingPrice => integer()();
   RealColumn get stock => real().withDefault(const Constant(0))();
   RealColumn get lowStockThreshold => real().withDefault(const Constant(0))();
   TextColumn get unit => text().withDefault(const Constant('piece'))();

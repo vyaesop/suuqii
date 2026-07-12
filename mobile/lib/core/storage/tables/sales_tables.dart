@@ -9,10 +9,11 @@ class SalesTable extends Table {
   TextColumn get shopId => text()();
   TextColumn get shiftId => text().nullable()();
   TextColumn get userId => text()();
-  RealColumn get subtotal => real()();
-  RealColumn get discount => real().withDefault(const Constant(0))();
-  RealColumn get total => real()();
-  RealColumn get costTotal => real()();
+  /// Money columns are stored as int64 santim (1 birr = 100 santim).
+  IntColumn get subtotal => integer()();
+  IntColumn get discount => integer().withDefault(const Constant(0))();
+  IntColumn get total => integer()();
+  IntColumn get costTotal => integer()();
   TextColumn get paymentMethod => text()();
   TextColumn get status => text().withDefault(const Constant('completed'))();
   DateTimeColumn get occurredAt => dateTime()();
@@ -35,8 +36,10 @@ class SaleItemsTable extends Table {
   TextColumn get productId => text()();
   TextColumn get productNameSnapshot => text()();
   RealColumn get quantity => real()();
-  RealColumn get unitPrice => real()();
-  RealColumn get unitCost => real()();
+
+  /// Money columns are stored as int64 santim (1 birr = 100 santim).
+  IntColumn get unitPrice => integer()();
+  IntColumn get unitCost => integer()();
 
   @override
   Set<Column> get primaryKey => {id};

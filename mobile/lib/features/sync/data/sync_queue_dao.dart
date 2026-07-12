@@ -42,6 +42,32 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
     return q.watchSingle().map((r) => r.read(syncEventsTable.id.count()) ?? 0);
   }
 
+  /// One-shot count of events still waiting to be pushed. Used by the
+  /// logout / shop-switch guard before local data is wiped.
+  Future<int> pendingCount() async {
+    final q = selectOnly(syncEventsTable)
+      ..addColumns([syncEventsTable.id.count()])
+      ..where(syncEventsTable.status.equals('pending'));
+    final r = await q.getSingle();
+    return r.read(syncEventsTable.id.count()) ?? 0;
+  }
+
+  /// Events the server rejected or that exhausted their retries.
+  Stream<int> watchDeadLetterCount() {
+    final q = selectOnly(syncEventsTable)
+      ..addColumns([syncEventsTable.id.count()])
+      ..where(syncEventsTable.status.isIn(['rejected', 'failed']));
+    return q.watchSingle().map((r) => r.read(syncEventsTable.id.count()) ?? 0);
+  }
+
+  Stream<List<SyncEventRow>> watchDeadLettered({int limit = 20}) {
+    final q = select(syncEventsTable)
+      ..where((t) => t.status.isIn(['rejected', 'failed']))
+      ..orderBy([(t) => OrderingTerm.desc(t.id)])
+      ..limit(limit);
+    return q.watch();
+  }
+
   Future<void> markSynced(int id) =>
       (update(syncEventsTable)..where((t) => t.id.equals(id)))
           .write(const SyncEventsTableCompanion(status: Value('synced')));
@@ -51,6 +77,16 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
         SyncEventsTableCompanion(
           status: const Value('rejected'),
           lastError: Value(detail ?? code ?? 'rejected'),
+        ),
+      );
+
+  /// Dead-letter: permanent client-side failure (non-retryable 4xx or
+  /// retry budget exhausted). The queue moves on past these events.
+  Future<void> markFailed(int id, String error) =>
+      (update(syncEventsTable)..where((t) => t.id.equals(id))).write(
+        SyncEventsTableCompanion(
+          status: const Value('failed'),
+          lastError: Value(error),
         ),
       );
 

@@ -51,6 +51,7 @@ void main() {
     creditSales: Decimal.zero,
     outstandingDebt: Decimal.zero,
     lowStock: const [],
+    spoilageCost: Decimal.zero,
     fetchedAt: DateTime.utc(2026, 5, 18, 10, 0),
   );
 

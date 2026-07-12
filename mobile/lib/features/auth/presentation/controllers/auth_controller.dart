@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:suuqii/core/device/device_id.dart';
@@ -5,8 +7,22 @@ import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/providers.dart';
+import 'package:suuqii/features/sync/data/sync_worker.dart';
 
 part 'auth_controller.g.dart';
+
+/// Thrown when logout / shop-switch would wipe local data while unsynced
+/// events are still queued. UI catches this to ask for explicit confirmation
+/// before retrying with `force: true`.
+class PendingSyncException implements Exception {
+  PendingSyncException(this.pendingCount);
+
+  final int pendingCount;
+
+  @override
+  String toString() =>
+      '$pendingCount unsynced record(s) would be discarded';
+}
 
 @Riverpod(keepAlive: true)
 class AuthController extends _$AuthController {
@@ -24,6 +40,7 @@ class AuthController extends _$AuthController {
     required String phone,
     required String password,
     String? deviceLabel,
+    bool force = false,
   }) async {
     // Capture previous shop before clearing state — once we set AsyncLoading
     // state.valueOrNull becomes null and the shop-switch check never fires.
@@ -41,6 +58,14 @@ class AuthController extends _$AuthController {
       // Clear local cache if switching to a different shop so stale data
       // from the previous session never leaks through.
       if (prevShopId != null && prevShopId != auth.shopId) {
+        // Never silently destroy unsynced events from the previous shop.
+        // No flush here: we already hold the new shop's tokens, so pushing
+        // the old shop's queue now would send it with the wrong credentials.
+        final pending =
+            await ref.read(appDatabaseProvider).syncQueueDao.pendingCount();
+        if (pending > 0 && !force) {
+          throw PendingSyncException(pending);
+        }
         await ref.read(appDatabaseProvider).clearAllShopData();
       }
       state = AsyncData(auth);
@@ -108,11 +133,33 @@ class AuthController extends _$AuthController {
     }
   }
 
-  Future<void> logout() async {
+  Future<void> logout({bool force = false}) async {
+    // Try to drain the queue first; if events remain, block the logout
+    // (unless forced) instead of silently discarding local-only records.
+    final pending = await _flushPendingSync();
+    if (pending > 0 && !force) {
+      throw PendingSyncException(pending);
+    }
     final repo = await ref.read(authRepositoryProvider.future);
     await repo.logout();
     ref.read(tokenStoreProvider).access = null;
     await ref.read(appDatabaseProvider).clearAllShopData();
     state = const AsyncData(Unauthenticated());
+  }
+
+  /// Kicks the sync worker and waits briefly for the queue to drain.
+  /// Returns the number of events still pending afterwards.
+  Future<int> _flushPendingSync() async {
+    final dao = ref.read(appDatabaseProvider).syncQueueDao;
+    if (await dao.pendingCount() == 0) return 0;
+    try {
+      await ref
+          .read(syncWorkerProvider)
+          .kick()
+          .timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      // Offline or slow network — fall through and report what's left.
+    }
+    return dao.pendingCount();
   }
 }

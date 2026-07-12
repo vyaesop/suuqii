@@ -30,4 +30,8 @@ final class Authenticated extends AuthState {
   final String shopType;
 
   bool get isBakery => shopType == 'bakery';
+
+  /// Owners see the full app; cashiers get the restricted surface described
+  /// in docs/17-roles.md (owner-only routes hidden, sensitive ops PIN-gated).
+  bool get isOwner => role == 'owner';
 }

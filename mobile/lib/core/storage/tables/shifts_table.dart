@@ -10,9 +10,10 @@ class ShiftsTable extends Table {
   TextColumn get userId => text()();
   DateTimeColumn get openedAt => dateTime()();
   DateTimeColumn get closedAt => dateTime().nullable()();
-  RealColumn get openingCash => real()();
-  RealColumn get declaredClosingCash => real().nullable()();
-  RealColumn get expectedClosingCash => real().nullable()();
+  /// Money columns are stored as int64 santim (1 birr = 100 santim).
+  IntColumn get openingCash => integer()();
+  IntColumn get declaredClosingCash => integer().nullable()();
+  IntColumn get expectedClosingCash => integer().nullable()();
   TextColumn get note => text().nullable()();
   TextColumn get deviceId => text().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();

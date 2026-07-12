@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/data/sales_repository.dart';
@@ -16,23 +18,24 @@ class RecentSalesScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final salesAsync = ref.watch(watchRecentSalesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Recent sales')),
+      appBar: AppBar(title: Text(l.recentSalesTitle)),
       body: salesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => EmptyState(
           icon: Icons.error_outline,
-          title: 'Failed to load',
-          message: '$e',
+          title: l.recentSalesLoadFailed,
+          message: context.errorMessage(e),
         ),
         data: (sales) {
           if (sales.isEmpty) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.point_of_sale_outlined,
-              title: 'No sales yet',
-              message: 'Sales you record on this device will appear here.',
+              title: l.recentSalesEmptyTitle,
+              message: l.recentSalesEmptyMessage,
             );
           }
           return ListView.separated(
@@ -61,28 +64,31 @@ class RecentSalesScreen extends ConsumerWidget {
     RecentSale sale,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l = context.l10n;
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Refund this sale?'),
-        content: Text(
-          'Reverses the sale of ${formatMoney(sale.total)}, restores '
-          'stock for every item, and logs the action.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(dl.recentSalesRefundConfirmTitle),
+          content: Text(
+            dl.recentSalesRefundConfirmBody(ctx.money(sale.total)),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Refund'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(dl.recentSalesRefund),
+            ),
+          ],
+        );
+      },
     );
     if (!(confirm ?? false)) return;
 
@@ -98,11 +104,29 @@ class RecentSalesScreen extends ConsumerWidget {
             saleId: sale.id,
             ownerChallengeToken: challenge,
           );
-      messenger.showSnackBar(const SnackBar(content: Text('Refund recorded')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.recentSalesRefundRecorded)),
+      );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.recentSalesRefundFailed(_refundErrorMessage(l, e))),
+        ),
+      );
     }
   }
+}
+
+/// Maps [StateError]s thrown by the sales repository during refund to
+/// localized messages; falls back to [localizedErrorMessage] otherwise.
+String _refundErrorMessage(AppLocalizations l, Object error) {
+  if (error is StateError) {
+    if (error.message == 'Sale not found') return l.recentSalesErrNotFound;
+    if (error.message == 'Sale already refunded') {
+      return l.recentSalesErrAlreadyRefunded;
+    }
+  }
+  return localizedErrorMessage(l, error);
 }
 
 class _SaleTile extends StatelessWidget {
@@ -112,12 +136,13 @@ class _SaleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final paymentLabel = switch (sale.paymentMethod) {
-      'cash' => 'Cash',
-      'mobile_money' => 'Mobile',
-      'credit' => 'Credit',
+      'cash' => l.paymentCash,
+      'mobile_money' => l.paymentMobile,
+      'credit' => l.paymentCredit,
       _ => sale.paymentMethod,
     };
     final paymentIcon = switch (sale.paymentMethod) {
@@ -157,7 +182,7 @@ class _SaleTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      formatMoney(sale.total),
+                      context.money(sale.total),
                       style: theme.textTheme.titleMedium?.copyWith(
                         decoration: sale.isRefunded
                             ? TextDecoration.lineThrough
@@ -167,34 +192,31 @@ class _SaleTile extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '$paymentLabel · '
-                      '${sale.itemCount} ${sale.itemCount == 1 ? "item" : "items"} · '
-                      '${_formatDateTime(sale.occurredAt.toLocal())}',
+                      l.recentSalesSummary(
+                        paymentLabel,
+                        sale.itemCount,
+                        context.dateTimeShort(sale.occurredAt.toLocal()),
+                      ),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
               if (sale.isRefunded)
-                const StatusPill(
-                  label: 'REFUNDED',
+                StatusPill(
+                  label: l.recentSalesRefundedCaps,
                   intent: PillIntent.danger,
                 )
               else
                 OutlinedButton.icon(
                   icon: const Icon(Icons.undo_rounded, size: 16),
                   onPressed: onRefund,
-                  label: const Text('Refund'),
+                  label: Text(l.recentSalesRefund),
                 ),
             ],
           ),
         ],
       ),
     );
-  }
-
-  static String _formatDateTime(DateTime d) {
-    String p(int n) => n < 10 ? '0$n' : '$n';
-    return '${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
   }
 }

@@ -1,7 +1,7 @@
-import 'package:decimal/decimal.dart';
 import 'package:drift/drift.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/debts_table.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/debt/domain/entities/debt.dart';
 
 part 'debts_dao.g.dart';
@@ -40,8 +40,8 @@ class DebtsDao extends DatabaseAccessor<AppDatabase> with _$DebtsDaoMixin {
             saleId: Value(d.saleId),
             customerName: d.customerName,
             customerPhone: Value(d.customerPhone),
-            amountOwed: d.amountOwed.toDouble(),
-            amountPaid: Value(d.amountPaid.toDouble()),
+            amountOwed: santimFromDecimal(d.amountOwed),
+            amountPaid: Value(santimFromDecimal(d.amountPaid)),
             dueDate: Value(d.dueDate),
             status: Value(debtStatusKey(d.status)),
           ),
@@ -63,7 +63,7 @@ class DebtsDao extends DatabaseAccessor<AppDatabase> with _$DebtsDaoMixin {
                 (r) => DebtPayment(
                   id: r.id,
                   debtId: r.debtId,
-                  amount: Decimal.parse(r.amount.toString()),
+                  amount: decimalFromSantim(r.amount),
                   paidAt: r.paidAt,
                   method: r.method,
                   note: r.note,
@@ -79,8 +79,8 @@ class DebtsDao extends DatabaseAccessor<AppDatabase> with _$DebtsDaoMixin {
         saleId: r.saleId,
         customerName: r.customerName,
         customerPhone: r.customerPhone,
-        amountOwed: Decimal.parse(r.amountOwed.toString()),
-        amountPaid: Decimal.parse(r.amountPaid.toString()),
+        amountOwed: decimalFromSantim(r.amountOwed),
+        amountPaid: decimalFromSantim(r.amountPaid),
         dueDate: r.dueDate,
         status: debtStatusFrom(r.status),
       );

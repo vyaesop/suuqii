@@ -37,6 +37,7 @@ class CartController extends _$CartController {
     String? customerName,
     String? customerPhone,
     DateTime? dueDate,
+    String? ownerChallengeToken,
   }) async {
     final repo = ref.read(salesRepositoryProvider);
     final saleId = await repo.submit(
@@ -45,6 +46,7 @@ class CartController extends _$CartController {
       customerName: customerName,
       customerPhone: customerPhone,
       dueDate: dueDate,
+      ownerChallengeToken: ownerChallengeToken,
     );
     clear();
     return saleId;

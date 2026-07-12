@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/http/dio_client.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/status_pill.dart';
@@ -45,25 +48,26 @@ class OpenShiftsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final async = ref.watch(_openShiftsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Open shifts')),
+      appBar: AppBar(title: Text(l.settingsOpenShifts)),
       body: RefreshIndicator(
         onRefresh: () async => ref.refresh(_openShiftsProvider.future),
         child: async.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => EmptyState(
             icon: Icons.error_outline,
-            title: "Couldn't load",
-            message: '$e',
+            title: l.openShiftsLoadFailedTitle,
+            message: context.errorMessage(e),
           ),
           data: (shifts) {
             if (shifts.isEmpty) {
-              return const EmptyState(
+              return EmptyState(
                 icon: Icons.check_circle_outline_rounded,
-                title: 'No open shifts',
-                message: 'Everyone has closed out cleanly.',
+                title: l.openShiftsEmptyTitle,
+                message: l.openShiftsEmptyMessage,
               );
             }
             return ListView.separated(
@@ -92,25 +96,25 @@ class OpenShiftsScreen extends ConsumerWidget {
     WidgetRef ref,
     _OpenShift shift,
   ) async {
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Force-close shift?'),
+        title: Text(ctx.l10n.openShiftsForceCloseTitle),
         content: Text(
-          'This shift has been open ${shift.openHours.toStringAsFixed(1)} '
-          'hours. Force-closing sets declared cash to the expected amount '
-          '(zero variance) and logs the action in the audit trail. '
-          'Use this only when the cashier is unreachable.',
+          ctx.l10n.openShiftsForceCloseBody(
+            shift.openHours.toStringAsFixed(1),
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Force-close'),
+            child: Text(ctx.l10n.openShiftsForceCloseCta),
           ),
         ],
       ),
@@ -122,12 +126,14 @@ class OpenShiftsScreen extends ConsumerWidget {
       await dio.post<Map<String, dynamic>>(
         '/v1/shifts/${shift.id}/force-close',
       );
-      messenger.showSnackBar(const SnackBar(content: Text('Shift closed')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.openShiftsClosedSnack)),
+      );
       // ignore: unused_result
       ref.refresh(_openShiftsProvider);
     } on DioException catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Failed: ${e.response?.data ?? e.message}')),
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
       );
     }
   }
@@ -140,6 +146,7 @@ class _OpenShiftTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final stale = shift.forceCloseable;
@@ -170,23 +177,30 @@ class _OpenShiftTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${shift.openHours.toStringAsFixed(1)}h open',
+                      l.openShiftsHoursOpen(
+                        shift.openHours.toStringAsFixed(1),
+                      ),
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: stale ? scheme.error : null,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     Text(
-                      'Since ${_formatDateTime(shift.openedAt.toLocal())}',
+                      l.openShiftsSince(
+                        context.dateTimeShort(shift.openedAt.toLocal()),
+                      ),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],
                 ),
               ),
               if (stale)
-                const StatusPill(label: 'STALE', intent: PillIntent.danger)
+                StatusPill(
+                  label: l.openShiftsPillStale,
+                  intent: PillIntent.danger,
+                )
               else
-                const StatusPill(label: 'OPEN'),
+                StatusPill(label: l.openShiftsPillOpen),
             ],
           ),
           if (stale) ...[
@@ -197,7 +211,7 @@ class _OpenShiftTile extends StatelessWidget {
                 OutlinedButton.icon(
                   icon: const Icon(Icons.flag_rounded, size: 18),
                   onPressed: onForceClose,
-                  label: const Text('Force-close'),
+                  label: Text(l.openShiftsForceCloseCta),
                 ),
               ],
             ),
@@ -205,10 +219,5 @@ class _OpenShiftTile extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  static String _formatDateTime(DateTime d) {
-    String p(int n) => n < 10 ? '0$n' : '$n';
-    return '${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
   }
 }

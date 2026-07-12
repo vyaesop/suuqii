@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/debt/domain/entities/debt.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
@@ -20,22 +22,23 @@ class DebtDetailScreen extends ConsumerWidget {
     final debtsAsync = ref.watch(watchDebtsProvider());
     final paymentsAsync = ref.watch(watchDebtPaymentsProvider(debtId));
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Debt')),
+      appBar: AppBar(title: Text(l.debtDetailTitle)),
       body: debtsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => EmptyState(
           icon: Icons.error_outline,
-          title: 'Failed to load',
-          message: '$e',
+          title: l.debtFailedToLoad,
+          message: context.errorMessage(e),
         ),
         data: (all) {
           final d = all.where((x) => x.id == debtId).firstOrNull;
           if (d == null) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.search_off_rounded,
-              title: 'Debt not found',
+              title: l.debtNotFound,
             );
           }
           final paid = d.status == DebtStatus.paid;
@@ -96,31 +99,30 @@ class DebtDetailScreen extends ConsumerWidget {
                                   ],
                                 ),
                               ),
-                              _statusPillFor(d),
+                              _statusPillFor(l, d),
                             ],
                           ),
                           const SizedBox(height: SuuqSpacing.lg),
                           InfoRow(
-                            label: 'Owed',
-                            value: formatMoney(d.amountOwed),
+                            label: l.debtOwedLabel,
+                            value: context.money(d.amountOwed),
                           ),
                           InfoRow(
-                            label: 'Paid',
-                            value: formatMoney(d.amountPaid),
+                            label: l.debtPaidLabel,
+                            value: context.money(d.amountPaid),
                           ),
                           const Divider(),
                           InfoRow(
-                            label: 'Remaining',
-                            value: formatMoney(d.remaining),
+                            label: l.debtRemainingLabel,
+                            value: context.money(d.remaining),
                             emphasize: true,
                             intent: d.isOverdue ? scheme.error : null,
                           ),
                           if (d.dueDate != null) ...[
                             const SizedBox(height: 4),
                             InfoRow(
-                              label: 'Due date',
-                              value:
-                                  d.dueDate!.toIso8601String().split('T').first,
+                              label: l.debtDueDateLabel,
+                              value: context.dateShort(d.dueDate!),
                             ),
                           ],
                         ],
@@ -128,7 +130,7 @@ class DebtDetailScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: SuuqSpacing.lg),
                     Text(
-                      'PAYMENT HISTORY',
+                      l.debtPaymentHistory,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             letterSpacing: 1.2,
                           ),
@@ -139,7 +141,7 @@ class DebtDetailScreen extends ConsumerWidget {
                         padding: EdgeInsets.all(SuuqSpacing.md),
                         child: Center(child: CircularProgressIndicator()),
                       ),
-                      error: (e, _) => Text('$e'),
+                      error: (e, _) => Text(context.errorMessage(e)),
                       data: (payments) {
                         if (payments.isEmpty) {
                           return SectionCard(
@@ -149,7 +151,7 @@ class DebtDetailScreen extends ConsumerWidget {
                                   vertical: SuuqSpacing.md,
                                 ),
                                 child: Text(
-                                  'No payments yet',
+                                  l.debtNoPaymentsYet,
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                               ),
@@ -179,7 +181,7 @@ class DebtDetailScreen extends ConsumerWidget {
                     padding: const EdgeInsets.all(SuuqSpacing.md),
                     child: FilledButton.icon(
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('Collect payment'),
+                      label: Text(l.debtCollectPayment),
                       onPressed: () => _showCollect(context, ref, d),
                     ),
                   ),
@@ -191,17 +193,17 @@ class DebtDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _statusPillFor(Debt d) {
+  Widget _statusPillFor(AppLocalizations l, Debt d) {
     if (d.status == DebtStatus.paid) {
-      return const StatusPill(label: 'PAID', intent: PillIntent.success);
+      return StatusPill(label: l.debtStatusPaid, intent: PillIntent.success);
     }
     if (d.isOverdue) {
-      return const StatusPill(label: 'OVERDUE', intent: PillIntent.danger);
+      return StatusPill(label: l.debtStatusOverdue, intent: PillIntent.danger);
     }
     if (d.status == DebtStatus.partial) {
-      return const StatusPill(label: 'PARTIAL', intent: PillIntent.info);
+      return StatusPill(label: l.debtStatusPartial, intent: PillIntent.info);
     }
-    return const StatusPill(label: 'OPEN');
+    return StatusPill(label: l.debtStatusOpen);
   }
 
   Future<void> _showCollect(
@@ -209,6 +211,7 @@ class DebtDetailScreen extends ConsumerWidget {
     WidgetRef ref,
     Debt debt,
   ) async {
+    final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
     final result = await showModalBottomSheet<
         ({Decimal amount, String method, String? note})>(
@@ -217,6 +220,8 @@ class DebtDetailScreen extends ConsumerWidget {
       builder: (_) => _CollectSheet(max: debt.remaining),
     );
     if (result == null) return;
+    if (!context.mounted) return;
+    final amountText = context.money(result.amount);
     try {
       await ref.read(debtsRepositoryProvider).recordPayment(
             debtId: debt.id,
@@ -225,10 +230,12 @@ class DebtDetailScreen extends ConsumerWidget {
             note: result.note,
           );
       messenger.showSnackBar(
-        SnackBar(content: Text('Recorded ${formatMoney(result.amount)}')),
+        SnackBar(content: Text(l.debtPaymentRecorded(amountText))),
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.debtActionFailed(localizedErrorMessage(l, e)))),
+      );
     }
   }
 }
@@ -241,6 +248,7 @@ class _PaymentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cash = payment.method == 'cash';
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: SuuqSpacing.md,
@@ -268,22 +276,18 @@ class _PaymentTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  cash ? 'Cash' : 'Mobile money',
+                  cash ? l.paymentCash : l.paymentMobileMoney,
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 Text(
-                  payment.paidAt
-                      .toLocal()
-                      .toString()
-                      .split('.')
-                      .first,
+                  context.dateTimeShort(payment.paidAt.toLocal()),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
           ),
           Text(
-            formatMoney(payment.amount),
+            context.money(payment.amount),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
@@ -322,17 +326,18 @@ class _CollectSheetState extends State<_CollectSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return SuuqSheet(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Collect payment',
+            l.debtCollectPayment,
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 4),
           Text(
-            'Remaining ${formatMoney(widget.max)}',
+            l.debtRemainingAmount(context.money(widget.max)),
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: SuuqSpacing.md),
@@ -340,8 +345,8 @@ class _CollectSheetState extends State<_CollectSheet> {
             controller: _amount,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Amount',
+            decoration: InputDecoration(
+              labelText: l.debtAmountLabel,
               prefixText: 'ETB  ',
             ),
             style: const TextStyle(
@@ -351,16 +356,16 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: SuuqSpacing.sm),
           SegmentedButton<String>(
-            segments: const [
+            segments: [
               ButtonSegment(
                 value: 'cash',
-                label: Text('Cash'),
-                icon: Icon(Icons.payments_rounded),
+                label: Text(l.paymentCash),
+                icon: const Icon(Icons.payments_rounded),
               ),
               ButtonSegment(
                 value: 'mobile_money',
-                label: Text('Mobile'),
-                icon: Icon(Icons.phone_iphone_rounded),
+                label: Text(l.paymentMobile),
+                icon: const Icon(Icons.phone_iphone_rounded),
               ),
             ],
             selected: {_method},
@@ -369,8 +374,8 @@ class _CollectSheetState extends State<_CollectSheet> {
           const SizedBox(height: SuuqSpacing.sm),
           TextField(
             controller: _note,
-            decoration: const InputDecoration(
-              labelText: 'Note (optional)',
+            decoration: InputDecoration(
+              labelText: l.debtNoteOptional,
             ),
           ),
           const SizedBox(height: SuuqSpacing.lg),
@@ -379,7 +384,7 @@ class _CollectSheetState extends State<_CollectSheet> {
               final d = Decimal.tryParse(_amount.text.trim());
               if (d == null || d <= Decimal.zero) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Enter a valid amount')),
+                  SnackBar(content: Text(l.debtEnterValidAmount)),
                 );
                 return;
               }
@@ -392,7 +397,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                 ),
               );
             },
-            child: const Text('Confirm'),
+            child: Text(l.commonConfirm),
           ),
         ],
       ),

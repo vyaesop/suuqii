@@ -3,6 +3,9 @@ import 'package:drift/drift.dart';
 
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/supplies_table.dart';
+import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/features/inventory/domain/entities/stock_lot.dart'
+    show expiryDateString;
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 
 part 'supplies_dao.g.dart';
@@ -47,7 +50,10 @@ class SuppliesDao extends DatabaseAccessor<AppDatabase> with _$SuppliesDaoMixin 
             unit: Value(s.unit),
             quantityOnHand: Value(s.quantityOnHand.toDouble()),
             reorderThreshold: Value(s.reorderThreshold.toDouble()),
-            costPerUnit: Value(s.costPerUnit.toDouble()),
+            costPerUnit: Value(santimFromDecimal(s.costPerUnit)),
+            expiryDate: Value(
+              s.expiryDate == null ? null : expiryDateString(s.expiryDate!),
+            ),
           ),
           mode: InsertMode.insertOrReplace,
         );
@@ -84,7 +90,8 @@ class SuppliesDao extends DatabaseAccessor<AppDatabase> with _$SuppliesDaoMixin 
         unit: r.unit,
         quantityOnHand: Decimal.parse(r.quantityOnHand.toString()),
         reorderThreshold: Decimal.parse(r.reorderThreshold.toString()),
-        costPerUnit: Decimal.parse(r.costPerUnit.toString()),
+        costPerUnit: decimalFromSantim(r.costPerUnit),
+        expiryDate: r.expiryDate == null ? null : DateTime.parse(r.expiryDate!),
         deletedAt: r.deletedAt,
       );
 }

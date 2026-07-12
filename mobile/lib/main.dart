@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:suuqii/app/app.dart';
 import 'package:suuqii/core/env/env.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/auth/presentation/providers.dart';
 import 'package:suuqii/features/sync/data/sync_worker.dart';
 
 Future<void> main() async {
@@ -18,9 +20,14 @@ Future<void> main() async {
   final dbFile = p.join(dir.path, 'suuqii.sqlite');
   final db = AppDatabase.openOn(dbFile);
 
+  // Load prefs before the first frame so the persisted app locale applies
+  // synchronously (no flash of the wrong language at startup).
+  final prefs = await SharedPreferences.getInstance();
+
   final container = ProviderContainer(
     overrides: [
       appDatabaseProvider.overrideWithValue(db),
+      sharedPrefsProvider.overrideWith((ref) => prefs),
     ],
   );
 

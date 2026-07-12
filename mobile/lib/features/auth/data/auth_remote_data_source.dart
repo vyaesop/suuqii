@@ -4,20 +4,37 @@ class AuthRemoteDataSource {
   AuthRemoteDataSource(this._dio);
   final Dio _dio;
 
+  /// Runs [send] and converts 4xx DioExceptions (thrown now that the shared
+  /// Dio only accepts <400) into typed [AuthException]s with the server's
+  /// error detail. Network-level errors are rethrown untouched.
+  Future<Response<Map<String, dynamic>>> _request(
+    Future<Response<Map<String, dynamic>>> Function() send,
+  ) async {
+    try {
+      return await send();
+    } on DioException catch (e) {
+      final res = e.response;
+      if (res != null) throw _toError(res);
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>> login({
     required String phone,
     required String password,
     required String deviceFingerprint,
     String? deviceLabel,
   }) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/v1/auth/login',
-      data: {
-        'phone': phone,
-        'password': password,
-        'device_fingerprint': deviceFingerprint,
-        if (deviceLabel != null) 'device_label': deviceLabel,
-      },
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/login',
+        data: {
+          'phone': phone,
+          'password': password,
+          'device_fingerprint': deviceFingerprint,
+          if (deviceLabel != null) 'device_label': deviceLabel,
+        },
+      ),
     );
     if (res.statusCode != 200) {
       throw _toError(res);
@@ -35,18 +52,20 @@ class AuthRemoteDataSource {
     String locale = 'en',
     String shopType = 'regular',
   }) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/v1/auth/register-shop',
-      data: {
-        'shop_name': shopName,
-        'owner_name': ownerName,
-        'phone': phone,
-        'password': password,
-        'owner_pin': ownerPin,
-        'device_fingerprint': deviceFingerprint,
-        'locale': locale,
-        'shop_type': shopType,
-      },
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/register-shop',
+        data: {
+          'shop_name': shopName,
+          'owner_name': ownerName,
+          'phone': phone,
+          'password': password,
+          'owner_pin': ownerPin,
+          'device_fingerprint': deviceFingerprint,
+          'locale': locale,
+          'shop_type': shopType,
+        },
+      ),
     );
     if (res.statusCode != 201 && res.statusCode != 200) {
       throw _toError(res);
@@ -55,9 +74,11 @@ class AuthRemoteDataSource {
   }
 
   Future<String> verifyOwnerPin(String pin) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/v1/auth/owner-pin/verify',
-      data: {'pin': pin},
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/owner-pin/verify',
+        data: {'pin': pin},
+      ),
     );
     if (res.statusCode != 200) throw _toError(res);
     return res.data!['challenge_token'] as String;
@@ -70,22 +91,26 @@ class AuthRemoteDataSource {
     required String deviceFingerprint,
     String? deviceLabel,
   }) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/v1/auth/accept-invite',
-      data: {
-        'phone': phone,
-        'invite_code': inviteCode,
-        'password': password,
-        'device_fingerprint': deviceFingerprint,
-        if (deviceLabel != null) 'device_label': deviceLabel,
-      },
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/accept-invite',
+        data: {
+          'phone': phone,
+          'invite_code': inviteCode,
+          'password': password,
+          'device_fingerprint': deviceFingerprint,
+          if (deviceLabel != null) 'device_label': deviceLabel,
+        },
+      ),
     );
     if (res.statusCode != 200 && res.statusCode != 201) throw _toError(res);
     return res.data!;
   }
 
   Future<List<Map<String, dynamic>>> listShopUsers() async {
-    final res = await _dio.get<Map<String, dynamic>>('/v1/auth/users');
+    final res = await _request(
+      () => _dio.get<Map<String, dynamic>>('/v1/auth/users'),
+    );
     if (res.statusCode != 200) throw _toError(res);
     final raw = res.data!['users'] as List<dynamic>;
     return raw.cast<Map<String, dynamic>>();
@@ -96,9 +121,11 @@ class AuthRemoteDataSource {
     required String phone,
     String role = 'cashier',
   }) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/v1/auth/invite',
-      data: {'name': name, 'phone': phone, 'role': role},
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/invite',
+        data: {'name': name, 'phone': phone, 'role': role},
+      ),
     );
     if (res.statusCode != 201 && res.statusCode != 200) {
       throw _toError(res);

@@ -5,17 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/sales/data/sales_repository.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/features/sales/presentation/cart_review_sheet.dart';
 import 'package:suuqii/features/sales/presentation/checkout_sheet.dart';
 import 'package:suuqii/features/sales/presentation/receipt_sheet.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
+import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
 const _kProductTileAspectRatio = 0.68;
@@ -46,6 +50,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final authAsync = ref.watch(authControllerProvider);
     final auth = authAsync.valueOrNull;
 
@@ -57,18 +62,18 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       return _PosFrame(
         child: EmptyState(
           icon: Icons.error_outline_rounded,
-          title: 'Could not restore your session',
-          message: '${authAsync.error}',
+          title: l.posSessionErrorTitle,
+          message: context.errorMessage(authAsync.error!),
         ),
       );
     }
 
     if (auth is! Authenticated) {
-      return const _PosFrame(
+      return _PosFrame(
         child: EmptyState(
           icon: Icons.lock_outline_rounded,
-          title: 'Sign in required',
-          message: 'Log in again to load products and continue selling.',
+          title: l.posSignInRequiredTitle,
+          message: l.posSignInRequiredMessage,
         ),
       );
     }
@@ -158,12 +163,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   loading: () => const _ProductGridSkeleton(),
                   error: (error, _) => EmptyState(
                     icon: Icons.error_outline,
-                    title: "Couldn't load products",
-                    message: '$error',
+                    title: l.posLoadErrorTitle,
+                    message: context.errorMessage(error),
                     action: FilledButton(
                       onPressed: () =>
                           ref.read(productsSyncProvider.notifier).refresh(),
-                      child: const Text('Retry'),
+                      child: Text(l.commonRetry),
                     ),
                   ),
                 ),
@@ -232,6 +237,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   Future<void> _checkout() async {
     final messenger = ScaffoldMessenger.of(context);
+    final l = context.l10n;
     final snapshot = ref.read(cartControllerProvider);
     if (snapshot.isEmpty) return;
 
@@ -242,12 +248,32 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     );
     if (result == null) return;
 
+    // Credit sales that push the customer's cumulative balance over the
+    // shop's debt threshold need owner approval (docs/17-roles.md): collect
+    // the owner PIN from cashiers upfront so the queued sync op carries the
+    // challenge instead of being rejected server-side later. Owners proceed
+    // without a PIN.
+    String? challenge;
+    if (result.paymentMethod == PaymentMethod.credit) {
+      final salesRepo = ref.read(salesRepositoryProvider);
+      final needsApproval = await salesRepo.creditSaleNeedsOwnerApproval(
+        customerPhone: result.customerPhone,
+        saleTotal: snapshot.total,
+      );
+      if (needsApproval && !salesRepo.isOwner) {
+        if (!mounted) return;
+        challenge = await requestOwnerChallenge(context, ref);
+        if (challenge == null) return;
+      }
+    }
+
     try {
       final saleId = await ref.read(cartControllerProvider.notifier).checkout(
             paymentMethod: result.paymentMethod,
             customerName: result.customerName,
             customerPhone: result.customerPhone,
             dueDate: result.dueDate,
+            ownerChallengeToken: challenge,
           );
       if (!mounted) return;
       await showModalBottomSheet<void>(
@@ -266,9 +292,39 @@ class _PosScreenState extends ConsumerState<PosScreen> {
         ),
       );
     } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('Sale failed: $error')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.posSaleFailed(_checkoutErrorMessage(l, error))),
+        ),
+      );
     }
   }
+}
+
+/// Maps [StateError]s thrown by the sales repository during checkout to
+/// localized messages; falls back to [localizedErrorMessage] otherwise.
+String _checkoutErrorMessage(AppLocalizations l, Object error) {
+  if (error is StateError) {
+    final message = error.message;
+    if (message == 'Cart is empty') return l.checkoutErrCartEmpty;
+    if (message == 'Credit sale needs a customer name') {
+      return l.checkoutErrCreditNeedsCustomer;
+    }
+    const invalidQty = 'Invalid quantity for ';
+    if (message.startsWith(invalidQty)) {
+      return l.checkoutErrInvalidQuantity(message.substring(invalidQty.length));
+    }
+    const insufficient = 'Insufficient stock for ';
+    if (message.startsWith(insufficient)) {
+      return l.checkoutErrInsufficientStock(
+        message.substring(insufficient.length),
+      );
+    }
+    if (message.startsWith('Customer credit limit exceeded')) {
+      return l.errCreditLimitExceeded;
+    }
+  }
+  return localizedErrorMessage(l, error);
 }
 
 class _PosFrame extends StatelessWidget {
@@ -304,6 +360,7 @@ class _SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -325,7 +382,7 @@ class _SearchField extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Search products',
+                  hintText: l.posSearchHint,
                   prefixIcon: Icon(
                     Icons.search_rounded,
                     size: 24,
@@ -363,7 +420,7 @@ class _SearchField extends StatelessWidget {
             height: 56,
             child: IconButton.filledTonal(
               onPressed: onRecentSales,
-              tooltip: 'Recent sales',
+              tooltip: l.recentSalesTitle,
               icon: const Icon(Icons.receipt_long_rounded),
             ),
           ),
@@ -381,6 +438,7 @@ class _ProductTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     final qty = ref.watch(
@@ -390,7 +448,10 @@ class _ProductTile extends ConsumerWidget {
 
     return Semantics(
       button: true,
-      label: '${product.name}, ${formatMoney(product.sellingPrice)}',
+      label: l.posProductSemanticLabel(
+        product.name,
+        context.money(product.sellingPrice),
+      ),
       child: Material(
         color: inCart ? scheme.primaryContainer : scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(SuuqRadius.lg),
@@ -448,7 +509,7 @@ class _ProductTile extends ConsumerWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          formatMoney(product.sellingPrice),
+                          context.money(product.sellingPrice),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: scheme.primary,
                             fontWeight: FontWeight.w700,
@@ -457,7 +518,7 @@ class _ProductTile extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${_formatQty(product.stock)} ${product.unit}',
+                          l.posQtyUnit(_formatQty(product.stock), product.unit),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: product.isLowStock
                                 ? scheme.error
@@ -477,7 +538,7 @@ class _ProductTile extends ConsumerWidget {
                 top: SuuqSpacing.sm,
                 left: SuuqSpacing.sm,
                 child: IgnorePointer(
-                  child: _StockBadge(label: 'LOW', color: scheme.error),
+                  child: _StockBadge(label: l.posLowBadge, color: scheme.error),
                 ),
               ),
             if (qty > Decimal.zero)
@@ -501,7 +562,7 @@ class _ProductTile extends ConsumerWidget {
                     ],
                   ),
                   child: Text(
-                    'x${_formatQty(qty)}',
+                    l.posQtyTimes(_formatQty(qty)),
                     style: TextStyle(
                       color: scheme.onPrimary,
                       fontWeight: FontWeight.w800,
@@ -540,6 +601,7 @@ class _ProductTile extends ConsumerWidget {
   }
 
   void _toggleSelection(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final currentQty = ref.read(cartControllerProvider).qtyFor(product.id);
     final messenger = ScaffoldMessenger.of(context);
 
@@ -550,7 +612,7 @@ class _ProductTile extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text('${product.name} removed from cart'),
+            content: Text(l.posRemovedFromCart(product.name)),
             duration: const Duration(milliseconds: 900),
           ),
         );
@@ -565,8 +627,7 @@ class _ProductTile extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content:
-                Text('${product.name} is out of stock - selling will fail'),
+            content: Text(l.posOutOfStock(product.name)),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -580,8 +641,11 @@ class _ProductTile extends ConsumerWidget {
         ..showSnackBar(
           SnackBar(
             content: Text(
-              'Only ${_formatQty(product.stock)} ${product.unit} '
-              'of ${product.name} in stock',
+              l.posOnlyQtyOfNameInStock(
+                _formatQty(product.stock),
+                product.unit,
+                product.name,
+              ),
             ),
             duration: const Duration(seconds: 2),
           ),
@@ -597,8 +661,8 @@ class _ProductTile extends ConsumerWidget {
       ..showSnackBar(
         SnackBar(
           content: Text(
-            _lowStockMessage(product, nextQty) ??
-                '${product.name} added to cart',
+            _lowStockMessage(l, product, nextQty) ??
+                l.posAddedToCart(product.name),
           ),
           duration: const Duration(milliseconds: 1000),
         ),
@@ -611,33 +675,36 @@ class _ProductTile extends ConsumerWidget {
     );
     final result = await showDialog<Decimal?>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(product.name),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: 'Quantity (${product.unit})',
-            helperText: 'In stock: ${_formatQty(product.stock)}',
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(product.name),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: dl.posQuantityLabel(product.unit),
+              helperText: dl.posInStockHelper(_formatQty(product.stock)),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = Decimal.tryParse(
-                controller.text.trim().replaceAll(',', '.'),
-              );
-              Navigator.pop(ctx, value);
-            },
-            child: const Text('Set'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = Decimal.tryParse(
+                  controller.text.trim().replaceAll(',', '.'),
+                );
+                Navigator.pop(ctx, value);
+              },
+              child: Text(dl.posSetButton),
+            ),
+          ],
+        );
+      },
     );
 
     if (result == null) return;
@@ -650,7 +717,8 @@ class _ProductTile extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Only ${_formatQty(product.stock)} ${product.unit} in stock',
+            context.l10n
+                .posOnlyQtyInStock(_formatQty(product.stock), product.unit),
           ),
         ),
       );
@@ -658,9 +726,10 @@ class _ProductTile extends ConsumerWidget {
     }
 
     ref.read(cartControllerProvider.notifier).setQty(product.id, result);
-    final message =
-        _lowStockMessage(product, result) ?? '${product.name} updated in cart';
     if (context.mounted) {
+      final l = context.l10n;
+      final message =
+          _lowStockMessage(l, product, result) ?? l.posUpdatedInCart(product.name);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -712,6 +781,7 @@ class _CartBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     return Container(
@@ -789,10 +859,11 @@ class _CartBar extends StatelessWidget {
                   children: [
                     Text(
                       cart.isEmpty
-                          ? 'Cart is empty - tap a product to add it'
-                          : '${_formatQty(cart.itemCount)} items across '
-                              '${cart.lineCount} '
-                              '${cart.lineCount == 1 ? "line" : "lines"}',
+                          ? l.posCartEmptyTapHint
+                          : l.posCartItemsSummary(
+                              _qtyAsNum(cart.itemCount),
+                              cart.lineCount,
+                            ),
                       style: TextStyle(
                         color: scheme.onPrimary.withValues(alpha: 0.85),
                         fontSize: 12,
@@ -802,7 +873,9 @@ class _CartBar extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      cart.isEmpty ? 'ETB 0' : formatMoney(cart.total),
+                      cart.isEmpty
+                          ? context.money(Decimal.zero)
+                          : context.money(cart.total),
                       style: theme.textTheme.headlineSmall?.copyWith(
                         color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,
@@ -836,7 +909,7 @@ class _CartBar extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            cart.isEmpty ? 'Add items' : 'Checkout',
+                            cart.isEmpty ? l.posAddItems : l.checkout,
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -871,6 +944,7 @@ class _CartDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
@@ -886,28 +960,29 @@ class _CartDock extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Cart',
+              l.cartTitle,
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: SuuqSpacing.xs),
             if (cart.isEmpty)
-              const Expanded(
+              Expanded(
                 child: EmptyState(
                   icon: Icons.shopping_cart_outlined,
-                  title: 'Cart is empty',
-                  message: 'Tap a product tile to start a sale.',
+                  title: l.posCartEmptyTitle,
+                  message: l.posCartEmptyMessage,
                 ),
               )
             else ...[
               Text(
-                '${_formatQty(cart.itemCount)} items across '
-                '${cart.lineCount} '
-                '${cart.lineCount == 1 ? "line" : "lines"}',
+                l.posCartItemsSummary(
+                  _qtyAsNum(cart.itemCount),
+                  cart.lineCount,
+                ),
                 style: theme.textTheme.bodySmall,
               ),
               const SizedBox(height: 2),
               Text(
-                formatMoney(cart.total),
+                context.money(cart.total),
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -917,7 +992,7 @@ class _CartDock extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    'Discount applied: ${formatMoney(cart.discount)}',
+                    l.posDiscountApplied(context.money(cart.discount)),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.error,
                     ),
@@ -958,7 +1033,10 @@ class _CartDock extends StatelessWidget {
                                   style: theme.textTheme.titleSmall,
                                 ),
                                 Text(
-                                  '${_formatQty(line.qty)} ${line.product.unit}',
+                                  l.posQtyUnit(
+                                    _formatQty(line.qty),
+                                    line.product.unit,
+                                  ),
                                   style: theme.textTheme.bodySmall,
                                 ),
                               ],
@@ -966,7 +1044,7 @@ class _CartDock extends StatelessWidget {
                           ),
                           const SizedBox(width: SuuqSpacing.sm),
                           Text(
-                            formatMoney(line.lineTotal),
+                            context.money(line.lineTotal),
                             style: theme.textTheme.bodySmall?.copyWith(
                               fontFeatures: const [
                                 FontFeature.tabularFigures(),
@@ -984,7 +1062,7 @@ class _CartDock extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onReviewCart,
               icon: const Icon(Icons.edit_note_rounded),
-              label: const Text('Review cart'),
+              label: Text(l.posReviewCart),
             ),
             const SizedBox(height: SuuqSpacing.xs),
             SizedBox(
@@ -992,7 +1070,7 @@ class _CartDock extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: onCheckout,
                 icon: const Icon(Icons.arrow_forward_rounded),
-                label: const Text('Checkout'),
+                label: Text(l.checkout),
               ),
             ),
           ],
@@ -1023,7 +1101,7 @@ class _RecentStrip extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'RECENT',
+                context.l10n.posRecentHeader,
                 style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
               ),
               const SizedBox(height: 4),
@@ -1054,6 +1132,7 @@ class _RecentTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final qty = ref.watch(
@@ -1076,7 +1155,7 @@ class _RecentTile extends ConsumerWidget {
               ..hideCurrentSnackBar()
               ..showSnackBar(
                 SnackBar(
-                  content: Text('${product.name} removed from cart'),
+                  content: Text(l.posRemovedFromCart(product.name)),
                   duration: const Duration(milliseconds: 900),
                 ),
               );
@@ -1090,8 +1169,11 @@ class _RecentTile extends ConsumerWidget {
               ..showSnackBar(
               SnackBar(
                 content: Text(
-                  'Only ${_formatQty(product.stock)} ${product.unit} of '
-                  '${product.name} in stock',
+                  l.posOnlyQtyOfNameInStock(
+                    _formatQty(product.stock),
+                    product.unit,
+                    product.name,
+                  ),
                 ),
               ),
             );
@@ -1100,8 +1182,8 @@ class _RecentTile extends ConsumerWidget {
 
           HapticFeedback.selectionClick();
           ref.read(cartControllerProvider.notifier).addProduct(product);
-          final message = _lowStockMessage(product, nextQty) ??
-              '${product.name} added to cart';
+          final message = _lowStockMessage(l, product, nextQty) ??
+              l.posAddedToCart(product.name);
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(
@@ -1141,7 +1223,7 @@ class _RecentTile extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'x${_formatQty(qty)}',
+                    l.posQtyTimes(_formatQty(qty)),
                     style: TextStyle(
                       color: scheme.onPrimary,
                       fontWeight: FontWeight.w700,
@@ -1157,7 +1239,7 @@ class _RecentTile extends ConsumerWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                formatMoney(product.sellingPrice),
+                context.money(product.sellingPrice),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.primary,
                   fontWeight: FontWeight.w700,
@@ -1192,7 +1274,7 @@ class _CategoryChips extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: SuuqSpacing.md),
         children: [
           ChoiceChip(
-            label: const Text('All'),
+            label: Text(context.l10n.commonAll),
             selected: selected == null,
             onSelected: (_) => onSelect(null),
           ),
@@ -1283,6 +1365,7 @@ class _EmptyProductsState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     if (syncAsync.isLoading) {
       return const _ProductGridSkeleton();
     }
@@ -1290,13 +1373,14 @@ class _EmptyProductsState extends StatelessWidget {
     if (syncAsync.hasError) {
       return EmptyState(
         icon: Icons.cloud_off_rounded,
-        title: 'Products did not load',
-        message:
-            'The local product list is empty, and the refresh failed: ${syncAsync.error}',
+        title: l.posProductsNotLoadedTitle,
+        message: l.posProductsNotLoadedMessage(
+          context.errorMessage(syncAsync.error!),
+        ),
         action: FilledButton.icon(
           icon: const Icon(Icons.refresh_rounded),
           onPressed: onRetry,
-          label: const Text('Retry'),
+          label: Text(l.commonRetry),
         ),
       );
     }
@@ -1304,20 +1388,19 @@ class _EmptyProductsState extends StatelessWidget {
     if (query.isNotEmpty) {
       return EmptyState(
         icon: Icons.search_off_rounded,
-        title: 'No matches for "$query"',
-        message: 'Clear search to see all products available for selling.',
+        title: l.posNoMatchesTitle(query),
+        message: l.posNoMatchesMessage,
       );
     }
 
     return EmptyState(
       icon: Icons.inventory_2_outlined,
-      title: 'No products available to sell',
-      message:
-          'Add products in Inventory or retry loading from the server, then they will appear here.',
+      title: l.posNoProductsTitle,
+      message: l.posNoProductsMessage,
       action: FilledButton.icon(
         icon: const Icon(Icons.refresh_rounded),
         onPressed: onRetry,
-        label: const Text('Load products'),
+        label: Text(l.posLoadProducts),
       ),
     );
   }
@@ -1347,7 +1430,7 @@ class _PosLoadingState extends StatelessWidget {
               ),
               const SizedBox(width: SuuqSpacing.sm),
               Text(
-                'Loading sell screen...',
+                context.l10n.posLoadingSellScreen,
                 style: theme.textTheme.bodyMedium,
               ),
             ],
@@ -1365,12 +1448,23 @@ String _formatQty(Decimal value) {
   return n.toStringAsFixed(2);
 }
 
-String? _lowStockMessage(Product product, Decimal nextQty) {
+/// Quantity as a `num` for ICU plural placeholders: whole values become int
+/// (renders "3", not "3.0"), fractional values stay double (renders "2.5").
+num _qtyAsNum(Decimal value) {
+  final n = value.toDouble();
+  return n == n.roundToDouble() ? n.toInt() : n;
+}
+
+String? _lowStockMessage(AppLocalizations l, Product product, Decimal nextQty) {
   final remaining = product.stock - nextQty;
   if (remaining < Decimal.zero) return null;
 
   if (remaining == Decimal.zero) {
-    return 'Last ${_formatQty(product.stock)} ${product.unit} of ${product.name} added';
+    return l.posLastStockAdded(
+      _formatQty(product.stock),
+      product.unit,
+      product.name,
+    );
   }
 
   final threshold = product.lowStockThreshold;
@@ -1379,6 +1473,9 @@ String? _lowStockMessage(Product product, Decimal nextQty) {
       remaining <= threshold;
   if (!crossedThreshold) return null;
 
-  return 'Low stock: ${product.name} will have '
-      '${_formatQty(remaining)} ${product.unit} left after this sale';
+  return l.posLowStockAfterSale(
+    product.name,
+    _formatQty(remaining),
+    product.unit,
+  );
 }

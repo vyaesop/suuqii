@@ -4,8 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/l10n/error_l10n.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:suuqii/l10n/app_localizations.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
 class RegisterShopScreen extends ConsumerStatefulWidget {
@@ -37,7 +38,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
+    final l = context.l10n;
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -64,15 +65,15 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                     child: SuuqLogo(size: 30),
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
-                  Text('Open your shop', style: theme.textTheme.displaySmall),
+                  Text(l.registerTitle, style: theme.textTheme.displaySmall),
                   const SizedBox(height: SuuqSpacing.xs),
                   Text(
-                    'Three minutes to set up. You can invite cashiers later.',
+                    l.registerSubtitle,
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: SuuqSpacing.xl),
                   _Group(
-                    title: 'Shop type',
+                    title: l.registerShopTypeGroup,
                     children: [
                       _ShopTypeSelector(
                         value: _shopType,
@@ -82,12 +83,12 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   _Group(
-                    title: 'Shop',
+                    title: l.registerShopGroup,
                     children: [
                       TextFormField(
                         controller: _shopName,
                         decoration: InputDecoration(
-                          labelText: 'Shop name',
+                          labelText: l.registerShopNameLabel,
                           prefixIcon: Icon(
                             _shopType == 'bakery'
                                 ? Icons.bakery_dining_rounded
@@ -101,13 +102,13 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   _Group(
-                    title: 'You',
+                    title: l.registerYouGroup,
                     children: [
                       TextFormField(
                         controller: _ownerName,
-                        decoration: const InputDecoration(
-                          labelText: 'Your name',
-                          prefixIcon: Icon(
+                        decoration: InputDecoration(
+                          labelText: l.registerYourNameLabel,
+                          prefixIcon: const Icon(
                             Icons.person_outline_rounded,
                             size: 20,
                           ),
@@ -120,7 +121,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                         keyboardType: TextInputType.phone,
                         decoration: InputDecoration(
                           labelText: l.phone,
-                          hintText: '+2519...',
+                          hintText: l.registerPhoneHint,
                           prefixIcon: const Icon(
                             Icons.phone_iphone_rounded,
                             size: 20,
@@ -132,21 +133,21 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   _Group(
-                    title: 'Security',
+                    title: l.registerSecurityGroup,
                     children: [
                       TextFormField(
                         controller: _password,
                         obscureText: true,
                         decoration: InputDecoration(
                           labelText: l.password,
-                          helperText: 'At least 8 characters',
+                          helperText: l.registerPasswordHelper,
                           prefixIcon: const Icon(
                             Icons.lock_outline_rounded,
                             size: 20,
                           ),
                         ),
                         validator: (v) => (v == null || v.length < 8)
-                            ? 'Min 8 characters'
+                            ? l.registerPasswordMin
                             : null,
                       ),
                       const SizedBox(height: SuuqSpacing.sm),
@@ -158,18 +159,17 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                           FilteringTextInputFormatter.digitsOnly,
                           LengthLimitingTextInputFormatter(8),
                         ],
-                        decoration: const InputDecoration(
-                          labelText: 'Owner PIN',
-                          helperText:
-                              '4–8 digits. Used to authorise sensitive actions.',
-                          prefixIcon: Icon(
+                        decoration: InputDecoration(
+                          labelText: l.registerOwnerPinLabel,
+                          helperText: l.registerOwnerPinHelper,
+                          prefixIcon: const Icon(
                             Icons.pin_outlined,
                             size: 20,
                           ),
                         ),
                         validator: (v) =>
                             (v == null || v.length < 4 || v.length > 8)
-                                ? '4–8 digits'
+                                ? l.registerOwnerPinInvalid
                                 : null,
                       ),
                     ],
@@ -186,7 +186,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text('Create shop'),
+                        : Text(l.registerCreateShopCta),
                   ),
                 ],
               ),
@@ -198,11 +198,13 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
   }
 
   String? _req(String? v) =>
-      (v == null || v.trim().isEmpty) ? 'Required' : null;
+      (v == null || v.trim().isEmpty) ? context.l10n.commonRequired : null;
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
+    final l = context.l10n;
+    final locale = Localizations.localeOf(context).languageCode;
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
     try {
@@ -213,10 +215,13 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
             password: _password.text,
             ownerPin: _pin.text,
             shopType: _shopType,
+            locale: locale,
           );
       router.go('/pos');
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(localizedErrorMessage(l, e))),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -230,13 +235,14 @@ class _ShopTypeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return Row(
       children: [
         Expanded(
           child: _TypeCard(
             icon: Icons.storefront_rounded,
-            label: 'Regular shop',
-            description: 'Sells finished goods',
+            label: l.registerTypeRegularLabel,
+            description: l.registerTypeRegularDesc,
             selected: value == 'regular',
             onTap: () => onChanged('regular'),
           ),
@@ -245,8 +251,8 @@ class _ShopTypeSelector extends StatelessWidget {
         Expanded(
           child: _TypeCard(
             icon: Icons.bakery_dining_rounded,
-            label: 'Bakery',
-            description: 'Makes products from ingredients',
+            label: l.registerTypeBakeryLabel,
+            description: l.registerTypeBakeryDesc,
             selected: value == 'bakery',
             onTap: () => onChanged('bakery'),
           ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -28,7 +29,10 @@ Dio dio(DioRef ref) {
       receiveTimeout: const Duration(seconds: 30),
       sendTimeout: const Duration(seconds: 30),
       headers: {'Accept': 'application/json'},
-      validateStatus: (s) => s != null && s < 500,
+      // 4xx must throw so the _AuthInterceptor.onError 401 refresh/retry
+      // path actually runs. Callers that need to read 4xx bodies inline
+      // pass a per-request validateStatus or catch DioException.
+      validateStatus: (s) => s != null && s < 400,
     ),
   );
 
@@ -112,7 +116,10 @@ class _AuthInterceptor extends Interceptor {
       req.extra['retried'] = true;
       final response = await _dio.fetch<dynamic>(req);
       handler.resolve(response);
-    } catch (_) {
+    } catch (e) {
+      // Refresh (or the retried request) failed — let the original 401
+      // propagate so callers can surface an unauthenticated state.
+      debugPrint('token refresh after 401 failed: $e');
       handler.next(err);
     }
   }
@@ -138,11 +145,19 @@ class _AuthInterceptor extends Interceptor {
       final data = res.data!;
       ref.read(tokenStoreProvider).access = data['access'] as String;
       await storage.writeRefresh(data['refresh'] as String);
-    } finally {
-      _refreshing = false;
       for (final w in _waiters) {
         w.complete();
       }
+    } catch (e, st) {
+      // Waiters must fail too — completing them successfully would let
+      // queued requests proceed with a stale/absent token.
+      debugPrint('token refresh failed: $e');
+      for (final w in _waiters) {
+        w.completeError(e, st);
+      }
+      rethrow;
+    } finally {
+      _refreshing = false;
       _waiters.clear();
     }
   }

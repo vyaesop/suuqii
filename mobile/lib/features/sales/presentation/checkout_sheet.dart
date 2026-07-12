@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
-import 'package:suuqii/core/utils/money.dart';
+import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
@@ -90,6 +91,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final cart = ref.watch(cartControllerProvider);
     final total = cart.total;
@@ -103,7 +105,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Checkout',
+            l.checkout,
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: SuuqSpacing.lg),
@@ -111,14 +113,14 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
             child: Column(
               children: [
                 Text(
-                  'TOTAL',
+                  l.checkoutTotalCaps,
                   style: theme.textTheme.labelSmall?.copyWith(
                     letterSpacing: 1.4,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  formatMoney(total),
+                  context.money(total),
                   style: theme.textTheme.displayMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -128,14 +130,15 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      'Subtotal ${formatMoney(cart.subtotal)} - '
-                      'discount ${formatMoney(cart.discount)}',
+                      l.checkoutSubtotalDiscount(
+                        context.money(cart.subtotal),
+                        context.money(cart.discount),
+                      ),
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
                 Text(
-                  '${_formatQty(cart.itemCount)} '
-                  '${cart.itemCount == Decimal.one ? "item" : "items"}',
+                  l.checkoutItemCount(_qtyAsNum(cart.itemCount)),
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -143,7 +146,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
           ),
           const SizedBox(height: SuuqSpacing.lg),
           Text(
-            'PAYMENT',
+            l.checkoutPaymentCaps,
             style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: SuuqSpacing.xs),
@@ -195,11 +198,10 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                           }
                         },
                       )
-                    : const _InfoCard(
-                        key: ValueKey('mobile'),
+                    : _InfoCard(
+                        key: const ValueKey('mobile'),
                         icon: Icons.phone_iphone_rounded,
-                        label:
-                            'Mobile money sales are recorded immediately with no cash change due.',
+                        label: l.checkoutMobileInfo,
                       ),
           ),
           const SizedBox(height: SuuqSpacing.xl),
@@ -220,9 +222,8 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                 if (isCash) {
                   if (tendered == null || tendered <= Decimal.zero) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content:
-                            Text('Enter the cash received from the customer'),
+                      SnackBar(
+                        content: Text(l.checkoutEnterCashReceived),
                       ),
                     );
                     return;
@@ -231,7 +232,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
-                          'Customer is short by ${formatMoney(total - tendered)}',
+                          l.checkoutShortBy(context.money(total - tendered)),
                         ),
                       ),
                     );
@@ -241,8 +242,8 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
 
                 if (isCredit && _customerName.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Customer name required for credit'),
+                    SnackBar(
+                      content: Text(l.checkoutCustomerNameRequired),
                     ),
                   );
                   return;
@@ -263,7 +264,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                   ),
                 );
               },
-              label: Text('Confirm - ${formatMoney(total)}'),
+              label: Text(l.checkoutConfirmTotal(context.money(total))),
             ),
           ),
         ],
@@ -277,10 +278,11 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
     return Decimal.tryParse(normalized);
   }
 
-  String _formatQty(Decimal value) {
+  /// Whole quantities as int (renders "3"), fractional as double ("2.5") —
+  /// for ICU plural placeholders.
+  num _qtyAsNum(Decimal value) {
     final n = value.toDouble();
-    if (n == n.roundToDouble()) return n.toInt().toString();
-    return n.toStringAsFixed(2);
+    return n == n.roundToDouble() ? n.toInt() : n;
   }
 
   String _formatDecimal(Decimal value) {
@@ -298,25 +300,26 @@ class _PaymentPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return Row(
       children: [
         _PaymentOption(
           icon: Icons.payments_rounded,
-          label: 'Cash',
+          label: l.paymentCash,
           selected: value == PaymentMethod.cash,
           onTap: () => onChanged(PaymentMethod.cash),
         ),
         const SizedBox(width: SuuqSpacing.xs),
         _PaymentOption(
           icon: Icons.phone_iphone_rounded,
-          label: 'Mobile',
+          label: l.paymentMobile,
           selected: value == PaymentMethod.mobileMoney,
           onTap: () => onChanged(PaymentMethod.mobileMoney),
         ),
         const SizedBox(width: SuuqSpacing.xs),
         _PaymentOption(
           icon: Icons.access_time_rounded,
-          label: 'Credit',
+          label: l.paymentCredit,
           selected: value == PaymentMethod.credit,
           onTap: () => onChanged(PaymentMethod.credit),
         ),
@@ -345,7 +348,7 @@ class _PaymentOption extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: selected,
-        label: '$label payment',
+        label: context.l10n.checkoutPaymentSemantic(label),
         child: Material(
           color: selected ? scheme.primary : scheme.surfaceContainer,
           borderRadius: BorderRadius.circular(SuuqRadius.md),
@@ -415,6 +418,7 @@ class _CashSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final showPositiveChange = changeDue != null && changeDue! >= Decimal.zero;
@@ -423,17 +427,17 @@ class _CashSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'CASH',
+          l.checkoutCashCaps,
           style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
         ),
         const SizedBox(height: SuuqSpacing.xs),
         TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Tendered amount',
-            prefixIcon: Icon(Icons.payments_rounded, size: 20),
-            helperText: 'Enter how much cash the customer handed over.',
+          decoration: InputDecoration(
+            labelText: l.checkoutTenderedAmount,
+            prefixIcon: const Icon(Icons.payments_rounded, size: 20),
+            helperText: l.checkoutTenderedHelper,
           ),
         ),
         const SizedBox(height: SuuqSpacing.sm),
@@ -443,7 +447,7 @@ class _CashSection extends StatelessWidget {
           children: [
             for (final amount in _cashSuggestions(total))
               ActionChip(
-                label: Text(formatMoney(amount)),
+                label: Text(context.money(amount)),
                 onPressed: () => onFillAmount(amount),
               ),
           ],
@@ -477,11 +481,10 @@ class _CashSection extends StatelessWidget {
               Expanded(
                 child: Text(
                   switch (changeDue) {
-                    null =>
-                      'Change will appear after you enter the cash received.',
+                    null => l.checkoutChangeHint,
                     final value when value < Decimal.zero =>
-                      'Short by ${formatMoney(value.abs())}',
-                    final value => 'Change due ${formatMoney(value)}',
+                      l.checkoutShortByAmount(context.money(value.abs())),
+                    final value => l.checkoutChangeDue(context.money(value)),
                   },
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: changeDue == null
@@ -535,6 +538,7 @@ class _CreditSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final hasOutstanding = customerOutstanding > Decimal.zero;
@@ -544,24 +548,24 @@ class _CreditSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'CUSTOMER',
+          l.checkoutCustomerCaps,
           style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
         ),
         const SizedBox(height: SuuqSpacing.xs),
         TextField(
           controller: customerName,
-          decoration: const InputDecoration(
-            labelText: 'Customer name',
-            prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+          decoration: InputDecoration(
+            labelText: l.checkoutCustomerName,
+            prefixIcon: const Icon(Icons.person_outline_rounded, size: 20),
           ),
         ),
         const SizedBox(height: SuuqSpacing.sm),
         TextField(
           controller: customerPhone,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Phone (optional)',
-            prefixIcon: Icon(Icons.phone_iphone_rounded, size: 20),
+          decoration: InputDecoration(
+            labelText: l.checkoutPhoneOptional,
+            prefixIcon: const Icon(Icons.phone_iphone_rounded, size: 20),
           ),
         ),
         const SizedBox(height: SuuqSpacing.sm),
@@ -570,8 +574,8 @@ class _CreditSection extends StatelessWidget {
           onPressed: onPickDueDate,
           label: Text(
             dueDate == null
-                ? 'Due date (optional)'
-                : 'Due ${dueDate!.toIso8601String().split('T').first}',
+                ? l.checkoutDueDateOptional
+                : l.checkoutDueDate(context.dateShort(dueDate!)),
           ),
         ),
         const SizedBox(height: SuuqSpacing.sm),
@@ -601,7 +605,7 @@ class _CreditSection extends StatelessWidget {
                     ),
                     const SizedBox(width: SuuqSpacing.xs),
                     Text(
-                      'Existing outstanding balance',
+                      l.checkoutOutstandingTitle,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: scheme.onErrorContainer,
                         fontWeight: FontWeight.w700,
@@ -611,13 +615,13 @@ class _CreditSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 _BalanceRow(
-                  label: 'Current outstanding',
+                  label: l.checkoutCurrentOutstanding,
                   amount: customerOutstanding,
                   color: scheme.onErrorContainer,
                   theme: theme,
                 ),
                 _BalanceRow(
-                  label: 'This sale',
+                  label: l.checkoutThisSale,
                   amount: saleTotal,
                   color: scheme.onErrorContainer,
                   theme: theme,
@@ -627,7 +631,7 @@ class _CreditSection extends StatelessWidget {
                   height: SuuqSpacing.md,
                 ),
                 _BalanceRow(
-                  label: 'Total after sale',
+                  label: l.checkoutTotalAfterSale,
                   amount: cumulativeAfterSale,
                   color: scheme.onErrorContainer,
                   theme: theme,
@@ -635,7 +639,7 @@ class _CreditSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Owner approval may be required if cumulative balance exceeds the shop limit.',
+                  l.checkoutOwnerApprovalNote,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onErrorContainer.withValues(alpha: 0.8),
                   ),
@@ -644,9 +648,9 @@ class _CreditSection extends StatelessWidget {
             ),
           ),
         ] else ...[
-          const _InfoCard(
+          _InfoCard(
             icon: Icons.verified_user_outlined,
-            label: 'Large credit sales may require owner approval when synced.',
+            label: l.checkoutLargeCreditNote,
           ),
         ],
       ],
@@ -681,7 +685,7 @@ class _BalanceRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(label, style: style)),
-          Text(formatMoney(amount), style: style),
+          Text(context.money(amount), style: style),
         ],
       ),
     );

@@ -1,15 +1,1542 @@
-﻿{
+{
   "@@locale": "en",
+  "appTitle": "Suuqii",
+  "@appTitle": {
+    "description": "App/brand name. Keep identical in every language."
+  },
   "navSell": "Sell",
   "navInventory": "Inventory",
   "navDebts": "Debts",
+  "navSupplies": "Supplies",
   "navShift": "Shift",
   "navDashboard": "Dashboard",
   "navSettings": "Settings",
-  "shiftOpeningCash": "Opening Cash",
-  "shiftEnd": "End Shift",
+  "commonCancel": "Cancel",
+  "commonSave": "Save",
+  "commonClose": "Close",
+  "commonDelete": "Delete",
+  "commonEdit": "Edit",
+  "commonDone": "Done",
+  "commonRetry": "Retry",
+  "commonConfirm": "Confirm",
+  "commonOk": "OK",
+  "commonAdd": "Add",
+  "commonRemove": "Remove",
+  "commonUndo": "Undo",
+  "commonAll": "All",
+  "commonToday": "Today",
+  "commonOptional": "Optional",
+  "commonRequired": "Required",
+  "@commonRequired": {
+    "description": "Form validator message for an empty required field."
+  },
+  "errNetwork": "Network error — check your connection and try again",
+  "errPhoneTaken": "That phone number is already registered",
+  "errCreditLimitExceeded": "This sale would exceed the customer's credit limit",
+  "errExpenseApprovalRequired": "This expense needs the owner's approval",
+  "errInvalidPayload": "Some fields are invalid — check the form and try again",
+  "errConflict": "Someone else changed this record — refresh and try again",
+  "errExpired": "This code has expired — ask for a new one",
+  "errBadRole": "Your account doesn't have permission for this",
+  "errHttp": "Request failed ({status})",
+  "@errHttp": {
+    "description": "Generic HTTP failure with status code.",
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
+  "errUnknown": "Something went wrong — please try again",
+  "ownerPinRequired": "Owner PIN required",
+  "ownerPinExplain": "This action requires the shop owner to authorize.",
+  "ownerPinLabel": "PIN (4–8 digits)",
+  "ownerPinEnterDigits": "Enter 4–8 digits",
+  "ownerPinAuthorize": "Authorize",
+  "wrongPin": "Wrong PIN",
+  "login": "Log In",
   "phone": "Phone",
   "password": "Password",
-  "login": "Log In",
-  "createNewShop": "Create New Shop"
+  "createNewShop": "Create New Shop",
+  "joinShopWithCode": "Join with an invite code",
+  "checkout": "Checkout",
+  "paymentCash": "Cash",
+  "paymentMobile": "Mobile",
+  "paymentCredit": "Credit",
+  "total": "Total",
+  "change": "Change",
+  "@change": {
+    "description": "Money returned to the customer after a cash payment."
+  },
+  "tendered": "Tendered",
+  "lowStock": "Low stock",
+  "outstandingDebt": "Outstanding debt",
+  "revenue": "Revenue",
+  "profit": "Profit",
+  "expenses": "Expenses",
+  "netProfit": "Net profit",
+  "shiftOpeningCash": "Opening Cash",
+  "shiftDeclaredCash": "Declared cash",
+  "shiftExpectedCash": "Expected cash",
+  "shiftVariance": "Variance",
+  "shiftEnd": "End Shift",
+  "syncOffline": "Offline",
+  "syncPending": "{n} pending changes",
+  "@syncPending": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "syncSynced": "Synced",
+  "syncProblemsTitle": "Sync problems",
+  "syncNoDetails": "No details available.",
+  "roleOwner": "Owner",
+  "roleCashier": "Cashier",
+  "auditTitle": "Audit",
+  "settingsTitle": "Settings",
+  "settingsProfileSubtitle": "{role} · {shopName}",
+  "@settingsProfileSubtitle": {
+    "placeholders": {
+      "role": {
+        "type": "String"
+      },
+      "shopName": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSectionShop": "Shop",
+  "settingsReports": "Reports",
+  "settingsReportsSubtitle": "Sales over time, top products",
+  "settingsAuditLog": "Audit log",
+  "settingsEmployees": "Employees",
+  "settingsEmployeesSubtitle": "Invite and manage cashiers",
+  "settingsOpenShifts": "Open shifts",
+  "settingsOpenShiftsSubtitle": "Force-close stale shifts",
+  "settingsSectionSales": "Sales",
+  "settingsRecentSales": "Recent sales",
+  "settingsRecentSalesSubtitle": "View & refund recent transactions",
+  "settingsSectionAccount": "Account",
+  "settingsLanguage": "Language",
+  "settingsLanguageSystem": "System default",
+  "settingsLanguageEnglish": "English",
+  "@settingsLanguageEnglish": {
+    "description": "Language option shown in its own language. Keep as 'English' in every locale."
+  },
+  "settingsLanguageOromo": "Afaan Oromoo",
+  "@settingsLanguageOromo": {
+    "description": "Language option shown in its own language. Keep as 'Afaan Oromoo' in every locale."
+  },
+  "settingsTheme": "Theme",
+  "settingsThemeSystem": "Follows system",
+  "settingsLogout": "Log out",
+  "settingsLogoutAnyway": "Log out anyway",
+  "settingsUnsyncedTitle": "Unsynced records",
+  "settingsUnsyncedBody": "{count, plural, =1{You have 1 unsynced record. Logging out now will discard it permanently.} other{You have {count} unsynced records. Logging out now will discard them permanently.}}",
+  "@settingsUnsyncedBody": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "inventorySearchHint": "Search products",
+  "inventoryLoadFailedTitle": "Failed to load",
+  "inventoryEmptyTitle": "No products yet",
+  "inventoryEmptyMessage": "Add your first product to get started.",
+  "inventoryStockHealthyTitle": "Stock is healthy",
+  "inventoryStockHealthyMessage": "Nothing below its low-stock threshold.",
+  "inventoryAddProduct": "Add product",
+  "inventoryUncategorized": "Uncategorised",
+  "@inventoryUncategorized": {
+    "description": "Fallback category shown for products without a category."
+  },
+  "productDetailTitle": "Product",
+  "productNotFoundTitle": "Product not found",
+  "productLowPill": "LOW",
+  "@productLowPill": {
+    "description": "Short uppercase badge next to the price when stock is below the low-stock threshold."
+  },
+  "productInStockLabel": "In stock",
+  "productLowAtLabel": "Low at",
+  "@productLowAtLabel": {
+    "description": "Label for the low-stock threshold quantity (alerts trigger at or below this level)."
+  },
+  "productLowAtHelper": "Alert below this",
+  "productPurchasePriceLabel": "Purchase price",
+  "productBarcodeLabel": "Barcode",
+  "productStockHistoryTitle": "STOCK HISTORY",
+  "@productStockHistoryTitle": {
+    "description": "Uppercase section header above the list of stock movements."
+  },
+  "productNoMovements": "No movements yet",
+  "productMovementRestock": "Restock",
+  "productMovementSale": "Sale",
+  "productMovementRefund": "Refund",
+  "productMovementAdjustment": "Adjustment",
+  "@productMovementAdjustment": {
+    "description": "Stock movement type: a manual correction/removal (waste, damage, count fix)."
+  },
+  "productEditNewTitle": "New product",
+  "productEditEditTitle": "Edit product",
+  "productSectionDetails": "Details",
+  "productSectionPricing": "Pricing",
+  "productSectionStock": "Stock",
+  "productSectionImage": "Image",
+  "productSectionIdentifiers": "Identifiers",
+  "productNameLabel": "Name",
+  "productCategoryOptionalLabel": "Category (optional)",
+  "productUnitLabel": "Unit",
+  "productPurchaseLabel": "Purchase",
+  "@productPurchaseLabel": {
+    "description": "Label for the purchase (cost) price field."
+  },
+  "productSellingPriceLabel": "Selling price",
+  "productInitialStockLabel": "Initial stock",
+  "productCurrentStockLabel": "Current stock",
+  "productStockHelper": "Use Adjust stock to change",
+  "productInvalidNumber": "Invalid number",
+  "productUploadPhoto": "Upload photo",
+  "productChangePhoto": "Change photo",
+  "productBarcodeOptionalLabel": "Barcode (optional)",
+  "productCreateButton": "Create product",
+  "commonSaveChanges": "Save changes",
+  "productTakePhoto": "Take a photo",
+  "productChooseFromGallery": "Choose from gallery",
+  "productUploadFailed": "Upload failed: {error}",
+  "@productUploadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "productImagePreviewName": "Preview",
+  "@productImagePreviewName": {
+    "description": "Placeholder product name used for the image preview before a name is typed."
+  },
+  "productRecipeTitle": "RECIPE",
+  "@productRecipeTitle": {
+    "description": "Uppercase section header for the bakery recipe (ingredient list) of a product."
+  },
+  "productRecipeCost": "Cost: {amount}",
+  "@productRecipeCost": {
+    "description": "Total ingredient cost of the recipe; amount is a pre-formatted money string.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "productRecipeEmpty": "No ingredients added yet.\nAdd supplies to calculate cost automatically.",
+  "productRecipeAddIngredient": "Add ingredient",
+  "productRecipePickIngredient": "Pick an ingredient",
+  "productRecipeAddSuppliesFirst": "Add supplies first before building a recipe",
+  "productRecipeAllSuppliesAdded": "All supplies already added",
+  "productSupplyOnHand": "{quantity} {unit} on hand",
+  "@productSupplyOnHand": {
+    "description": "Supply availability line in the ingredient picker; quantity is pre-formatted, unit is user data (e.g. kg).",
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "stockAdjustTitle": "Adjust stock",
+  "stockAdjustQuantityLabel": "Quantity",
+  "stockAdjustReasonLabel": "Reason",
+  "stockAdjustEnterPositive": "Enter a positive number",
+  "stockAdjustApply": "Apply",
+  "stockAdjustSuccess": "Stock adjusted by {delta}",
+  "@stockAdjustSuccess": {
+    "description": "Snackbar after a stock adjustment; delta is a signed quantity string like +5 or -2.",
+    "placeholders": {
+      "delta": {
+        "type": "String"
+      }
+    }
+  },
+  "stockAdjustReasonRestock": "restock",
+  "stockAdjustReasonSupplierDelivery": "supplier delivery",
+  "stockAdjustReasonTransferIn": "transfer in",
+  "stockAdjustReasonCountCorrection": "count correction",
+  "@stockAdjustReasonCountCorrection": {
+    "description": "Stock adjustment reason: fixing a wrong stock count after a physical recount."
+  },
+  "stockAdjustReasonWaste": "waste",
+  "@stockAdjustReasonWaste": {
+    "description": "Stock adjustment reason: goods discarded (spoiled, expired, unsellable)."
+  },
+  "stockAdjustReasonDamaged": "damaged",
+  "stockAdjustReasonTheft": "theft",
+  "stockAdjustReasonTransferOut": "transfer out",
+  "bulkRestockTitle": "Bulk restock",
+  "bulkRestockEmptyTitle": "No products to restock",
+  "bulkRestockLineCount": "{count, plural, =1{1 product} other{{count} products}}",
+  "@bulkRestockLineCount": {
+    "description": "How many products have a quantity entered in the bulk restock draft.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "bulkRestockTotalUnits": "+{units} units",
+  "@bulkRestockTotalUnits": {
+    "description": "Total quantity being added across all products; units is a pre-formatted number string.",
+    "placeholders": {
+      "units": {
+        "type": "String"
+      }
+    }
+  },
+  "bulkRestockApply": "Apply restock",
+  "bulkRestockSuccess": "{count, plural, =1{Restocked 1 product} other{Restocked {count} products}}",
+  "@bulkRestockSuccess": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "bulkRestockInStock": "{quantity} {unit} in stock",
+  "@bulkRestockInStock": {
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "bulkRestockDialogTitle": "Restock {name}",
+  "@bulkRestockDialogTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "bulkRestockQuantityLabel": "Quantity ({unit})",
+  "@bulkRestockQuantityLabel": {
+    "placeholders": {
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "bulkRestockSet": "Set",
+  "suppliesEmptyTitle": "No supplies yet",
+  "suppliesEmptyMessage": "Add your ingredients to track costs",
+  "suppliesAddButton": "Add supply",
+  "suppliesAdded": "Supply added",
+  "suppliesUpdated": "Supply updated",
+  "suppliesRunningLow": "{count, plural, =1{1 supply is running low} other{{count} supplies are running low}}",
+  "@suppliesRunningLow": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "suppliesLowBadge": "Low",
+  "suppliesTileSubtitleNoCost": "{quantity} {unit}",
+  "@suppliesTileSubtitleNoCost": {
+    "description": "Supply list line for cashiers: quantity on hand only; cost per unit is masked for non-owners.",
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "suppliesTileSubtitle": "{quantity} {unit}  ·  {cost} per {unit}",
+  "@suppliesTileSubtitle": {
+    "description": "Supply list line: quantity on hand plus cost per unit; cost is a pre-formatted money string.",
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      },
+      "cost": {
+        "type": "String"
+      }
+    }
+  },
+  "suppliesEditTitle": "Edit supply",
+  "suppliesNewTitle": "New supply",
+  "suppliesNameLabel": "Name",
+  "suppliesUnitLabel": "Unit",
+  "suppliesOnHandLabel": "On hand",
+  "suppliesAlertBelowLabel": "Alert below",
+  "@suppliesAlertBelowLabel": {
+    "description": "Label for the reorder threshold field: alert when quantity drops below this."
+  },
+  "suppliesAlertBelowHelper": "Low-stock threshold",
+  "suppliesCostPerUnitLabel": "Cost per {unit}",
+  "@suppliesCostPerUnitLabel": {
+    "placeholders": {
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "suppliesNameRequired": "Name required",
+  "unitPiece": "piece",
+  "unitKg": "kg",
+  "unitG": "g",
+  "unitMg": "mg",
+  "unitQuintal": "quintal",
+  "@unitQuintal": {
+    "description": "Unit of weight equal to 100 kg, common in Ethiopian trade."
+  },
+  "unitLiter": "liter",
+  "unitMl": "ml",
+  "unitCup": "cup",
+  "unitPack": "pack",
+  "unitMeter": "m",
+  "@unitMeter": {
+    "description": "Abbreviation for meter (length)."
+  },
+  "dashboardCreditSales": "Credit sales",
+  "dashboardAllStockHealthy": "All stock healthy",
+  "dashboardStockLeft": "{count} left",
+  "@dashboardStockLeft": {
+    "description": "Low-stock pill: remaining stock quantity (pre-formatted decimal quantity, e.g. '3' or '2.5')",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "dashboardScanNothingUnusual": "Scan complete — nothing unusual",
+  "dashboardAnomaliesWritten": "{count, plural, =1{1 anomaly written to audit} other{{count} anomaly entries written to audit}}",
+  "@dashboardAnomaliesWritten": {
+    "description": "Snackbar after anomaly scan: how many anomaly entries were written to the audit log",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dashboardScanView": "View",
+  "@dashboardScanView": {
+    "description": "Snackbar action that opens the audit log after an anomaly scan"
+  },
+  "dashboardScanFailed": "Scan failed: {error}",
+  "@dashboardScanFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dashboardAnomalyScanTitle": "Anomaly scan",
+  "dashboardAnomalyScanSubtitle": "Check for oversells, large variances, stale shifts.",
+  "dashboardScanButton": "Scan",
+  "@dashboardScanButton": {
+    "description": "Button that starts the anomaly scan"
+  },
+  "dashboardRange7Days": "7 days",
+  "dashboardRange30Days": "30 days",
+  "dashboardOfflineSnapshot": "Showing offline snapshot",
+  "dashboardOfflineSnapshotUpdated": "Offline snapshot — updated {when}",
+  "@dashboardOfflineSnapshotUpdated": {
+    "description": "Offline banner; {when} is a localized relative time like 'just now' or '5 min ago'",
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "dashboardJustNow": "just now",
+  "dashboardMinutesAgo": "{count} min ago",
+  "@dashboardMinutesAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dashboardHoursAgo": "{count}h ago",
+  "@dashboardHoursAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dashboardDaysAgo": "{count}d ago",
+  "@dashboardDaysAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "reportSalesOverTime": "SALES OVER TIME",
+  "@reportSalesOverTime": {
+    "description": "All-caps section header on the reports screen"
+  },
+  "reportTopProducts": "TOP PRODUCTS",
+  "@reportTopProducts": {
+    "description": "All-caps section header on the reports screen"
+  },
+  "reportPaymentMix": "PAYMENT MIX",
+  "@reportPaymentMix": {
+    "description": "All-caps section header on the reports screen"
+  },
+  "reportNoSalesYet": "No sales recorded yet.",
+  "reportNoSoldProducts": "No sold products in this range.",
+  "reportNoSalesInRange": "No sales in this range.",
+  "reportRank": "#{rank}",
+  "@reportRank": {
+    "description": "Rank marker in the top-products list, e.g. '#1'",
+    "placeholders": {
+      "rank": {
+        "type": "int"
+      }
+    }
+  },
+  "reportSoldAndProfit": "{qty} sold · profit {profit}",
+  "@reportSoldAndProfit": {
+    "description": "Top-product subtitle; {qty} is a pre-formatted quantity, {profit} a pre-formatted money amount",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "profit": {
+        "type": "String"
+      }
+    }
+  },
+  "paymentMobileMoney": "Mobile money",
+  "@paymentMobileMoney": {
+    "description": "Display name of the mobile-money payment method (long form; paymentMobile is the short 'Mobile')"
+  },
+  "debtTabOpen": "Open",
+  "debtTabPartial": "Partial",
+  "debtTabPaid": "Paid",
+  "debtFailedToLoad": "Failed to load",
+  "debtEmptyOpenTitle": "No open debts",
+  "debtEmptyPartialTitle": "No partial debts",
+  "debtEmptyPaidTitle": "No paid debts yet",
+  "debtEmptyWrittenOffTitle": "No written-off debts",
+  "debtEmptyPaidMessage": "Collected payments will appear here.",
+  "debtEmptyMessage": "Credit sales will show up here.",
+  "debtDueShort": "Due {date}",
+  "@debtDueShort": {
+    "description": "Debt row subtitle; {date} is a pre-formatted short date",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "debtStatusOpen": "OPEN",
+  "@debtStatusOpen": {
+    "description": "All-caps status pill for an open debt"
+  },
+  "debtStatusPartial": "PARTIAL",
+  "@debtStatusPartial": {
+    "description": "All-caps status pill for a partially paid debt"
+  },
+  "debtStatusPaid": "PAID",
+  "@debtStatusPaid": {
+    "description": "All-caps status pill for a fully paid debt"
+  },
+  "debtStatusOverdue": "OVERDUE",
+  "@debtStatusOverdue": {
+    "description": "All-caps status pill for an overdue debt"
+  },
+  "debtDetailTitle": "Debt",
+  "debtNotFound": "Debt not found",
+  "debtOwedLabel": "Owed",
+  "debtPaidLabel": "Paid",
+  "debtRemainingLabel": "Remaining",
+  "debtDueDateLabel": "Due date",
+  "debtPaymentHistory": "PAYMENT HISTORY",
+  "@debtPaymentHistory": {
+    "description": "All-caps section header on the debt detail screen"
+  },
+  "debtNoPaymentsYet": "No payments yet",
+  "debtCollectPayment": "Collect payment",
+  "debtRemainingAmount": "Remaining {amount}",
+  "@debtRemainingAmount": {
+    "description": "Collect-payment sheet subtitle; {amount} is a pre-formatted money amount",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "debtAmountLabel": "Amount",
+  "debtNoteOptional": "Note (optional)",
+  "debtEnterValidAmount": "Enter a valid amount",
+  "debtPaymentRecorded": "Recorded {amount}",
+  "@debtPaymentRecorded": {
+    "description": "Snackbar after collecting a debt payment; {amount} is a pre-formatted money amount",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "debtActionFailed": "Failed: {error}",
+  "@debtActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "expenseEmpty": "No expenses yet",
+  "expenseAddTitle": "Add expense",
+  "expenseAdded": "Expense added",
+  "expenseActionFailed": "Failed: {error}",
+  "@expenseActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "expenseTitleLabel": "Title",
+  "expenseAmountLabel": "Amount",
+  "expenseCategoryLabel": "Category",
+  "expenseDescriptionOptional": "Description (optional)",
+  "expenseTitleRequired": "Title required",
+  "expenseInvalidAmount": "Invalid amount",
+  "expenseCategoryRent": "rent",
+  "@expenseCategoryRent": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "expenseCategoryTransport": "transport",
+  "@expenseCategoryTransport": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "expenseCategoryUtilities": "utilities",
+  "@expenseCategoryUtilities": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "expenseCategorySalary": "salary",
+  "@expenseCategorySalary": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "expenseCategorySupplies": "supplies",
+  "@expenseCategorySupplies": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "expenseCategoryOther": "other",
+  "@expenseCategoryOther": {
+    "description": "Expense category display name (lowercase in English UI)"
+  },
+  "auditLogTitle": "Audit log",
+  "auditFilterProductEdit": "Product edit",
+  "auditFilterProductAdd": "Product add",
+  "auditFilterSaleChange": "Sale change",
+  "auditFilterSaleDelete": "Sale delete",
+  "auditFilterDebtChange": "Debt change",
+  "auditFilterShiftClose": "Shift close",
+  "auditEmpty": "No audit entries",
+  "auditBefore": "Before",
+  "@auditBefore": {
+    "description": "Header above the JSON snapshot of a record before an audited change"
+  },
+  "auditAfter": "After",
+  "@auditAfter": {
+    "description": "Header above the JSON snapshot of a record after an audited change"
+  },
+  "auditActionProductsUpdate": "products.update",
+  "@auditActionProductsUpdate": {
+    "description": "Display text for the audit action code 'products.update'; English deliberately keeps the technical code"
+  },
+  "auditActionProductsInsert": "products.insert",
+  "@auditActionProductsInsert": {
+    "description": "Display text for the audit action code 'products.insert'; English deliberately keeps the technical code"
+  },
+  "auditActionSalesUpdate": "sales.update",
+  "@auditActionSalesUpdate": {
+    "description": "Display text for the audit action code 'sales.update'; English deliberately keeps the technical code"
+  },
+  "auditActionSalesDelete": "sales.delete",
+  "@auditActionSalesDelete": {
+    "description": "Display text for the audit action code 'sales.delete'; English deliberately keeps the technical code"
+  },
+  "auditActionDebtsUpdate": "debts.update",
+  "@auditActionDebtsUpdate": {
+    "description": "Display text for the audit action code 'debts.update'; English deliberately keeps the technical code"
+  },
+  "auditActionShiftsUpdate": "shifts.update",
+  "@auditActionShiftsUpdate": {
+    "description": "Display text for the audit action code 'shifts.update'; English deliberately keeps the technical code"
+  },
+  "auditEntityProducts": "products",
+  "@auditEntityProducts": {
+    "description": "Display text for the audit entity type 'products'; English deliberately keeps the technical value"
+  },
+  "auditEntitySales": "sales",
+  "@auditEntitySales": {
+    "description": "Display text for the audit entity type 'sales'; English deliberately keeps the technical value"
+  },
+  "auditEntityDebts": "debts",
+  "@auditEntityDebts": {
+    "description": "Display text for the audit entity type 'debts'; English deliberately keeps the technical value"
+  },
+  "auditEntityShifts": "shifts",
+  "@auditEntityShifts": {
+    "description": "Display text for the audit entity type 'shifts'; English deliberately keeps the technical value"
+  },
+  "auditEntityExpenses": "expenses",
+  "@auditEntityExpenses": {
+    "description": "Display text for the audit entity type 'expenses'; English deliberately keeps the technical value"
+  },
+  "loginWelcomeTitle": "Welcome back",
+  "loginWelcomeSubtitle": "Sign in to your shop to keep selling.",
+  "loginHaveInviteCode": "I have an invite code",
+  "loginEnterPhonePassword": "Enter phone and password",
+  "loginUnsyncedTitle": "Unsynced records",
+  "loginUnsyncedBody": "{count, plural, =1{This device has 1 unsynced record from another shop. Switching shops now will discard it permanently.} other{This device has {count} unsynced records from another shop. Switching shops now will discard them permanently.}}",
+  "@loginUnsyncedBody": {
+    "description": "Warning shown when logging into a different shop would delete local records that have not been synced yet",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "loginSwitchAnyway": "Switch anyway",
+  "registerTitle": "Open your shop",
+  "registerSubtitle": "Three minutes to set up. You can invite cashiers later.",
+  "registerShopTypeGroup": "Shop type",
+  "registerShopGroup": "Shop",
+  "@registerShopGroup": {
+    "description": "Form section heading for the shop details fields (rendered uppercase)"
+  },
+  "registerShopNameLabel": "Shop name",
+  "registerYouGroup": "You",
+  "@registerYouGroup": {
+    "description": "Form section heading for the owner's personal details (rendered uppercase)"
+  },
+  "registerYourNameLabel": "Your name",
+  "registerPhoneHint": "+2519...",
+  "@registerPhoneHint": {
+    "description": "Example phone number format hint (Ethiopian international prefix)"
+  },
+  "registerSecurityGroup": "Security",
+  "registerPasswordHelper": "At least 8 characters",
+  "registerPasswordMin": "Min 8 characters",
+  "registerOwnerPinLabel": "Owner PIN",
+  "registerOwnerPinHelper": "4–8 digits. Used to authorise sensitive actions.",
+  "registerOwnerPinInvalid": "4–8 digits",
+  "@registerOwnerPinInvalid": {
+    "description": "Validation error when the owner PIN is not 4 to 8 digits long"
+  },
+  "registerCreateShopCta": "Create shop",
+  "registerTypeRegularLabel": "Regular shop",
+  "registerTypeRegularDesc": "Sells finished goods",
+  "registerTypeBakeryLabel": "Bakery",
+  "registerTypeBakeryDesc": "Makes products from ingredients",
+  "inviteJoinTitle": "Join your shop",
+  "inviteJoinSubtitle": "Your owner will share an 8-digit code with you.",
+  "invitePhoneLabel": "Your phone number",
+  "invitePhoneHelper": "Must match what your owner entered",
+  "inviteCodeLabel": "Invite code",
+  "inviteCodeHelper": "8-digit code from your owner",
+  "inviteCodeInvalid": "Enter the 8-digit code",
+  "invitePasswordLabel": "Set a password",
+  "invitePasswordHelper": "At least 8 characters",
+  "invitePasswordMin": "Min 8 characters",
+  "inviteJoinCta": "Join shop",
+  "inviteBackToSignIn": "Back to sign in",
+  "shiftLoadFailedTitle": "Failed to load shift",
+  "shiftStartTitle": "Start your shift",
+  "shiftStartSubtitle": "Count the cash in the till before you start selling.",
+  "shiftStartCta": "Start shift",
+  "shiftEnterValidAmount": "Enter a valid amount",
+  "shiftOpenBadge": "SHIFT OPEN",
+  "@shiftOpenBadge": {
+    "description": "Status badge shown while a shift is running (styled uppercase)"
+  },
+  "shiftSinceTime": "Since {time}",
+  "@shiftSinceTime": {
+    "description": "Shows when the current shift started, e.g. 'Since 2:30 PM'",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "shiftDurationHoursMinutes": "{hours}h {minutes}m",
+  "@shiftDurationHoursMinutes": {
+    "description": "Compact elapsed-time display, e.g. '3h 25m'",
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "shiftDurationMinutes": "{minutes}m",
+  "@shiftDurationMinutes": {
+    "description": "Compact elapsed-time display under one hour, e.g. '25m'",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "shiftCloseHint": "When you finish your shift, count the cash drawer. We compare it with expected cash and surface any variance.",
+  "shiftClosedTitle": "Shift closed",
+  "shiftDeclaredLabel": "Declared",
+  "@shiftDeclaredLabel": {
+    "description": "Row label in the shift-closed summary for the cash amount the cashier declared"
+  },
+  "shiftCloseTitle": "Close shift",
+  "shiftCloseSubtitle": "Here is what should be in the drawer. Count the actual cash, then enter it below.",
+  "shiftNoteLabel": "Note (optional)",
+  "shiftNoteHelper": "e.g. gave too much change to a customer",
+  "shiftCloseCta": "Close shift",
+  "shiftBreakdownOpening": "Opening cash",
+  "shiftBreakdownCashSales": "+ Cash sales",
+  "shiftBreakdownDebtCollected": "+ Debt collected",
+  "shiftBreakdownExpenses": "− Expenses",
+  "shiftBreakdownCashRefunds": "− Cash refunds",
+  "shiftBreakdownExpected": "Expected in drawer",
+  "openShiftsLoadFailedTitle": "Couldn't load",
+  "openShiftsEmptyTitle": "No open shifts",
+  "openShiftsEmptyMessage": "Everyone has closed out cleanly.",
+  "openShiftsForceCloseTitle": "Force-close shift?",
+  "openShiftsForceCloseBody": "This shift has been open {hours} hours. Force-closing sets declared cash to the expected amount (zero variance) and logs the action in the audit trail. Use this only when the cashier is unreachable.",
+  "@openShiftsForceCloseBody": {
+    "description": "Confirmation body for force-closing a stale shift; hours is pre-formatted with one decimal, e.g. '12.5'",
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "openShiftsForceCloseCta": "Force-close",
+  "openShiftsClosedSnack": "Shift closed",
+  "openShiftsHoursOpen": "{hours}h open",
+  "@openShiftsHoursOpen": {
+    "description": "How long a shift has been open; hours is pre-formatted with one decimal, e.g. '12.5'",
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "openShiftsSince": "Since {dateTime}",
+  "@openShiftsSince": {
+    "description": "When the shift was opened, e.g. 'Since Jan 5, 2026 2:30 PM'",
+    "placeholders": {
+      "dateTime": {
+        "type": "String"
+      }
+    }
+  },
+  "openShiftsPillStale": "STALE",
+  "@openShiftsPillStale": {
+    "description": "Status pill for a shift open long enough to be force-closeable (styled uppercase)"
+  },
+  "openShiftsPillOpen": "OPEN",
+  "@openShiftsPillOpen": {
+    "description": "Status pill for a normally open shift (styled uppercase)"
+  },
+  "employeesInviteFab": "Invite",
+  "employeesLoadFailedTitle": "Couldn't load employees",
+  "employeesEmptyTitle": "No employees yet",
+  "employeesEmptyMessage": "Invite a cashier to share the till with you.",
+  "employeesInviteCta": "Invite employee",
+  "employeesPillPending": "PENDING",
+  "@employeesPillPending": {
+    "description": "Status pill for an invited employee who has not activated their account yet (styled uppercase)"
+  },
+  "employeesInviteReadyTitle": "Invite ready",
+  "employeesInviteShareCode": "Share this 8-digit code with {name}.",
+  "@employeesInviteShareCode": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesInviteExpiresSoon": "Expires soon",
+  "employeesInviteExpiresAt": "Expires {time}",
+  "@employeesInviteExpiresAt": {
+    "description": "When the invite code stops working; time is pre-formatted, e.g. '2:30 PM'",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "employeesInviteInstructions": "They open the app, tap \"I have an invite code\", enter their phone, this code, and set a password. Code is single-use and expires in 30 minutes.",
+  "employeesCodeCopied": "Code copied",
+  "employeesCopyCode": "Copy code",
+  "employeesInviteSheetTitle": "Invite employee",
+  "employeesInviteSheetSubtitle": "They will get an 8-digit code to set up their account.",
+  "employeesNameLabel": "Name",
+  "employeesGenerateCode": "Generate invite code",
+  "employeesNamePhoneRequired": "Name and phone are required",
+  "posSessionErrorTitle": "Could not restore your session",
+  "posSignInRequiredTitle": "Sign in required",
+  "posSignInRequiredMessage": "Log in again to load products and continue selling.",
+  "posLoadErrorTitle": "Couldn't load products",
+  "posSearchHint": "Search products",
+  "posProductSemanticLabel": "{name}, {price}",
+  "@posProductSemanticLabel": {
+    "description": "Screen-reader label for a product tile: product name plus formatted price.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "posQtyUnit": "{qty} {unit}",
+  "@posQtyUnit": {
+    "description": "Quantity followed by its unit, e.g. '3 pcs' or '2.5 kg'.",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "posLowBadge": "LOW",
+  "@posLowBadge": {
+    "description": "Uppercase badge on a product tile whose stock is low."
+  },
+  "posQtyTimes": "x{qty}",
+  "@posQtyTimes": {
+    "description": "Quantity multiplier badge on a product tile, e.g. 'x3'.",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      }
+    }
+  },
+  "posRemovedFromCart": "{name} removed from cart",
+  "@posRemovedFromCart": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posOutOfStock": "{name} is out of stock - selling will fail",
+  "@posOutOfStock": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posOnlyQtyOfNameInStock": "Only {qty} {unit} of {name} in stock",
+  "@posOnlyQtyOfNameInStock": {
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posAddedToCart": "{name} added to cart",
+  "@posAddedToCart": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posQuantityLabel": "Quantity ({unit})",
+  "@posQuantityLabel": {
+    "description": "Text field label in the quantity dialog; unit is the product unit, e.g. 'pcs'.",
+    "placeholders": {
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "posInStockHelper": "In stock: {qty}",
+  "@posInStockHelper": {
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      }
+    }
+  },
+  "posSetButton": "Set",
+  "@posSetButton": {
+    "description": "Dialog button that applies the entered quantity or discount amount."
+  },
+  "posOnlyQtyInStock": "Only {qty} {unit} in stock",
+  "@posOnlyQtyInStock": {
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "posUpdatedInCart": "{name} updated in cart",
+  "@posUpdatedInCart": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posCartEmptyTapHint": "Cart is empty - tap a product to add it",
+  "posCartItemsSummary": "{items, plural, =1{1 item} other{{items} items}} across {lines, plural, =1{1 line} other{{lines} lines}}",
+  "@posCartItemsSummary": {
+    "description": "Cart summary. items may be fractional (e.g. 2.5 kg sold loose), so it is a num: pass whole values as int and fractional as double.",
+    "placeholders": {
+      "items": {
+        "type": "num"
+      },
+      "lines": {
+        "type": "int"
+      }
+    }
+  },
+  "posAddItems": "Add items",
+  "posReviewCart": "Review cart",
+  "cartTitle": "Cart",
+  "posCartEmptyTitle": "Cart is empty",
+  "posCartEmptyMessage": "Tap a product tile to start a sale.",
+  "posDiscountApplied": "Discount applied: {amount}",
+  "@posDiscountApplied": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "posRecentHeader": "RECENT",
+  "@posRecentHeader": {
+    "description": "Uppercase section header above the recently-sold products strip."
+  },
+  "posProductsNotLoadedTitle": "Products did not load",
+  "posProductsNotLoadedMessage": "The local product list is empty, and the refresh failed: {error}",
+  "@posProductsNotLoadedMessage": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "posNoMatchesTitle": "No matches for \"{query}\"",
+  "@posNoMatchesTitle": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "posNoMatchesMessage": "Clear search to see all products available for selling.",
+  "posNoProductsTitle": "No products available to sell",
+  "posNoProductsMessage": "Add products in Inventory or retry loading from the server, then they will appear here.",
+  "posLoadProducts": "Load products",
+  "posLoadingSellScreen": "Loading sell screen...",
+  "posLastStockAdded": "Last {qty} {unit} of {name} added",
+  "@posLastStockAdded": {
+    "description": "Snackbar when the last of a product's stock was added to the cart.",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "posLowStockAfterSale": "Low stock: {name} will have {qty} {unit} left after this sale",
+  "@posLowStockAfterSale": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "posSaleFailed": "Sale failed: {error}",
+  "@posSaleFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutErrCartEmpty": "Cart is empty",
+  "@checkoutErrCartEmpty": {
+    "description": "Checkout error: repository rejected the sale because the cart is empty."
+  },
+  "checkoutErrCreditNeedsCustomer": "Credit sale needs a customer name",
+  "checkoutErrInvalidQuantity": "Invalid quantity for {name}",
+  "@checkoutErrInvalidQuantity": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutErrInsufficientStock": "Insufficient stock for {name}",
+  "@checkoutErrInsufficientStock": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutTotalCaps": "TOTAL",
+  "@checkoutTotalCaps": {
+    "description": "Uppercase section header above the sale total on the checkout sheet and receipt."
+  },
+  "checkoutSubtotalDiscount": "Subtotal {subtotal} - discount {discount}",
+  "@checkoutSubtotalDiscount": {
+    "placeholders": {
+      "subtotal": {
+        "type": "String"
+      },
+      "discount": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutItemCount": "{count, plural, =1{1 item} other{{count} items}}",
+  "@checkoutItemCount": {
+    "description": "Item count under the checkout total. count may be fractional (e.g. 2.5 kg sold loose), so it is a num: pass whole values as int and fractional as double.",
+    "placeholders": {
+      "count": {
+        "type": "num"
+      }
+    }
+  },
+  "checkoutPaymentCaps": "PAYMENT",
+  "@checkoutPaymentCaps": {
+    "description": "Uppercase section header above the payment method picker."
+  },
+  "checkoutPaymentSemantic": "{method} payment",
+  "@checkoutPaymentSemantic": {
+    "description": "Screen-reader label for a payment method option, e.g. 'Cash payment'.",
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutMobileInfo": "Mobile money sales are recorded immediately with no cash change due.",
+  "checkoutEnterCashReceived": "Enter the cash received from the customer",
+  "checkoutShortBy": "Customer is short by {amount}",
+  "@checkoutShortBy": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutCustomerNameRequired": "Customer name required for credit",
+  "checkoutConfirmTotal": "Confirm - {amount}",
+  "@checkoutConfirmTotal": {
+    "description": "Label of the button that finalizes the sale; amount is the formatted total.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutCashCaps": "CASH",
+  "@checkoutCashCaps": {
+    "description": "Uppercase section header above the tendered-cash field."
+  },
+  "checkoutTenderedAmount": "Tendered amount",
+  "checkoutTenderedHelper": "Enter how much cash the customer handed over.",
+  "checkoutChangeHint": "Change will appear after you enter the cash received.",
+  "checkoutShortByAmount": "Short by {amount}",
+  "@checkoutShortByAmount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutChangeDue": "Change due {amount}",
+  "@checkoutChangeDue": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutCustomerCaps": "CUSTOMER",
+  "@checkoutCustomerCaps": {
+    "description": "Uppercase section header above the credit customer fields."
+  },
+  "checkoutCustomerName": "Customer name",
+  "checkoutPhoneOptional": "Phone (optional)",
+  "checkoutDueDateOptional": "Due date (optional)",
+  "checkoutDueDate": "Due {date}",
+  "@checkoutDueDate": {
+    "description": "Debt due date, e.g. 'Due Jul 18, 2026'. date is pre-formatted.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutOutstandingTitle": "Existing outstanding balance",
+  "checkoutCurrentOutstanding": "Current outstanding",
+  "checkoutThisSale": "This sale",
+  "checkoutTotalAfterSale": "Total after sale",
+  "checkoutOwnerApprovalNote": "Owner approval may be required if cumulative balance exceeds the shop limit.",
+  "checkoutLargeCreditNote": "Large credit sales may require owner approval when synced.",
+  "cartClear": "Clear",
+  "@cartClear": {
+    "description": "Button that empties the cart or removes the discount."
+  },
+  "cartKeep": "Keep",
+  "@cartKeep": {
+    "description": "Dialog button that cancels clearing the cart, keeping its items."
+  },
+  "cartDiscount": "Discount",
+  "cartAddDiscount": "Add discount",
+  "cartMinusAmount": "- {amount}",
+  "@cartMinusAmount": {
+    "description": "A deducted amount shown with a leading minus sign, e.g. '- ETB 25'.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cartContinueToCheckout": "Continue to checkout",
+  "cartAmountLabel": "Amount",
+  "cartSubtotalHelper": "Subtotal: {amount}",
+  "@cartSubtotalHelper": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cartDiscountExceedsSubtotal": "Discount cannot exceed subtotal {amount}",
+  "@cartDiscountExceedsSubtotal": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cartClearConfirmTitle": "Clear cart?",
+  "cartClearConfirmBody": "Remove all items from the cart.",
+  "cartPricePerUnit": "{price} / {unit}",
+  "@cartPricePerUnit": {
+    "description": "Unit price of a cart line, e.g. 'ETB 25 / pcs'.",
+    "placeholders": {
+      "price": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptSaleRecorded": "Sale recorded",
+  "receiptSubtotal": "Subtotal",
+  "receiptItemsCaps": "ITEMS",
+  "@receiptItemsCaps": {
+    "description": "Uppercase section header above the receipt line items."
+  },
+  "receiptQtyUnitPrice": "{qty} {unit} x {price}",
+  "@receiptQtyUnitPrice": {
+    "description": "Receipt line detail: quantity, unit and unit price, e.g. '2 pcs x ETB 25'.",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptCopied": "Receipt copied",
+  "receiptCopy": "Copy",
+  "receiptNewSale": "New sale",
+  "receiptSaleNumber": "#{id}",
+  "@receiptSaleNumber": {
+    "description": "Short sale reference shown at the bottom of the receipt, e.g. '#1a2b3c4d'.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptPaidCash": "Paid in cash",
+  "receiptPaidMobile": "Paid via mobile money",
+  "receiptOnCredit": "On credit",
+  "receiptShareHeader": "Receipt #{id}",
+  "@receiptShareHeader": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareLine": "{name}  {qty}{unit} x {price} = {total}",
+  "@receiptShareLine": {
+    "description": "One line item in the copied receipt text, e.g. 'Sugar  2kg x ETB 50 = ETB 100'.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareTotal": "Total: {amount}",
+  "@receiptShareTotal": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptSharePayment": "Payment: {method}",
+  "@receiptSharePayment": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareTendered": "Tendered: {amount}",
+  "@receiptShareTendered": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareChange": "Change: {amount}",
+  "@receiptShareChange": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareCustomer": "Customer: {name}",
+  "@receiptShareCustomer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptSharePhone": "Phone: {phone}",
+  "@receiptSharePhone": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareDue": "Due: {date}",
+  "@receiptShareDue": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "recentSalesTitle": "Recent sales",
+  "recentSalesLoadFailed": "Failed to load",
+  "recentSalesEmptyTitle": "No sales yet",
+  "recentSalesEmptyMessage": "Sales you record on this device will appear here.",
+  "recentSalesRefundConfirmTitle": "Refund this sale?",
+  "recentSalesRefundConfirmBody": "Reverses the sale of {amount}, restores stock for every item, and logs the action.",
+  "@recentSalesRefundConfirmBody": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "recentSalesRefund": "Refund",
+  "recentSalesRefundRecorded": "Refund recorded",
+  "recentSalesRefundFailed": "Failed: {error}",
+  "@recentSalesRefundFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recentSalesErrNotFound": "Sale not found",
+  "recentSalesErrAlreadyRefunded": "Sale already refunded",
+  "recentSalesSummary": "{method} · {count, plural, =1{1 item} other{{count} items}} · {date}",
+  "@recentSalesSummary": {
+    "description": "One-line sale summary: payment method, item count, and pre-formatted date-time, separated by middle dots.",
+    "placeholders": {
+      "method": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "recentSalesRefundedCaps": "REFUNDED",
+  "@recentSalesRefundedCaps": {
+    "description": "Uppercase status pill on a refunded sale."
+  },
+  "stockReceiveTitle": "Receive stock",
+  "stockReceiveUnitCostLabel": "Unit cost",
+  "stockReceiveExpiryLabel": "Expiry date (optional)",
+  "stockReceiveNoExpiry": "No expiry",
+  "stockReceiveSpoiledLabel": "Spoiled on arrival (optional)",
+  "stockReceiveNoteLabel": "Note (optional)",
+  "stockReceiveSpoiledInvalid": "Spoiled quantity can't exceed the received quantity",
+  "stockReceiveApply": "Receive",
+  "stockReceiveSuccess": "Received {qty}",
+  "@stockReceiveSuccess": {
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      }
+    }
+  },
+  "stockAdjustSpoilageHint": "For expired or damaged goods, use Record spoilage so waste is costed correctly.",
+  "spoilageTitle": "Record spoilage",
+  "spoilageApply": "Record",
+  "spoilageSuccess": "Spoilage recorded",
+  "spoilageReasonExpired": "expired",
+  "spoilageReasonDayOld": "day-old",
+  "spoilageReasonOther": "other",
+  "spoilageLotLabel": "Batch",
+  "spoilageLotAuto": "Oldest / expiring first (automatic)",
+  "spoilageLotOption": "{received} · {qty} left · exp {expiry}",
+  "@spoilageLotOption": {
+    "description": "One batch in the spoilage batch picker: receipt date, quantity remaining, expiry date (or a dash).",
+    "placeholders": {
+      "received": {
+        "type": "String"
+      },
+      "qty": {
+        "type": "String"
+      },
+      "expiry": {
+        "type": "String"
+      }
+    }
+  },
+  "spoilageOnReceiveReason": "spoiled on arrival",
+  "spoilageInProductionReason": "spoiled in production",
+  "productionTitle": "Record production",
+  "productionProducedLabel": "Quantity produced",
+  "productionSpoiledLabel": "Spoiled / burnt (optional)",
+  "productionSpoiledHelper": "Spoiled units still use up ingredients",
+  "productionSpoiledInvalid": "Spoiled quantity can't exceed the produced quantity",
+  "productionApply": "Record production",
+  "productionSuccess": "Production recorded",
+  "productBatchesTitle": "Batches",
+  "productViewBatches": "View batches",
+  "productNoBatches": "No open batches",
+  "productMovementReceive": "Stock received",
+  "productMovementSpoilage": "Spoilage",
+  "productMovementProduction": "Production",
+  "lotReceivedOn": "Received {date}",
+  "@lotReceivedOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "lotQtyLeft": "{qty} {unit} left",
+  "@lotQtyLeft": {
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "lotMarkSpoiled": "Mark spoiled",
+  "expiryExpired": "Expired",
+  "expiryToday": "Expires today",
+  "expiryInDays": "{days, plural, =1{1 day left} other{{days} days left}}",
+  "@expiryInDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "inventoryExpiringChip": "Expiring soon",
+  "inventoryNoExpiringTitle": "Nothing expiring",
+  "inventoryNoExpiringMessage": "No batches expire in the next 7 days.",
+  "inventoryViewDetails": "View details",
+  "batchReportTitle": "Batch report",
+  "batchReportEmptyTitle": "No batches yet",
+  "batchReportEmptyMessage": "Receive stock with a cost and expiry date to see per-batch profit here.",
+  "batchColCost": "Cost",
+  "batchColSold": "Sold",
+  "batchColSpoiled": "Spoiled",
+  "batchColLeft": "Left",
+  "batchColRevenue": "Revenue",
+  "batchColMargin": "Margin",
+  "dashboardWaste": "Waste (spoilage)"
 }
