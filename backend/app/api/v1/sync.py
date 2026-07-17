@@ -61,7 +61,9 @@ async def pull(
     has_more = len(rows) > limit
     rows = rows[:limit]
     events = [
-        SyncEventOut(server_id=r.id, op=r.op, payload=r.payload, applied_at=r.applied_at)
+        SyncEventOut(server_id=r.id, op=r.op, payload=r.payload,
+                     applied_at=r.applied_at, user_id=r.user_id,
+                     occurred_at=r.client_occurred_at)
         for r in rows
     ]
     next_cursor = rows[-1].id if rows else cursor

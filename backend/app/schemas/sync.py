@@ -58,6 +58,11 @@ class SyncEventOut(BaseModel):
     op: SyncOp
     payload: dict[str, Any]
     applied_at: datetime
+    # Actor and client-side timestamp of the event. Payloads deliberately omit
+    # user_id (the server derives it from auth on push), so pulling devices
+    # need both here to attribute and date replicated rows (sales, shifts).
+    user_id: UUID
+    occurred_at: datetime
 
 
 class SyncPullResponse(BaseModel):

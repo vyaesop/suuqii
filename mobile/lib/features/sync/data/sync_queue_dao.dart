@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/sync_events_table.dart';
+import 'package:suuqii/core/storage/tables/sync_meta_table.dart';
 import 'package:uuid/uuid.dart';
 
 part 'sync_queue_dao.g.dart';
 
-@DriftAccessor(tables: [SyncEventsTable])
+@DriftAccessor(tables: [SyncEventsTable, SyncMetaTable])
 class SyncQueueDao extends DatabaseAccessor<AppDatabase>
     with _$SyncQueueDaoMixin {
   SyncQueueDao(super.db);
@@ -52,17 +53,18 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
     return r.read(syncEventsTable.id.count()) ?? 0;
   }
 
-  /// Events the server rejected or that exhausted their retries.
+  /// Events that need the user's attention: rejected by the server, retry
+  /// budget exhausted, or lost a conflict (another device's change was kept).
   Stream<int> watchDeadLetterCount() {
     final q = selectOnly(syncEventsTable)
       ..addColumns([syncEventsTable.id.count()])
-      ..where(syncEventsTable.status.isIn(['rejected', 'failed']));
+      ..where(syncEventsTable.status.isIn(['rejected', 'failed', 'conflict']));
     return q.watchSingle().map((r) => r.read(syncEventsTable.id.count()) ?? 0);
   }
 
   Stream<List<SyncEventRow>> watchDeadLettered({int limit = 20}) {
     final q = select(syncEventsTable)
-      ..where((t) => t.status.isIn(['rejected', 'failed']))
+      ..where((t) => t.status.isIn(['rejected', 'failed', 'conflict']))
       ..orderBy([(t) => OrderingTerm.desc(t.id)])
       ..limit(limit);
     return q.watch();
@@ -71,6 +73,18 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
   Future<void> markSynced(int id) =>
       (update(syncEventsTable)..where((t) => t.id.equals(id)))
           .write(const SyncEventsTableCompanion(status: Value('synced')));
+
+  /// The server resolved this event against a newer state and kept its own
+  /// version (e.g. a stale product edit). The event leaves the queue — it
+  /// must never be retried — but stays visible so the user learns their
+  /// change was not applied.
+  Future<void> markConflict(int id, String? code, String? detail) =>
+      (update(syncEventsTable)..where((t) => t.id.equals(id))).write(
+        SyncEventsTableCompanion(
+          status: const Value('conflict'),
+          lastError: Value(detail ?? code ?? 'conflict'),
+        ),
+      );
 
   Future<void> markRejected(int id, String? code, String? detail) =>
       (update(syncEventsTable)..where((t) => t.id.equals(id))).write(
@@ -100,4 +114,16 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
       [sqliteDateTimeParam(DateTime.now()), error, ...ids],
     );
   }
+
+  /// Sync bookkeeping key/value store (e.g. the server pull cursor).
+  Future<String?> getMeta(String key) async {
+    final row = await (select(syncMetaTable)..where((t) => t.key.equals(key)))
+        .getSingleOrNull();
+    return row?.value;
+  }
+
+  Future<void> setMeta(String key, String value) =>
+      into(syncMetaTable).insertOnConflictUpdate(
+        SyncMetaTableCompanion.insert(key: key, value: value),
+      );
 }

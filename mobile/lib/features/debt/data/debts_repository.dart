@@ -65,7 +65,14 @@ class DebtsRepository {
     // Pull both open + partial; paid ones are kept locally but stale is fine.
     final open = await remote.list(shopId: shopId, status: 'open');
     final partial = await remote.list(shopId: shopId, status: 'partial');
-    final all = [...open, ...partial];
+    // Debts touched by still-pending sync events are skipped, mirroring the
+    // products refresh: the server hasn't seen those local changes yet, so
+    // its rows would revert an optimistic payment/write-off — the customer
+    // would briefly show as owing money they already handed over.
+    final dirty = await debtIdsWithPendingChanges(db);
+    final all = [...open, ...partial]
+        .where((d) => !dirty.contains(d.id))
+        .toList();
     await db.debtsDao.upsertAll(all);
     return all.length;
   }
@@ -198,6 +205,27 @@ class DebtsRepository {
     });
     unawaited(syncWorker.kick());
   }
+}
+
+/// Debt ids referenced by pending sync events (payments, write-offs, and
+/// credit sales that create a debt). Server snapshots must not clobber these
+/// rows until the queue drains — local wins while its change is in flight.
+Future<Set<String>> debtIdsWithPendingChanges(AppDatabase db) async {
+  final pending = await (db.select(db.syncEventsTable)
+        ..where((t) => t.status.equals('pending')))
+      .get();
+  final ids = <String>{};
+  for (final ev in pending) {
+    final payload = jsonDecode(ev.payload) as Map<String, dynamic>;
+    final id = switch (ev.op) {
+      'debt.payment.create' || 'debt.writeoff' => payload['debt_id'],
+      'debt.create' => payload['id'],
+      'sale.create' => payload['debt_id'], // credit sale creating a debt
+      _ => null,
+    };
+    if (id is String) ids.add(id);
+  }
+  return ids;
 }
 
 @Riverpod(keepAlive: true)

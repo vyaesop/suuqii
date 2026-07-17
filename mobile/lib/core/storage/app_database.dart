@@ -14,6 +14,7 @@ import 'package:suuqii/core/storage/tables/shifts_table.dart';
 import 'package:suuqii/core/storage/tables/stock_lots_table.dart';
 import 'package:suuqii/core/storage/tables/supplies_table.dart';
 import 'package:suuqii/core/storage/tables/sync_events_table.dart';
+import 'package:suuqii/core/storage/tables/sync_meta_table.dart';
 import 'package:suuqii/features/debt/data/debts_dao.dart';
 import 'package:suuqii/features/expenses/data/expenses_dao.dart';
 import 'package:suuqii/features/inventory/data/lots_dao.dart';
@@ -39,6 +40,7 @@ int sqliteDateTimeParam(DateTime value) =>
     ShiftsTable,
     AuditLogsTable,
     SyncEventsTable,
+    SyncMetaTable,
     SuppliesTable,
     RecipeItemsTable,
     StockLotsTable,
@@ -73,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -107,6 +109,9 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 8) {
             await _backfillOpeningLots();
+          }
+          if (from < 9) {
+            await m.createTable(syncMetaTable);
           }
         },
       );
@@ -189,6 +194,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> clearAllShopData() async {
     await transaction(() async {
       await customStatement('DELETE FROM sync_events');
+      await customStatement('DELETE FROM sync_meta');
       await customStatement('DELETE FROM lot_consumptions');
       await customStatement('DELETE FROM stock_lots');
       await customStatement('DELETE FROM inventory_logs');

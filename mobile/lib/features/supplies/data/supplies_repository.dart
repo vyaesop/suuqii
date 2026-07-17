@@ -3,11 +3,13 @@ import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/domain/entities/stock_lot.dart'
     show expiryDateString;
+import 'package:suuqii/features/supplies/data/supplies_remote_data_source.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
@@ -17,17 +19,56 @@ part 'supplies_repository.g.dart';
 class SuppliesRepository {
   SuppliesRepository({
     required this.db,
+    required this.remote,
     required this.syncWorker,
     required this.shopId,
     required this.userId,
   });
 
   final AppDatabase db;
+  final SuppliesRemoteDataSource remote;
   final SyncWorker syncWorker;
   final String shopId;
   final String userId;
 
   Stream<List<Supply>> watch() => db.suppliesDao.watchAll(shopId: shopId);
+
+  /// Pull fresh supplies from the server, mirroring the products refresh:
+  /// rows touched by still-pending sync events are skipped so server state
+  /// never clobbers queued local changes.
+  ///
+  /// A pending `production.record` skips the refresh entirely: the server
+  /// deducts ingredient supplies from the product's recipe, so the affected
+  /// supply ids aren't knowable from the event payload alone.
+  Future<int> refreshFromServer() async {
+    final pending = await (db.select(db.syncEventsTable)
+          ..where((t) => t.status.equals('pending')))
+        .get();
+    final dirty = <String>{};
+    for (final ev in pending) {
+      if (ev.op == 'production.record') return 0;
+      final payload = jsonDecode(ev.payload) as Map<String, dynamic>;
+      switch (ev.op) {
+        case 'supply.create' || 'supply.update' || 'supply.delete':
+          final id = payload['id'];
+          if (id is String) dirty.add(id);
+        case 'sale.create':
+          final deductions = payload['supply_deductions'];
+          if (deductions is List) {
+            for (final d in deductions) {
+              if (d is Map && d['supply_id'] is String) {
+                dirty.add(d['supply_id'] as String);
+              }
+            }
+          }
+      }
+    }
+    final remoteList = await remote.list(shopId: shopId);
+    final toUpsert =
+        remoteList.where((s) => !dirty.contains(s.id)).toList();
+    await db.suppliesDao.upsertAll(toUpsert);
+    return toUpsert.length;
+  }
 
   Future<List<Supply>> getAll() => db.suppliesDao.getAllByShop(shopId);
 
@@ -164,6 +205,7 @@ SuppliesRepository suppliesRepository(SuppliesRepositoryRef ref) {
   }
   return SuppliesRepository(
     db: ref.watch(appDatabaseProvider),
+    remote: SuppliesRemoteDataSource(ref.watch(dioProvider)),
     syncWorker: ref.watch(syncWorkerProvider),
     shopId: auth.shopId,
     userId: auth.userId,
