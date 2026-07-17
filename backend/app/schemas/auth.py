@@ -1,12 +1,20 @@
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+
+from app.core.phone import normalize_phone
+
+# Identity phones are normalized to the canonical local format (09.../07...)
+# at the schema boundary so lookups and uniqueness checks always compare the
+# same representation. InvalidPhoneError subclasses ValueError → 422.
+Phone = Annotated[str, AfterValidator(normalize_phone)]
 
 
 class RegisterShopRequest(BaseModel):
     shop_name: str = Field(min_length=1, max_length=120)
     owner_name: str = Field(min_length=1, max_length=120)
-    phone: str
+    phone: Phone
     password: str = Field(min_length=8)
     owner_pin: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
     device_fingerprint: str
@@ -24,7 +32,7 @@ class RegisterShopRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    phone: str
+    phone: Phone
     password: str
     device_fingerprint: str
     device_label: str | None = None
@@ -51,7 +59,7 @@ class TokenBundle(BaseModel):
 
 class InviteRequest(BaseModel):
     name: str
-    phone: str
+    phone: Phone
     role: str = "cashier"
 
 
@@ -62,7 +70,7 @@ class InviteResponse(BaseModel):
 
 class AcceptInviteRequest(BaseModel):
     invite_code: str
-    phone: str
+    phone: Phone
     password: str = Field(min_length=8)
     device_fingerprint: str
     device_label: str | None = None

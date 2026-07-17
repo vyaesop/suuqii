@@ -29,7 +29,7 @@ class ConflictError(DomainError):
         self.server_payload = server_payload or {}
 
 
-class OwnerPinRequired(DomainError):
+class OwnerPinRequired(DomainError):  # noqa: N818 — established public name
     code = "owner_pin_required"
     status = 403
 

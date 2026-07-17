@@ -7,9 +7,23 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.api.v1 import auth, audit, debts, expenses, products, reports, sales, shifts, shops, supplies, sync
+from app.api.v1 import (
+    audit,
+    auth,
+    debts,
+    expenses,
+    products,
+    reports,
+    sales,
+    shifts,
+    shops,
+    supplies,
+    sync,
+)
+from app.core.app_version import app_version_rejection
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
+from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.db.bootstrap import ensure_migrated
 
@@ -23,6 +37,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 def create_app() -> FastAPI:
     # Init at import time, not in lifespan — on serverless the lifespan hook
     # is not guaranteed to run before the first request is handled.
+    setup_logging()
     if settings.sentry_dsn:
         sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
 
@@ -54,6 +69,18 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def _migration_gate(request, call_next):  # noqa: ANN001, ANN202
         await ensure_migrated()
+        return await call_next(request)
+
+    # Forced upgrade: reject too-old (or version-less) clients on /v1 with
+    # 426 before doing any work. /healthz and /readyz stay reachable.
+    # Added after _migration_gate so it runs first (middleware nest outward).
+    @app.middleware("http")
+    async def _app_version_gate(request, call_next):  # noqa: ANN001, ANN202
+        rejection = app_version_rejection(
+            request.url.path, request.headers.get("X-App-Version")
+        )
+        if rejection is not None:
+            return rejection
         return await call_next(request)
 
     api = "/v1"

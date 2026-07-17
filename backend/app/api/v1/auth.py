@@ -47,17 +47,21 @@ OWNER_PIN_MAX_ATTEMPTS = 5
 OWNER_PIN_LOCK_MINUTES = 15
 
 
-def _pin_seconds_left(user: User) -> int | None:
-    """Return seconds remaining in lockout, or None if not locked."""
-    if not user.owner_pin_locked_until:
+def _lock_seconds_left(locked_until: datetime | None) -> int | None:
+    """Return seconds remaining in a lockout, or None if not locked."""
+    if not locked_until:
         return None
     now = datetime.now(UTC)
-    locked_until = user.owner_pin_locked_until
     if locked_until.tzinfo is None:
         locked_until = locked_until.replace(tzinfo=UTC)
     if locked_until <= now:
         return None
     return int((locked_until - now).total_seconds())
+
+
+def _pin_seconds_left(user: User) -> int | None:
+    """Return seconds remaining in lockout, or None if not locked."""
+    return _lock_seconds_left(user.owner_pin_locked_until)
 
 
 async def _record_pin_failure(db: AsyncSession, user: User) -> int:
@@ -86,6 +90,38 @@ async def _reset_pin_attempts(db: AsyncSession, user: User) -> None:
     user.owner_pin_attempts = 0
     user.owner_pin_locked_until = None
     await db.commit()
+
+
+# --- Login brute-force lockout (DB-backed, per account) ------------------
+# The per-IP slowapi limit is per-instance memory only (useless across
+# serverless cold starts); this DB-backed per-account lockout is the real
+# defense. Mirrors the owner-PIN pattern above.
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_MINUTES = 15
+
+# A real argon2 hash of a discarded random secret, verified when the phone
+# doesn't match any account so "unknown phone" costs the same as "wrong
+# password" — otherwise response time leaks which phones are registered.
+_TIMING_DUMMY_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$KtekJmzMbniotZuDZH9FcA"
+    "$u9ZhqTKOzwhFwnpSjz5dOE8dgBlot1nTRd6zZRtAsCU"
+)
+
+
+async def _record_login_failure(db: AsyncSession, user: User) -> int:
+    """Increment failure count. Returns attempts remaining (0 = just locked)."""
+    # A previous lockout that has expired grants a fresh attempt window.
+    if user.login_locked_until is not None and _lock_seconds_left(user.login_locked_until) is None:
+        user.login_attempts = 0
+        user.login_locked_until = None
+
+    user.login_attempts = (user.login_attempts or 0) + 1
+    if user.login_attempts >= LOGIN_MAX_ATTEMPTS:
+        user.login_locked_until = datetime.now(UTC) + timedelta(minutes=LOGIN_LOCK_MINUTES)
+        await db.commit()
+        return 0
+    await db.commit()
+    return LOGIN_MAX_ATTEMPTS - user.login_attempts
 
 
 def _fp_hash(fp: str) -> str:
@@ -189,8 +225,36 @@ async def login(request: Request, req: LoginRequest) -> TokenBundle:
         user = (await db.execute(
             select(User).where(User.phone == req.phone, User.deleted_at.is_(None))
         )).scalar_one_or_none()
-        if not user or not user.is_active or not verify_password(req.password, user.password_hash):
+        if not user or not user.is_active:
+            # Burn the same argon2 work as a real verification so an
+            # attacker can't tell "unknown phone" from "wrong password"
+            # by timing. The 401 shape is identical too.
+            verify_password(req.password, _TIMING_DUMMY_HASH)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+
+        seconds_left = _lock_seconds_left(user.login_locked_until)
+        if seconds_left is not None:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                f"too many failed logins — try again in {seconds_left // 60}m {seconds_left % 60}s",
+                headers={"Retry-After": str(seconds_left)},
+            )
+
+        if not verify_password(req.password, user.password_hash):
+            remaining = await _record_login_failure(db, user)
+            if remaining == 0:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    f"too many failed logins — locked for {LOGIN_LOCK_MINUTES} min",
+                    headers={"Retry-After": str(LOGIN_LOCK_MINUTES * 60)},
+                )
+            # Don't reveal remaining attempts: unlike the PIN endpoint the
+            # caller is unauthenticated, and a countdown confirms the
+            # account exists.
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+
+        user.login_attempts = 0
+        user.login_locked_until = None
         bundle = await _issue_token_bundle(db, user, req.device_fingerprint, req.device_label)
         await db.commit()
         return bundle

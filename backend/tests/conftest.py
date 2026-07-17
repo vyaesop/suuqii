@@ -16,6 +16,15 @@ import os
 # DATABASE_URL is in .env (potentially a real deployment).
 os.environ.setdefault("MIGRATE_ON_START", "false")
 
+# Point the app's own engine (app.db.session) at the scratch database too:
+# the auth endpoints open sessions via AsyncSessionLocal directly (no
+# dependency override possible), and .env may hold a live deployment URL —
+# tests must never be able to touch it.
+_test_url = os.environ.get("TEST_DATABASE_URL")
+if _test_url:
+    os.environ["DATABASE_URL"] = _test_url
+    os.environ["DATABASE_URL_SYNC"] = _test_url.replace("+asyncpg", "")
+
 from decimal import Decimal
 from uuid import uuid4
 

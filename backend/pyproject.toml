@@ -42,6 +42,17 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "N", "SIM", "TID"]
 ignore = ["E501"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom: calls in argument defaults are the API.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
+
+[tool.ruff.lint.per-file-ignores]
+# Established convention: `from ...postgresql import UUID as PgUUID`.
+"app/models/*" = ["N811"]
+"alembic/*" = ["N811"]
+# conftest must set env vars before any app module is imported.
+"tests/conftest.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

@@ -14,10 +14,8 @@ from app.models import (
     AuditLog,
     LotConsumption,
     Product,
-    RecipeItem,
     Sale,
     SaleItem,
-    Shop,
     StockLot,
     Supply,
 )

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
@@ -26,13 +26,13 @@ from app.models import (
     DebtPayment,
     Expense,
     InventoryLog,
+    LotConsumption,
     Product,
     RecipeItem,
-    LotConsumption,
     Sale,
     SaleItem,
-    Shop,
     Shift,
+    Shop,
     StockLot,
     Supply,
     SyncEvent,
@@ -694,12 +694,12 @@ class SyncService:
                     )
                 )).scalar_one()
                 cumulative = Decimal(existing_outstanding) + sale_total
-                if cumulative > shop.debt_threshold:
-                    # Requires owner PIN — the challenge was already validated
-                    # for ops in SENSITIVE_OPS; credit sales above threshold
-                    # need PIN regardless of role.
-                    if self.user.role != "owner" and self._resolve_challenge(p) is None:
-                        raise OwnerPinRequired(
+                # Requires owner PIN — the challenge was already validated
+                # for ops in SENSITIVE_OPS; credit sales above threshold
+                # need PIN regardless of role.
+                if (cumulative > shop.debt_threshold
+                        and self.user.role != "owner" and self._resolve_challenge(p) is None):
+                    raise OwnerPinRequired(
                             f"Customer {customer_phone} would have "
                             f"{cumulative} outstanding (threshold {shop.debt_threshold}). "
                             "Owner PIN required.",

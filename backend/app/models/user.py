@@ -21,6 +21,8 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     owner_pin_hash: Mapped[str | None] = mapped_column(String)
     owner_pin_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     owner_pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fcm_token: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

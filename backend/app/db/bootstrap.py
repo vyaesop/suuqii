@@ -16,12 +16,12 @@ import logging
 from pathlib import Path
 
 import anyio
-from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 
+from alembic import command
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

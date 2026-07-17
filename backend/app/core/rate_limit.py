@@ -13,8 +13,21 @@ Shared rate limiter. Per docs/04-api-design.md & docs/07-authentication.md:
 
 The limiter is module-level so route modules can import the same instance
 as `main.py` (slowapi requires a single shared `Limiter` per app).
+
+Storage: per-process memory by default, which on serverless means each
+instance counts separately — the limits above are best-effort noise
+reduction there, and the DB-backed per-account login/PIN lockouts in
+auth.py are the real brute-force defense. Set RATE_LIMIT_REDIS_URL to
+share counters across instances; the backend is resolved from the URI
+string by the `limits` library, so no redis import is needed here.
 """
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+from app.core.config import settings
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["100/minute"],
+    storage_uri=settings.rate_limit_redis_url or "memory://",
+)

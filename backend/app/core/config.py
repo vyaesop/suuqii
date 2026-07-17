@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     fcm_private_key: str | None = None
     sentry_dsn: str | None = None
     log_level: str = "INFO"
+    # Shared slowapi/limits storage (e.g. redis://host:6379/0). Empty keeps
+    # per-process memory — fine for a single instance, per-instance (weak)
+    # on serverless; the DB-backed account lockout covers brute force there.
+    rate_limit_redis_url: str = ""
+    # Oldest mobile app version (semver "x.y.z") allowed on /v1. Empty
+    # disables the check. Older/missing X-App-Version headers get a 426.
+    min_app_version: str = ""
     # Bring the DB schema to head on first request per process (serverless
     # has no deploy hook to run alembic). Disable for test harnesses.
     migrate_on_start: bool = True
