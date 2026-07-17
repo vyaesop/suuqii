@@ -46,31 +46,55 @@ class ProductImage extends StatelessWidget {
 
     if (imageUrl == null || imageUrl!.isEmpty) return fallback;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: CachedNetworkImage(
-        imageUrl: imageUrl!,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => fallback,
-        placeholder: (_, __) => Container(
-          width: size,
-          height: size,
-          color: scheme.surfaceContainerHighest,
-          alignment: Alignment.center,
-          child: SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: scheme.onSurfaceVariant,
+    // Decode at the rendered size, not full resolution: thumbnails are
+    // ~44-180 logical px, and decoding a full camera photo per tile is a
+    // real memory/jank source on 1-2GB RAM phones.
+    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 2.0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final logicalWidth = size ??
+            (constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : _kFallbackLogicalWidth);
+        final memCacheWidth =
+            (logicalWidth * dpr).round().clamp(_kMinDecodePx, _kMaxDecodePx);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: CachedNetworkImage(
+            imageUrl: imageUrl!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            memCacheWidth: memCacheWidth,
+            errorWidget: (_, __, ___) => fallback,
+            placeholder: (_, __) => Container(
+              width: size,
+              height: size,
+              color: scheme.surfaceContainerHighest,
+              alignment: Alignment.center,
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
+
+  /// Assumed logical width when the parent gives unbounded constraints.
+  static const double _kFallbackLogicalWidth = 180;
+
+  /// Decode bounds in physical pixels: floor keeps tiny thumbs legible,
+  /// cap bounds memory (640px covers a ~180dp tile on a 3.5x screen).
+  static const int _kMinDecodePx = 32;
+  static const int _kMaxDecodePx = 640;
 
   double _hueFromName(String s) {
     if (s.isEmpty) return 200;

@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:suuqii/features/auth/presentation/providers.dart';
 
 /// SharedPreferences key holding the user's explicit language choice
-/// ('en' | 'om'). Absent → follow the device locale (resolving to English
+/// ('en' | 'om' | 'am'). Absent → follow the device locale (resolving to English
 /// when the device language isn't supported, since `en` is listed first in
 /// supportedLocales).
 const String localePrefKey = 'app_locale';

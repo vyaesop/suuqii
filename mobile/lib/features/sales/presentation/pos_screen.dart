@@ -209,7 +209,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                           'cart_bar_${cart.isEmpty}_${cart.lineCount}',
                         ),
                         cart: cart,
-                        onCheckout: cart.isNotEmpty ? _reviewCart : null,
+                        // Tapping the summary opens the review sheet;
+                        // the primary button charges directly (same
+                        // direct path as the wide-layout _CartDock).
+                        onReviewCart: cart.isNotEmpty ? _reviewCart : null,
+                        onCheckout: cart.isNotEmpty ? _checkout : null,
                       ),
                     ),
                   ],
@@ -276,11 +280,13 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             ownerChallengeToken: challenge,
           );
       if (!mounted) return;
+      final auth = ref.read(authControllerProvider).valueOrNull;
       await showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         builder: (_) => ReceiptSheet(
           cart: snapshot,
+          shopName: auth is Authenticated ? auth.shopName : null,
           paymentMethod: result.paymentMethod,
           saleId: saleId,
           soldAt: DateTime.now().toUtc(),
@@ -772,11 +778,20 @@ class _StockBadge extends StatelessWidget {
 class _CartBar extends StatelessWidget {
   const _CartBar({
     required this.cart,
+    required this.onReviewCart,
     required this.onCheckout,
     super.key,
   });
 
   final Cart cart;
+
+  /// Opens the cart review sheet (edit quantities, discount). Triggered by
+  /// tapping the summary area, keeping the primary button free for the
+  /// direct-to-checkout fast path.
+  final VoidCallback? onReviewCart;
+
+  /// Straight to the checkout sheet, skipping review — same direct path as
+  /// the wide-layout [_CartDock].
   final VoidCallback? onCheckout;
 
   @override
@@ -809,80 +824,98 @@ class _CartBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: scheme.onPrimary.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(SuuqRadius.md),
-                ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Icon(
-                      Icons.shopping_basket_rounded,
-                      color: scheme.onPrimary,
-                      size: 24,
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.onPrimary,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          _formatQty(cart.itemCount),
-                          style: TextStyle(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 10,
-                            height: 1.1,
+              // Summary area: tap to review/edit the cart before paying.
+              Expanded(
+                child: Semantics(
+                  button: onReviewCart != null,
+                  label: onReviewCart == null ? null : l.posReviewCart,
+                  child: InkWell(
+                    onTap: onReviewCart,
+                    borderRadius: BorderRadius.circular(SuuqRadius.md),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: scheme.onPrimary.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(SuuqRadius.md),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(
+                                Icons.shopping_basket_rounded,
+                                color: scheme.onPrimary,
+                                size: 24,
+                              ),
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.onPrimary,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    _formatQty(cart.itemCount),
+                                    style: TextStyle(
+                                      color: scheme.primary,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10,
+                                      height: 1.1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+                        const SizedBox(width: SuuqSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                cart.isEmpty
+                                    ? l.posCartEmptyTapHint
+                                    : l.posCartItemsSummary(
+                                        _qtyAsNum(cart.itemCount),
+                                        cart.lineCount,
+                                      ),
+                                style: TextStyle(
+                                  color:
+                                      scheme.onPrimary.withValues(alpha: 0.85),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                cart.isEmpty
+                                    ? context.money(Decimal.zero)
+                                    : context.money(cart.total),
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  color: scheme.onPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: SuuqSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      cart.isEmpty
-                          ? l.posCartEmptyTapHint
-                          : l.posCartItemsSummary(
-                              _qtyAsNum(cart.itemCount),
-                              cart.lineCount,
-                            ),
-                      style: TextStyle(
-                        color: scheme.onPrimary.withValues(alpha: 0.85),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      cart.isEmpty
-                          ? context.money(Decimal.zero)
-                          : context.money(cart.total),
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: scheme.onPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(width: SuuqSpacing.sm),

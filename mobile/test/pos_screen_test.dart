@@ -180,6 +180,68 @@ void main() {
     expect(find.text('ETB 0'), findsOneWidget);
   });
 
+  testWidgets(
+      'cart bar Checkout button goes straight to the checkout sheet, '
+      'skipping review', (tester) async {
+    final product = Product(
+      id: 'p1',
+      shopId: 'shop-1',
+      name: 'Coffee',
+      purchasePrice: Decimal.parse('10'),
+      sellingPrice: Decimal.parse('25'),
+      stock: Decimal.parse('5'),
+      lowStockThreshold: Decimal.parse('1'),
+      unit: 'pack',
+    );
+
+    await tester.pumpWidget(buildSubject([product]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Coffee'));
+    await tester.pumpAndSettle();
+    // Let the "added to cart" snackbar expire so it cannot cover the bar.
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pumpAndSettle();
+
+    // Primary button: direct to checkout (product -> Checkout -> Confirm).
+    await tester.tap(find.widgetWithText(FilledButton, 'Checkout'));
+    await tester.pumpAndSettle();
+
+    // Checkout sheet is open; the review sheet was skipped.
+    expect(find.text('Confirm - ETB 25'), findsOneWidget);
+    expect(find.text('Continue to checkout'), findsNothing);
+    // Exact-cash prefill makes Confirm work with zero extra input.
+    expect(find.text('Change due ETB 0'), findsOneWidget);
+  });
+
+  testWidgets('tapping the cart bar summary still opens the review sheet',
+      (tester) async {
+    final product = Product(
+      id: 'p1',
+      shopId: 'shop-1',
+      name: 'Coffee',
+      purchasePrice: Decimal.parse('10'),
+      sellingPrice: Decimal.parse('25'),
+      stock: Decimal.parse('5'),
+      lowStockThreshold: Decimal.parse('1'),
+      unit: 'pack',
+    );
+
+    await tester.pumpWidget(buildSubject([product]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Coffee'));
+    await tester.pumpAndSettle();
+    // Let the "added to cart" snackbar expire so it cannot cover the bar.
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('1 item across 1 line'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Continue to checkout'), findsOneWidget);
+  });
+
   testWidgets('sell route renders through the home shell', (tester) async {
     await tester.pumpWidget(buildRoutedSubject(const []));
     await tester.pumpAndSettle();

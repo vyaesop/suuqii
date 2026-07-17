@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
@@ -78,9 +79,14 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
                       prefixIcon:
                           const Icon(Icons.phone_iphone_rounded, size: 20),
                     ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? l.commonRequired
-                        : null,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return l.commonRequired;
+                      }
+                      return normalizeEthiopianPhone(v) == null
+                          ? l.phoneInvalid
+                          : null;
+                    },
                   ),
                   const SizedBox(height: SuuqSpacing.md),
                   TextFormField(
@@ -167,7 +173,8 @@ class _AcceptInviteScreenState extends ConsumerState<AcceptInviteScreen> {
     final router = GoRouter.of(context);
     try {
       await ref.read(authControllerProvider.notifier).acceptInvite(
-            phone: _phone.text.trim(),
+            // Validated by the phone field's validator above.
+            phone: normalizeEthiopianPhone(_phone.text)!,
             inviteCode: _code.text.trim(),
             password: _password.text,
           );

@@ -410,6 +410,35 @@ class SalesRepository {
     );
   }
 
+  /// Loads everything needed to re-compose a shareable plain-text receipt
+  /// for a past sale from the local snapshot tables (sale_items stores
+  /// name/qty/price snapshots, so this works even after product edits).
+  Future<SaleReceiptData?> receiptData(String saleId) async {
+    final sale = await (db.select(db.salesTable)
+          ..where((t) => t.id.equals(saleId)))
+        .getSingleOrNull();
+    if (sale == null) return null;
+    final items = await (db.select(db.saleItemsTable)
+          ..where((t) => t.saleId.equals(saleId)))
+        .get();
+    return SaleReceiptData(
+      id: sale.id,
+      subtotal: decimalFromSantim(sale.subtotal),
+      discount: decimalFromSantim(sale.discount),
+      total: decimalFromSantim(sale.total),
+      paymentMethod: sale.paymentMethod,
+      occurredAt: sale.occurredAt,
+      items: [
+        for (final item in items)
+          SaleReceiptItem(
+            name: item.productNameSnapshot,
+            quantity: item.quantity,
+            unitPrice: decimalFromSantim(item.unitPrice),
+          ),
+      ],
+    );
+  }
+
   /// Reverse a completed sale. Local writes mirror the server-side
   /// `_sale_refund` handler: mark sale as refunded, restore stock, log
   /// inventory movements, enqueue the sync event.
@@ -480,6 +509,41 @@ class SalesRepository {
     });
     unawaited(syncWorker.kick());
   }
+}
+
+/// Snapshot of a past sale for receipt sharing (see
+/// [SalesRepository.receiptData]).
+class SaleReceiptData {
+  SaleReceiptData({
+    required this.id,
+    required this.subtotal,
+    required this.discount,
+    required this.total,
+    required this.paymentMethod,
+    required this.occurredAt,
+    required this.items,
+  });
+  final String id;
+  final Decimal subtotal;
+  final Decimal discount;
+  final Decimal total;
+  final String paymentMethod;
+  final DateTime occurredAt;
+  final List<SaleReceiptItem> items;
+}
+
+class SaleReceiptItem {
+  SaleReceiptItem({
+    required this.name,
+    required this.quantity,
+    required this.unitPrice,
+  });
+  final String name;
+  final double quantity;
+  final Decimal unitPrice;
+
+  Decimal get lineTotal =>
+      unitPrice * Decimal.parse(quantity.toString());
 }
 
 class RecentSale {

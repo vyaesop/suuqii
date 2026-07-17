@@ -6,16 +6,18 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/sales/presentation/receipt_share.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 /// Post-sale receipt summary. Shows what the customer paid for and how,
-/// with copy-to-clipboard and "new sale" actions.
+/// with share, copy-to-clipboard and "new sale" actions.
 class ReceiptSheet extends StatelessWidget {
   const ReceiptSheet({
     required this.cart,
     required this.paymentMethod,
     required this.saleId,
     required this.soldAt,
+    this.shopName,
     this.amountTendered,
     this.changeDue,
     this.customerName,
@@ -28,6 +30,9 @@ class ReceiptSheet extends StatelessWidget {
   final PaymentMethod paymentMethod;
   final String saleId;
   final DateTime soldAt;
+
+  /// Shown at the top of the shared receipt text when available.
+  final String? shopName;
   final Decimal? amountTendered;
   final Decimal? changeDue;
   final String? customerName;
@@ -245,14 +250,22 @@ class ReceiptSheet extends StatelessWidget {
               ),
               const SizedBox(width: SuuqSpacing.sm),
               Expanded(
-                flex: 2,
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
-                  onPressed: () => Navigator.of(context).pop(),
-                  label: Text(l.receiptNewSale),
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.share_rounded, size: 18),
+                  onPressed: () => shareReceiptText(_buildShareText(context)),
+                  label: Text(l.receiptShare),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+          SizedBox(
+            height: 52,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
+              onPressed: () => Navigator.of(context).pop(),
+              label: Text(l.receiptNewSale),
+            ),
           ),
           const SizedBox(height: SuuqSpacing.xs),
           Center(
@@ -270,48 +283,34 @@ class ReceiptSheet extends StatelessWidget {
   }
 
   String _buildShareText(BuildContext context) {
-    final l = context.l10n;
-    final buf = StringBuffer()
-      ..writeln(l.receiptShareHeader(saleId.substring(0, 8)))
-      ..writeln(context.dateTimeShort(soldAt.toLocal()))
-      ..writeln();
-    for (final line in cart.lines) {
-      buf.writeln(
-        l.receiptShareLine(
-          line.product.name,
-          _fmtQty(line.qty.toDouble()),
-          line.product.unit,
-          context.money(line.product.sellingPrice),
-          context.money(line.lineTotal),
-        ),
-      );
-    }
-    buf
-      ..writeln()
-      ..writeln(l.receiptShareTotal(context.money(cart.total)))
-      ..writeln(l.receiptSharePayment(_paymentLabel(l, paymentMethod)));
-    if (amountTendered != null) {
-      buf.writeln(l.receiptShareTendered(context.money(amountTendered!)));
-    }
-    if (changeDue != null && changeDue! > Decimal.zero) {
-      buf.writeln(l.receiptShareChange(context.money(changeDue!)));
-    }
-    if (customerName != null && customerName!.isNotEmpty) {
-      buf.writeln(l.receiptShareCustomer(customerName!));
-    }
-    if (customerPhone != null && customerPhone!.isNotEmpty) {
-      buf.writeln(l.receiptSharePhone(customerPhone!));
-    }
-    if (dueDate != null) {
-      buf.writeln(l.receiptShareDue(context.dateShort(dueDate!)));
-    }
-    return buf.toString();
+    return composeReceiptShareText(
+      context,
+      saleId: saleId,
+      soldAt: soldAt,
+      shopName: shopName,
+      lines: [
+        for (final line in cart.lines)
+          ReceiptShareLine(
+            name: line.product.name,
+            qty: _fmtQty(line.qty.toDouble()),
+            unit: line.product.unit,
+            unitPrice: line.product.sellingPrice,
+            lineTotal: line.lineTotal,
+          ),
+      ],
+      subtotal: cart.subtotal,
+      discount: cart.discount,
+      total: cart.total,
+      paymentLabel: _paymentLabel(context.l10n, paymentMethod),
+      amountTendered: amountTendered,
+      changeDue: changeDue,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      dueDate: dueDate,
+    );
   }
 
-  String _fmtQty(double n) {
-    if (n == n.roundToDouble()) return n.toInt().toString();
-    return n.toStringAsFixed(2);
-  }
+  String _fmtQty(double n) => receiptQtyText(n);
 
   IconData _paymentIcon(PaymentMethod method) => switch (method) {
         PaymentMethod.cash => Icons.payments_rounded,

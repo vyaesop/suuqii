@@ -8,6 +8,7 @@ import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
+import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -503,9 +504,13 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
   Future<void> _submit() async {
     final l = context.l10n;
     final name = _name.text.trim();
-    final phone = _phone.text.trim();
-    if (name.isEmpty || phone.isEmpty) {
+    if (name.isEmpty || _phone.text.trim().isEmpty) {
       setState(() => _error = l.employeesNamePhoneRequired);
+      return;
+    }
+    final phone = normalizeEthiopianPhone(_phone.text);
+    if (phone == null) {
+      setState(() => _error = l.phoneInvalid);
       return;
     }
     setState(() {

@@ -471,7 +471,11 @@ class _QtyStepper extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _RoundIconBtn(icon: Icons.remove_rounded, onPressed: onMinus),
+          _RoundIconBtn(
+            icon: Icons.remove_rounded,
+            onPressed: onMinus,
+            semanticLabel: context.l10n.cartDecreaseQty,
+          ),
           InkWell(
             onTap: onTapQty,
             borderRadius: BorderRadius.circular(4),
@@ -488,7 +492,11 @@ class _QtyStepper extends StatelessWidget {
               ),
             ),
           ),
-          _RoundIconBtn(icon: Icons.add_rounded, onPressed: onPlus),
+          _RoundIconBtn(
+            icon: Icons.add_rounded,
+            onPressed: onPlus,
+            semanticLabel: context.l10n.cartIncreaseQty,
+          ),
         ],
       ),
     );
@@ -502,26 +510,38 @@ class _QtyStepper extends StatelessWidget {
 }
 
 class _RoundIconBtn extends StatelessWidget {
-  const _RoundIconBtn({required this.icon, required this.onPressed});
+  const _RoundIconBtn({
+    required this.icon,
+    required this.onPressed,
+    required this.semanticLabel,
+  });
 
   final IconData icon;
   final VoidCallback? onPressed;
+  final String semanticLabel;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 36,
-      height: 36,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(SuuqRadius.sm),
-        child: Icon(
-          icon,
-          size: 18,
-          color: onPressed == null
-              ? scheme.onSurfaceVariant.withValues(alpha: 0.4)
-              : scheme.onSurface,
+    // 44x44 hit target (48dp guideline, floor 44) — the glyph stays small
+    // but the whole area is tappable for one-handed cashier use.
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: semanticLabel,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(SuuqRadius.sm),
+          child: Icon(
+            icon,
+            size: 18,
+            color: onPressed == null
+                ? scheme.onSurfaceVariant.withValues(alpha: 0.4)
+                : scheme.onSurface,
+          ),
         ),
       ),
     );

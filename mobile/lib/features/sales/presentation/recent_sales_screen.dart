@@ -8,6 +8,7 @@ import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/data/sales_repository.dart';
+import 'package:suuqii/features/sales/presentation/receipt_share.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
@@ -50,12 +51,62 @@ class RecentSalesScreen extends ConsumerWidget {
                 const SizedBox(height: SuuqSpacing.xs),
             itemBuilder: (_, i) => _SaleTile(
               sale: sales[i],
+              onShare: () => _share(context, ref, sales[i]),
               onRefund: () => _refund(context, ref, sales[i]),
             ),
           );
         },
       ),
     );
+  }
+
+  /// Re-composes the plain-text receipt for [sale] from the local snapshot
+  /// and opens the system share sheet (WhatsApp/Telegram/SMS).
+  Future<void> _share(
+    BuildContext context,
+    WidgetRef ref,
+    RecentSale sale,
+  ) async {
+    final l = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    final shopName = auth is Authenticated ? auth.shopName : null;
+
+    final data = await ref.read(salesRepositoryProvider).receiptData(sale.id);
+    if (data == null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.recentSalesErrNotFound)),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+
+    final paymentLabel = switch (data.paymentMethod) {
+      'cash' => l.receiptPaidCash,
+      'mobile_money' => l.receiptPaidMobile,
+      'credit' => l.receiptOnCredit,
+      _ => data.paymentMethod,
+    };
+    final text = composeReceiptShareText(
+      context,
+      saleId: data.id,
+      soldAt: data.occurredAt,
+      shopName: shopName,
+      lines: [
+        for (final item in data.items)
+          ReceiptShareLine(
+            name: item.name,
+            qty: receiptQtyText(item.quantity),
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+          ),
+      ],
+      subtotal: data.subtotal,
+      discount: data.discount,
+      total: data.total,
+      paymentLabel: paymentLabel,
+    );
+    await shareReceiptText(text);
   }
 
   Future<void> _refund(
@@ -130,8 +181,13 @@ String _refundErrorMessage(AppLocalizations l, Object error) {
 }
 
 class _SaleTile extends StatelessWidget {
-  const _SaleTile({required this.sale, required this.onRefund});
+  const _SaleTile({
+    required this.sale,
+    required this.onShare,
+    required this.onRefund,
+  });
   final RecentSale sale;
+  final VoidCallback onShare;
   final VoidCallback onRefund;
 
   @override
@@ -201,6 +257,11 @@ class _SaleTile extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.share_rounded, size: 20),
+                tooltip: l.receiptShare,
+                onPressed: onShare,
               ),
               if (sale.isRefunded)
                 StatusPill(

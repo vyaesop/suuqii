@@ -5,6 +5,7 @@ import 'package:suuqii/app/router.dart';
 import 'package:suuqii/app/theme/app_theme.dart';
 import 'package:suuqii/core/l10n/fallback_localizations.dart';
 import 'package:suuqii/core/l10n/locale_controller.dart';
+import 'package:suuqii/features/settings/presentation/controllers/theme_controller.dart';
 import 'package:suuqii/l10n/app_localizations.dart';
 
 class SuuqiiApp extends ConsumerWidget {
@@ -16,22 +17,25 @@ class SuuqiiApp extends ConsumerWidget {
     // null → follow the device locale; MaterialApp resolves unsupported
     // device locales to English (first entry in supportedLocales).
     final locale = ref.watch(localeControllerProvider);
+    final themeMode = ref.watch(themeModeControllerProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
+      themeMode: themeMode,
       routerConfig: router,
       locale: locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         // `om` isn't in flutter_localizations; these serve English framework
-        // strings for it. Must come before the Global* delegates.
+        // strings for it. Must come before the Global* delegates. (`am` is
+        // fully supported by flutter_localizations, so it needs no fallback.)
         ...omFallbackDelegates,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('en'), Locale('om')],
+      supportedLocales: const [Locale('en'), Locale('om'), Locale('am')],
     );
   }
 }

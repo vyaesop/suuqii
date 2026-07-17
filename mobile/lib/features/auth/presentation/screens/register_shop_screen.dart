@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
@@ -127,7 +128,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                             size: 20,
                           ),
                         ),
-                        validator: _req,
+                        validator: _validPhone,
                       ),
                     ],
                   ),
@@ -200,6 +201,13 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
   String? _req(String? v) =>
       (v == null || v.trim().isEmpty) ? context.l10n.commonRequired : null;
 
+  String? _validPhone(String? v) {
+    if (v == null || v.trim().isEmpty) return context.l10n.commonRequired;
+    return normalizeEthiopianPhone(v) == null
+        ? context.l10n.phoneInvalid
+        : null;
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
@@ -211,7 +219,8 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
       await ref.read(authControllerProvider.notifier).registerShop(
             shopName: _shopName.text.trim(),
             ownerName: _ownerName.text.trim(),
-            phone: _phone.text.trim(),
+            // Validated by _validPhone, so normalization cannot fail here.
+            phone: normalizeEthiopianPhone(_phone.text)!,
             password: _password.text,
             ownerPin: _pin.text,
             shopType: _shopType,

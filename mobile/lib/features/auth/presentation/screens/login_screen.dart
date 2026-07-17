@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
 
@@ -141,12 +142,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
       return;
     }
+    final phone = normalizeEthiopianPhone(_phone.text);
+    if (phone == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l.phoneInvalid)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
     try {
       await ref.read(authControllerProvider.notifier).login(
-            phone: _phone.text.trim(),
+            phone: phone,
             password: _pwd.text,
           );
       router.go('/pos');
@@ -156,7 +164,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (discard) {
         try {
           await ref.read(authControllerProvider.notifier).login(
-                phone: _phone.text.trim(),
+                phone: phone,
                 password: _pwd.text,
                 force: true,
               );

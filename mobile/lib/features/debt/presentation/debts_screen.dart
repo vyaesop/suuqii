@@ -21,6 +21,8 @@ class DebtsScreen extends ConsumerStatefulWidget {
 class _DebtsScreenState extends ConsumerState<DebtsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  final _search = TextEditingController();
+  String _query = '';
   bool _kicked = false;
 
   @override
@@ -38,15 +40,72 @@ class _DebtsScreenState extends ConsumerState<DebtsScreen>
   @override
   void dispose() {
     _tabs.dispose();
+    _search.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: Column(
         children: [
+          // Search by customer name or phone; styled to match the POS
+          // product search field.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              SuuqSpacing.md,
+              SuuqSpacing.xs,
+              SuuqSpacing.md,
+              0,
+            ),
+            child: SizedBox(
+              height: 48,
+              child: TextField(
+                controller: _search,
+                onChanged: (value) => setState(() => _query = value),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: InputDecoration(
+                  hintText: l.debtSearchHint,
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    size: 24,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 20),
+                          tooltip: l.commonCancel,
+                          onPressed: () {
+                            _search.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
+                  fillColor: scheme.surfaceContainer,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: SuuqSpacing.md,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: scheme.outlineVariant),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: scheme.outlineVariant),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: scheme.primary, width: 1.5),
+                  ),
+                ),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: SuuqSpacing.md),
             child: TabBar(
@@ -61,10 +120,10 @@ class _DebtsScreenState extends ConsumerState<DebtsScreen>
           Expanded(
             child: TabBarView(
               controller: _tabs,
-              children: const [
-                _DebtList(status: DebtStatus.open),
-                _DebtList(status: DebtStatus.partial),
-                _DebtList(status: DebtStatus.paid),
+              children: [
+                _DebtList(status: DebtStatus.open, query: _query),
+                _DebtList(status: DebtStatus.partial, query: _query),
+                _DebtList(status: DebtStatus.paid, query: _query),
               ],
             ),
           ),
@@ -75,8 +134,9 @@ class _DebtsScreenState extends ConsumerState<DebtsScreen>
 }
 
 class _DebtList extends ConsumerWidget {
-  const _DebtList({required this.status});
+  const _DebtList({required this.status, this.query = ''});
   final DebtStatus status;
+  final String query;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -91,7 +151,24 @@ class _DebtList extends ConsumerWidget {
           title: l.debtFailedToLoad,
           message: context.errorMessage(e),
         ),
-        data: (items) {
+        data: (all) {
+          final q = query.trim().toLowerCase();
+          final items = q.isEmpty
+              ? all
+              : all
+                  .where(
+                    (d) =>
+                        d.customerName.toLowerCase().contains(q) ||
+                        (d.customerPhone ?? '').toLowerCase().contains(q),
+                  )
+                  .toList();
+          if (items.isEmpty && q.isNotEmpty) {
+            return EmptyState(
+              icon: Icons.search_off_rounded,
+              title: l.debtSearchNoMatchTitle,
+              message: l.debtSearchNoMatchMessage,
+            );
+          }
           if (items.isEmpty) {
             return EmptyState(
               icon: switch (status) {
@@ -113,11 +190,13 @@ class _DebtList extends ConsumerWidget {
           }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(
-              SuuqSpacing.md, SuuqSpacing.xs, SuuqSpacing.md, SuuqSpacing.lg,
+              SuuqSpacing.md,
+              SuuqSpacing.xs,
+              SuuqSpacing.md,
+              SuuqSpacing.lg,
             ),
             itemCount: items.length,
-            separatorBuilder: (_, __) =>
-                const SizedBox(height: SuuqSpacing.xs),
+            separatorBuilder: (_, __) => const SizedBox(height: SuuqSpacing.xs),
             itemBuilder: (_, i) => _DebtRow(debt: items[i]),
           );
         },
@@ -139,98 +218,103 @@ class _DebtRow extends StatelessWidget {
         ? 0.0
         : (debt.amountPaid.toDouble() / debt.amountOwed.toDouble())
             .clamp(0.0, 1.0);
-    return Material(
-      color: scheme.surfaceContainer,
-      borderRadius: BorderRadius.circular(SuuqRadius.md),
-      child: InkWell(
-        onTap: () => context.push('/debts/${debt.id}'),
+    return Semantics(
+      button: true,
+      label: debt.customerName,
+      child: Material(
+        color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(SuuqRadius.md),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(SuuqRadius.md),
-            border: Border.all(color: scheme.outlineVariant),
-          ),
-          padding: const EdgeInsets.all(SuuqSpacing.md),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(SuuqRadius.sm),
+        child: InkWell(
+          onTap: () => context.push('/debts/${debt.id}'),
+          borderRadius: BorderRadius.circular(SuuqRadius.md),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(SuuqRadius.md),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            padding: const EdgeInsets.all(SuuqSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(SuuqRadius.sm),
+                      ),
+                      child: Text(
+                        debt.customerName.isNotEmpty
+                            ? debt.customerName[0].toUpperCase()
+                            : '?',
+                        style: theme.textTheme.titleMedium,
+                      ),
                     ),
-                    child: Text(
-                      debt.customerName.isNotEmpty
-                          ? debt.customerName[0].toUpperCase()
-                          : '?',
-                      style: theme.textTheme.titleMedium,
+                    const SizedBox(width: SuuqSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            debt.customerName,
+                            style: theme.textTheme.titleSmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            [
+                              if (debt.customerPhone != null)
+                                debt.customerPhone!,
+                              if (debt.dueDate != null)
+                                l.debtDueShort(
+                                  context.dateShort(debt.dueDate!),
+                                ),
+                            ].join(' · '),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: SuuqSpacing.sm),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          debt.customerName,
-                          style: theme.textTheme.titleSmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          [
-                            if (debt.customerPhone != null) debt.customerPhone!,
-                            if (debt.dueDate != null)
-                              l.debtDueShort(context.dateShort(debt.dueDate!)),
-                          ].join(' · '),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (debt.isOverdue)
-                    StatusPill(
-                      label: l.debtStatusOverdue,
-                      intent: PillIntent.danger,
-                    ),
-                ],
-              ),
-              const SizedBox(height: SuuqSpacing.sm),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  color: debt.isOverdue ? scheme.error : scheme.primary,
-                  minHeight: 6,
+                    if (debt.isOverdue)
+                      StatusPill(
+                        label: l.debtStatusOverdue,
+                        intent: PillIntent.danger,
+                      ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: SuuqSpacing.xs),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${context.money(debt.amountPaid)} / ${context.money(debt.amountOwed)}',
-                    style: theme.textTheme.bodySmall,
+                const SizedBox(height: SuuqSpacing.sm),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: fraction,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    color: debt.isOverdue ? scheme.error : scheme.primary,
+                    minHeight: 6,
                   ),
-                  Text(
-                    context.money(debt.remaining),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: debt.isOverdue
-                          ? scheme.error
-                          : scheme.onSurface,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+                const SizedBox(height: SuuqSpacing.xs),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${context.money(debt.amountPaid)} / ${context.money(debt.amountOwed)}',
+                      style: theme.textTheme.bodySmall,
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    Text(
+                      context.money(debt.remaining),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: debt.isOverdue ? scheme.error : scheme.onSurface,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

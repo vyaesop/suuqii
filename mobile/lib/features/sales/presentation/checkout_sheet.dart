@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,22 +47,44 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
   // Outstanding balance for the currently-entered customer phone.
   Decimal _customerOutstanding = Decimal.zero;
   bool _loadingOutstanding = false;
+  Timer? _phoneDebounce;
 
   @override
   void initState() {
     super.initState();
     _customerPhone.addListener(_onPhoneChanged);
+    // Recompute change-due live while the cashier types the tendered cash.
+    _tendered.addListener(_onTenderedChanged);
+    // Exact-cash fast path: pre-fill the tendered amount with the exact
+    // total, fully selected so any typing replaces it. A minimum cash sale
+    // needs zero extra input — "Confirm" works immediately.
+    final total = ref.read(cartControllerProvider).total;
+    if (total > Decimal.zero) _prefillExact(total);
   }
 
   @override
   void dispose() {
+    _phoneDebounce?.cancel();
     _tendered.dispose();
     _customerName.dispose();
     _customerPhone.dispose();
     super.dispose();
   }
 
+  void _onTenderedChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _prefillExact(Decimal total) {
+    final text = _formatDecimal(total);
+    _tendered.value = TextEditingValue(
+      text: text,
+      selection: TextSelection(baseOffset: 0, extentOffset: text.length),
+    );
+  }
+
   void _onPhoneChanged() {
+    _phoneDebounce?.cancel();
     final phone = _customerPhone.text.trim();
     if (phone.isEmpty) {
       setState(() {
@@ -69,8 +93,10 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
       });
       return;
     }
-    // Debounce: only query when user stops typing for a moment.
-    _lookupOutstanding(phone);
+    // Debounce: only query when the user stops typing for a moment.
+    _phoneDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _lookupOutstanding(phone);
+    });
   }
 
   Future<void> _lookupOutstanding(String phone) async {
@@ -154,6 +180,13 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
             value: _method,
             onChanged: (method) => setState(() {
               _method = method;
+              // Coming (back) to cash with nothing typed: restore the
+              // exact-total prefill so "Confirm" needs no extra input.
+              if (method == PaymentMethod.cash &&
+                  _tendered.text.trim().isEmpty &&
+                  total > Decimal.zero) {
+                _prefillExact(total);
+              }
               // Reset outstanding lookup when switching away from credit.
               if (method != PaymentMethod.credit) {
                 _customerOutstanding = Decimal.zero;
@@ -172,9 +205,9 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                     controller: _tendered,
                     total: total,
                     changeDue: changeDue,
-                    onFillAmount: (value) => setState(
-                      () => _tendered.text = _formatDecimal(value),
-                    ),
+                    // The controller listener rebuilds; no setState needed.
+                    onFillAmount: (value) =>
+                        _tendered.text = _formatDecimal(value),
                   )
                 : isCredit
                     ? _CreditSection(
@@ -445,6 +478,13 @@ class _CashSection extends StatelessWidget {
           spacing: SuuqSpacing.xs,
           runSpacing: SuuqSpacing.xs,
           children: [
+            // "Exact" first: the most common case is the customer handing
+            // over the exact total.
+            ActionChip(
+              avatar: const Icon(Icons.check_rounded, size: 16),
+              label: Text(l.checkoutExactChip(context.money(total))),
+              onPressed: () => onFillAmount(total),
+            ),
             for (final amount in _cashSuggestions(total))
               ActionChip(
                 label: Text(context.money(amount)),
@@ -503,15 +543,16 @@ class _CashSection extends StatelessWidget {
     );
   }
 
+  /// Round-note suggestions above the total. The exact total itself is
+  /// covered by the dedicated "Exact" chip rendered first.
   List<Decimal> _cashSuggestions(Decimal total) {
     final ceil = total.toDouble().ceil();
     final next50 = ((ceil + 49) ~/ 50) * 50;
     final next100 = ((ceil + 99) ~/ 100) * 100;
     final values = <String, Decimal>{
-      total.toString(): total,
       if (next50 > 0) '$next50': Decimal.parse(next50.toString()),
       if (next100 > 0) '$next100': Decimal.parse(next100.toString()),
-    };
+    }..removeWhere((_, v) => v == total);
     return values.values.toList(growable: false);
   }
 }

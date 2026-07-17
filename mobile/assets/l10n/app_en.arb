@@ -39,6 +39,11 @@
   "errExpired": "This code has expired — ask for a new one",
   "errBadRole": "Your account doesn't have permission for this",
   "errServerUpgrading": "The server is being updated — try again in a moment",
+  "updateRequiredTitle": "Update required",
+  "@updateRequiredTitle": {
+    "description": "Title of the full-screen blocker shown when the server rejects this app version (HTTP 426)."
+  },
+  "updateRequiredBody": "This version of the app is no longer supported. Update to the latest version to continue.",
   "errHttp": "Request failed ({status})",
   "@errHttp": {
     "description": "Generic HTTP failure with status code.",
@@ -57,6 +62,10 @@
   "wrongPin": "Wrong PIN",
   "login": "Log In",
   "phone": "Phone",
+  "phoneInvalid": "Enter a valid phone number, e.g. 0912345678",
+  "@phoneInvalid": {
+    "description": "Validation error for a phone number that is not a valid Ethiopian mobile number after normalization."
+  },
   "password": "Password",
   "createNewShop": "Create New Shop",
   "joinShopWithCode": "Join with an invite code",
@@ -93,6 +102,20 @@
   "syncSynced": "Synced",
   "syncProblemsTitle": "Sync problems",
   "syncNoDetails": "No details available.",
+  "syncConflictKeptServer": "Changed on another device — that newer version was kept, this change was not applied.",
+  "offlineBanner": "You're offline — sales are saved and will sync.",
+  "syncOpSale": "Sale",
+  "syncOpProduct": "Product change",
+  "syncOpDebtPayment": "Debt payment",
+  "syncOpDebtWriteoff": "Debt write-off",
+  "syncOpStock": "Stock change",
+  "syncOpExpense": "Expense",
+  "syncOpShift": "Shift",
+  "syncOpSupply": "Supply change",
+  "syncErrorPinRequired": "Needs the owner's PIN — redo this action and enter the PIN when asked.",
+  "syncErrorGaveUp": "Gave up after repeated attempts — check your connection, then contact support if this stays.",
+  "syncErrorRejected": "The server did not accept this change.",
+  "syncErrorFailed": "This change could not be synced.",
   "roleOwner": "Owner",
   "roleCashier": "Cashier",
   "auditTitle": "Audit",
@@ -132,10 +155,18 @@
   "@settingsLanguageOromo": {
     "description": "Language option shown in its own language. Keep as 'Afaan Oromoo' in every locale."
   },
+  "settingsLanguageAmharic": "አማርኛ",
+  "@settingsLanguageAmharic": {
+    "description": "Language option shown in its own language. Keep as 'አማርኛ' in every locale."
+  },
   "settingsTheme": "Theme",
   "settingsThemeSystem": "Follows system",
+  "settingsThemeLight": "Light",
+  "settingsThemeDark": "Dark",
   "settingsLogout": "Log out",
   "settingsLogoutAnyway": "Log out anyway",
+  "settingsLogoutConfirmTitle": "Log out?",
+  "settingsLogoutConfirmBody": "Downloaded shop data on this phone will be removed. Anything already synced stays safe on the server.",
   "settingsUnsyncedTitle": "Unsynced records",
   "settingsUnsyncedBody": "{count, plural, =1{You have 1 unsynced record. Logging out now will discard it permanently.} other{You have {count} unsynced records. Logging out now will discard them permanently.}}",
   "@settingsUnsyncedBody": {
@@ -537,6 +568,9 @@
   "debtEmptyWrittenOffTitle": "No written-off debts",
   "debtEmptyPaidMessage": "Collected payments will appear here.",
   "debtEmptyMessage": "Credit sales will show up here.",
+  "debtSearchHint": "Search name or phone",
+  "debtSearchNoMatchTitle": "No matching debts",
+  "debtSearchNoMatchMessage": "Try a different name or phone number.",
   "debtDueShort": "Due {date}",
   "@debtDueShort": {
     "description": "Debt row subtitle; {date} is a pre-formatted short date",
@@ -1310,6 +1344,15 @@
       }
     }
   },
+  "checkoutExactChip": "Exact {amount}",
+  "@checkoutExactChip": {
+    "description": "Quick chip that fills the tendered-cash field with the exact sale total, e.g. 'Exact ETB 70'.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "checkoutCustomerCaps": "CUSTOMER",
   "@checkoutCustomerCaps": {
     "description": "Uppercase section header above the credit customer fields."
@@ -1371,6 +1414,14 @@
   },
   "cartClearConfirmTitle": "Clear cart?",
   "cartClearConfirmBody": "Remove all items from the cart.",
+  "cartIncreaseQty": "Increase quantity",
+  "@cartIncreaseQty": {
+    "description": "Accessibility label for the + button on a cart line's quantity stepper."
+  },
+  "cartDecreaseQty": "Decrease quantity",
+  "@cartDecreaseQty": {
+    "description": "Accessibility label for the - button on a cart line's quantity stepper."
+  },
   "cartPricePerUnit": "{price} / {unit}",
   "@cartPricePerUnit": {
     "description": "Unit price of a cart line, e.g. 'ETB 25 / pcs'.",
@@ -1503,6 +1554,30 @@
         "type": "String"
       }
     }
+  },
+  "receiptShare": "Share",
+  "@receiptShare": {
+    "description": "Button that opens the system share sheet with the plain-text receipt."
+  },
+  "receiptShareSubtotal": "Subtotal: {amount}",
+  "@receiptShareSubtotal": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareDiscount": "Discount: -{amount}",
+  "@receiptShareDiscount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "receiptShareThanks": "Thank you!",
+  "@receiptShareThanks": {
+    "description": "Closing line of the shared plain-text receipt."
   },
   "recentSalesTitle": "Recent sales",
   "recentSalesLoadFailed": "Failed to load",

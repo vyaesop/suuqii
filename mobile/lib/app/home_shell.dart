@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
+import 'package:suuqii/core/connectivity/offline_banner.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sync/presentation/sync_status_badge.dart';
@@ -52,7 +53,10 @@ class HomeShell extends ConsumerWidget {
           bottom: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
-              SuuqSpacing.md, SuuqSpacing.xs, SuuqSpacing.xs, SuuqSpacing.xs,
+              SuuqSpacing.md,
+              SuuqSpacing.xs,
+              SuuqSpacing.xs,
+              SuuqSpacing.xs,
             ),
             child: Row(
               children: [
@@ -77,7 +81,12 @@ class HomeShell extends ConsumerWidget {
           ),
         ),
       ),
-      body: child,
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(child: child),
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: scheme.surface,
