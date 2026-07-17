@@ -1,0 +1,70 @@
+# Weekly logical backup of the production Postgres (docs/14-deployment.md).
+#
+# Setup (repo Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL      required — plain postgres:// URL (NOT the
+#                            sqlalchemy+asyncpg one). For Neon use the
+#                            direct (non-pooler) host.
+#   BACKUP_AGE_PUBLIC_KEY    optional — an age recipient (age1...). When set,
+#                            the dump is encrypted before upload; generate a
+#                            keypair with `age-keygen` and keep the private
+#                            key OFFLINE. Without it the dump is uploaded as
+#                            a plain artifact (repo must be private).
+#
+# Restore drill (run monthly, docs/14): download artifact →
+#   age -d -i key.txt suuqii-backup.dump.age > backup.dump
+#   pg_restore --clean --no-owner -d "$SCRATCH_DB_URL" backup.dump
+name: db-backup
+
+on:
+  schedule:
+    - cron: "0 1 * * 0" # Sundays 01:00 UTC (04:00 EAT)
+  workflow_dispatch: {}
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check configuration
+        id: config
+        env:
+          DB_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "BACKUP_DATABASE_URL secret is not set — skipping backup." >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install postgresql-client and age
+        if: steps.config.outputs.configured == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client age
+
+      - name: Dump database
+        if: steps.config.outputs.configured == 'true'
+        env:
+          DB_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: pg_dump --format=custom --no-owner --file=suuqii-backup.dump "$DB_URL"
+
+      - name: Encrypt dump
+        if: steps.config.outputs.configured == 'true'
+        env:
+          AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_PUBLIC_KEY }}
+        run: |
+          if [ -n "$AGE_RECIPIENT" ]; then
+            age -r "$AGE_RECIPIENT" -o suuqii-backup.dump.age suuqii-backup.dump
+            rm suuqii-backup.dump
+            echo "Encrypted backup produced." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::BACKUP_AGE_PUBLIC_KEY not set — uploading UNENCRYPTED dump."
+          fi
+
+      - name: Upload backup artifact
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: suuqii-db-backup-${{ github.run_id }}
+          path: suuqii-backup.dump*
+          retention-days: 90
+          if-no-files-found: error

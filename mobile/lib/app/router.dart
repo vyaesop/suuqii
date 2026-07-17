@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/app/home_shell.dart';
+import 'package:suuqii/app/update_required_screen.dart';
+import 'package:suuqii/core/http/update_required.dart';
 import 'package:suuqii/features/audit/presentation/audit_screen.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
@@ -62,17 +64,31 @@ GoRouter router(RouterRef ref) {
     ..listen<AsyncValue<AuthState>>(
       authControllerProvider,
       (_, __) => refreshNotifier.trigger(),
+    )
+    ..listen<bool>(
+      updateRequiredProvider,
+      (_, __) => refreshNotifier.trigger(),
     );
 
   return GoRouter(
     initialLocation: '/pos',
     refreshListenable: refreshNotifier,
     redirect: (ctx, state) {
+      final loc = state.matchedLocation;
+
+      // The backend demands a newer app (HTTP 426): block everything behind
+      // the update screen. The flag never resets in-session, so there is no
+      // way to navigate away until a newer build is installed.
+      final updateRequired = ref.read(updateRequiredProvider);
+      if (updateRequired) {
+        return loc == '/update-required' ? null : '/update-required';
+      }
+      if (loc == '/update-required') return '/pos';
+
       final authAsync = ref.read(authControllerProvider);
       if (authAsync.isLoading) return null;
 
       final auth = authAsync.valueOrNull;
-      final loc = state.matchedLocation;
       final publicPaths = {'/login', '/register-shop', '/accept-invite'};
       final isAuthed = auth is Authenticated;
       if (!isAuthed && !publicPaths.contains(loc)) return '/login';
@@ -81,6 +97,10 @@ GoRouter router(RouterRef ref) {
       return ownerOnlyRedirect(loc, isOwner: isOwner);
     },
     routes: [
+      GoRoute(
+        path: '/update-required',
+        builder: (_, __) => const UpdateRequiredScreen(),
+      ),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(
         path: '/register-shop',

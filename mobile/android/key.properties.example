@@ -1,0 +1,16 @@
+# Release signing configuration — copy to android/key.properties and fill in.
+# key.properties and *.jks/*.keystore are gitignored; NEVER commit them.
+#
+# Generate a keystore (keep it and these passwords in a password manager;
+# losing them means you can never update the app on the Play Store again):
+#
+#   keytool -genkey -v -keystore suuqii-release.jks -keyalg RSA \
+#       -keysize 2048 -validity 10000 -alias suuqii
+#
+# storeFile may be an absolute path, or a path relative to android/app
+# (e.g. ../suuqii-release.jks for a keystore placed in android/).
+
+storeFile=../suuqii-release.jks
+storePassword=CHANGE_ME
+keyAlias=suuqii
+keyPassword=CHANGE_ME

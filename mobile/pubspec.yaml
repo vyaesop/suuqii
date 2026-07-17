@@ -11,7 +11,6 @@ dependencies:
   cached_network_image: ^3.4.0
   connectivity_plus: ^6.0.3
   crypto: ^3.0.3
-  image_picker: ^1.1.2
   decimal: ^3.0.0
   dio: ^5.4.0
   drift: ^2.18.0
@@ -24,12 +23,15 @@ dependencies:
   freezed_annotation: ^2.4.1
   go_router: ^14.0.0
   google_fonts: ^8.1.0
+  image_picker: ^1.1.2
   intl: ^0.20.2
   json_annotation: ^4.9.0
+  package_info_plus: ^9.0.1
   path: ^1.9.0
   path_provider: ^2.1.3
   riverpod_annotation: ^2.3.5
   sentry_flutter: ^9.20.0
+  share_plus: ^10.1.0
   shared_preferences: ^2.2.3
   sqlite3_flutter_libs: ^0.5.20
   uuid: ^4.4.0

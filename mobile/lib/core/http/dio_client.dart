@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:suuqii/core/device/device_id.dart';
+import 'package:suuqii/core/env/app_version.dart';
 import 'package:suuqii/core/env/env.dart';
+import 'package:suuqii/core/http/update_required.dart';
 import 'package:suuqii/core/storage/secure_storage.dart';
 
 part 'dio_client.g.dart';
@@ -28,7 +30,12 @@ Dio dio(DioRef ref) {
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 30),
       sendTimeout: const Duration(seconds: 30),
-      headers: {'Accept': 'application/json'},
+      headers: {
+        'Accept': 'application/json',
+        // Resolved from PackageInfo before the container is built (see
+        // main.dart), so it is already available when this client is created.
+        'X-App-Version': ref.watch(appVersionProvider),
+      },
       // 4xx must throw so the _AuthInterceptor.onError 401 refresh/retry
       // path actually runs. Callers that need to read 4xx bodies inline
       // pass a per-request validateStatus or catch DioException.
@@ -38,6 +45,7 @@ Dio dio(DioRef ref) {
 
   d.interceptors.addAll([
     _DeviceInterceptor(ref),
+    _UpgradeRequiredInterceptor(ref),
     _AuthInterceptor(ref, d),
   ]);
 
@@ -56,6 +64,22 @@ class _DeviceInterceptor extends Interceptor {
     final fp = await ref.read(deviceFingerprintProvider.future);
     options.headers['X-Device-Id'] = fp;
     handler.next(options);
+  }
+}
+
+/// Flips the global [UpdateRequired] flag when the backend answers any call
+/// with HTTP 426 (Upgrade Required); the router then blocks the app behind
+/// the update screen. The error still propagates to the caller.
+class _UpgradeRequiredInterceptor extends Interceptor {
+  _UpgradeRequiredInterceptor(this.ref);
+  final Ref ref;
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (err.response?.statusCode == 426) {
+      ref.read(updateRequiredProvider.notifier).markRequired();
+    }
+    handler.next(err);
   }
 }
 
@@ -137,7 +161,12 @@ class _AuthInterceptor extends Interceptor {
       if (refresh == null) throw StateError('no refresh token');
       final fp = await ref.read(deviceFingerprintProvider.future);
 
-      final raw = Dio(BaseOptions(baseUrl: Env.apiBaseUrl));
+      final raw = Dio(
+        BaseOptions(
+          baseUrl: Env.apiBaseUrl,
+          headers: {'X-App-Version': ref.read(appVersionProvider)},
+        ),
+      );
       final res = await raw.post<Map<String, dynamic>>(
         '/v1/auth/refresh',
         data: {'refresh': refresh, 'device_fingerprint': fp},

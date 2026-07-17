@@ -1,0 +1,80 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # tests/conftest.py drops and recreates the schema on whatever
+      # TEST_DATABASE_URL points at — this must only ever be the throwaway
+      # service container above, never a real deployment.
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      # app.core.config.Settings is constructed at import time (tests import
+      # app.main); there is no .env in CI, so satisfy its required fields here.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      JWT_SECRET: ci-only-not-a-real-secret
+      MIGRATE_ON_START: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Pinned runtime deps first, then the package + dev tools on top.
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        # Advisory for now: the current codebase has pre-existing violations
+        # (mostly B008 `Depends(...)` defaults) that live in backend/app and
+        # need a dedicated cleanup pass. Flip to blocking once `ruff check app
+        # tests` passes locally.
+        continue-on-error: true
+        run: ruff check app tests
+
+      - name: Mypy
+        # Advisory for now: the current codebase does not pass `mypy --strict`
+        # (65 errors as of adding this workflow). Flip to blocking once clean.
+        continue-on-error: true
+        run: mypy app
+
+      - name: Pytest
+        run: pytest -q

@@ -1,4 +1,4 @@
-package com.example.suuqii
+package com.suuqii.pos
 
 import io.flutter.embedding.android.FlutterActivity
 
