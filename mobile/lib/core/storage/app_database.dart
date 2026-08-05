@@ -6,6 +6,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/tables/audit_logs_table.dart';
 import 'package:suuqii/core/storage/tables/debts_table.dart';
 import 'package:suuqii/core/storage/tables/expenses_table.dart';
+import 'package:suuqii/core/storage/tables/handovers_table.dart';
 import 'package:suuqii/core/storage/tables/inventory_logs_table.dart';
 import 'package:suuqii/core/storage/tables/products_table.dart';
 import 'package:suuqii/core/storage/tables/recipes_table.dart';
@@ -17,6 +18,7 @@ import 'package:suuqii/core/storage/tables/sync_events_table.dart';
 import 'package:suuqii/core/storage/tables/sync_meta_table.dart';
 import 'package:suuqii/features/debt/data/debts_dao.dart';
 import 'package:suuqii/features/expenses/data/expenses_dao.dart';
+import 'package:suuqii/features/handovers/data/handovers_dao.dart';
 import 'package:suuqii/features/inventory/data/lots_dao.dart';
 import 'package:suuqii/features/inventory/data/products_dao.dart';
 import 'package:suuqii/features/inventory/data/recipes_dao.dart';
@@ -45,6 +47,8 @@ int sqliteDateTimeParam(DateTime value) =>
     RecipeItemsTable,
     StockLotsTable,
     LotConsumptionsTable,
+    HandoversTable,
+    HandoverItemsTable,
   ],
   daos: [
     SyncQueueDao,
@@ -54,6 +58,7 @@ int sqliteDateTimeParam(DateTime value) =>
     SuppliesDao,
     RecipesDao,
     LotsDao,
+    HandoversDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -75,7 +80,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -112,6 +117,11 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 9) {
             await m.createTable(syncMetaTable);
+          }
+          if (from < 10) {
+            await m.createTable(handoversTable);
+            await m.createTable(handoverItemsTable);
+            await _createIndexes();
           }
         },
       );
@@ -182,6 +192,8 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_stock_lots_product_id ON stock_lots (product_id)',
       'CREATE INDEX IF NOT EXISTS idx_lot_consumptions_lot_id ON lot_consumptions (lot_id)',
       'CREATE INDEX IF NOT EXISTS idx_lot_consumptions_sale_item_id ON lot_consumptions (sale_item_id)',
+      'CREATE INDEX IF NOT EXISTS idx_handovers_shop_status ON handovers (shop_id, status)',
+      'CREATE INDEX IF NOT EXISTS idx_handover_items_handover_id ON handover_items (handover_id)',
     ];
     for (final sql in statements) {
       await customStatement(sql);
@@ -195,6 +207,8 @@ class AppDatabase extends _$AppDatabase {
     await transaction(() async {
       await customStatement('DELETE FROM sync_events');
       await customStatement('DELETE FROM sync_meta');
+      await customStatement('DELETE FROM handover_items');
+      await customStatement('DELETE FROM handovers');
       await customStatement('DELETE FROM lot_consumptions');
       await customStatement('DELETE FROM stock_lots');
       await customStatement('DELETE FROM inventory_logs');

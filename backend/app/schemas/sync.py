@@ -9,6 +9,7 @@ SyncOp = Literal[
     "product.create", "product.update", "product.delete",
     "inventory.adjust",
     "stock.receive", "stock.spoil", "production.record",
+    "handover.create", "handover.accept",
     "debt.create", "debt.payment.create", "debt.writeoff",
     "expense.create", "expense.update", "expense.delete",
     "shift.open", "shift.close",

@@ -627,50 +627,68 @@ class _ProductTile extends ConsumerWidget {
 
     final nextQty = currentQty + Decimal.one;
 
-    if (!isBakery && product.stock <= Decimal.zero) {
-      HapticFeedback.heavyImpact();
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(l.posOutOfStock(product.name)),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      return;
-    }
-
-    if (!isBakery && nextQty > product.stock) {
-      HapticFeedback.mediumImpact();
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              l.posOnlyQtyOfNameInStock(
-                _formatQty(product.stock),
-                product.unit,
-                product.name,
-              ),
+    // Bakery stock is only as current as the baker's last synced handover, and
+    // the baker is on a different device. Blocking here would let a sync delay
+    // stop a sale during the morning rush, so bakery shops get a warning and
+    // the sale goes through; regular shops still hard-block.
+    var overStockWarning = false;
+    if (nextQty > product.stock) {
+      if (isBakery) {
+        overStockWarning = true;
+      } else if (product.stock <= Decimal.zero) {
+        HapticFeedback.heavyImpact();
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(l.posOutOfStock(product.name)),
+              duration: const Duration(seconds: 2),
             ),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      return;
+          );
+        return;
+      } else {
+        HapticFeedback.mediumImpact();
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                l.posOnlyQtyOfNameInStock(
+                  _formatQty(product.stock),
+                  product.unit,
+                  product.name,
+                ),
+              ),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        return;
+      }
     }
 
-    HapticFeedback.selectionClick();
+    if (overStockWarning) {
+      HapticFeedback.mediumImpact();
+    } else {
+      HapticFeedback.selectionClick();
+    }
     ref.read(cartControllerProvider.notifier).addProduct(product);
 
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
+          // The over-stock warning wins over "added to cart": the counter has
+          // to know the shelf and the app disagree, even though the sale stands.
           content: Text(
-            _lowStockMessage(l, product, nextQty) ??
-                l.posAddedToCart(product.name),
+            overStockWarning
+                ? l.posBakeryStockWarning(
+                    product.name,
+                    _formatQty(product.stock),
+                  )
+                : _lowStockMessage(l, product, nextQty) ??
+                    l.posAddedToCart(product.name),
           ),
-          duration: const Duration(milliseconds: 1000),
+          duration: Duration(milliseconds: overStockWarning ? 2200 : 1000),
         ),
       );
   }
@@ -718,17 +736,25 @@ class _ProductTile extends ConsumerWidget {
       ref.read(cartControllerProvider.notifier).remove(product.id);
       return;
     }
-    if (!isBakery && result > product.stock) {
+    if (result > product.stock) {
       if (!context.mounted) return;
+      // Bakery: warn but honour the quantity — see _toggleSelection.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            context.l10n
-                .posOnlyQtyInStock(_formatQty(product.stock), product.unit),
+            isBakery
+                ? context.l10n.posBakeryStockWarning(
+                    product.name,
+                    _formatQty(product.stock),
+                  )
+                : context.l10n.posOnlyQtyInStock(
+                    _formatQty(product.stock),
+                    product.unit,
+                  ),
           ),
         ),
       );
-      return;
+      if (!isBakery) return;
     }
 
     ref.read(cartControllerProvider.notifier).setQty(product.id, result);
@@ -1194,7 +1220,8 @@ class _RecentTile extends ConsumerWidget {
           }
 
           final nextQty = qty + Decimal.one;
-          if (!isBakery && nextQty > product.stock) {
+          final overStock = nextQty > product.stock;
+          if (overStock && !isBakery) {
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
               ..showSnackBar(
@@ -1213,8 +1240,14 @@ class _RecentTile extends ConsumerWidget {
 
           HapticFeedback.selectionClick();
           ref.read(cartControllerProvider.notifier).addProduct(product);
-          final message = _lowStockMessage(l, product, nextQty) ??
-              l.posAddedToCart(product.name);
+          // Bakery: warn but allow — see _ProductTile._toggleSelection.
+          final message = overStock
+              ? l.posBakeryStockWarning(
+                  product.name,
+                  _formatQty(product.stock),
+                )
+              : _lowStockMessage(l, product, nextQty) ??
+                  l.posAddedToCart(product.name);
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(

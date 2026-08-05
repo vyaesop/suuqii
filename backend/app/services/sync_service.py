@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import can, capability_for_op, needs_owner_pin
 from app.core.errors import ConflictError, DomainError, OwnerPinRequired
 from app.core.security import decode_token
 from app.core.units import convert_unit
@@ -25,6 +26,8 @@ from app.models import (
     Debt,
     DebtPayment,
     Expense,
+    Handover,
+    HandoverItem,
     InventoryLog,
     LotConsumption,
     Product,
@@ -38,6 +41,9 @@ from app.models import (
     SyncEvent,
     User,
 )
+from app.models.handover import STATUS_ACCEPTED as HANDOVER_ACCEPTED
+from app.models.handover import STATUS_DISPUTED as HANDOVER_DISPUTED
+from app.models.handover import STATUS_PENDING as HANDOVER_PENDING
 from app.schemas.sync import SyncEventIn, SyncResultOut, SyncResultStatus
 
 logger = logging.getLogger(__name__)
@@ -149,7 +155,27 @@ class SyncService:
         if existing is not None:
             return SyncResultOut(client_event_id=event.client_event_id, status=SyncResultStatus.DUPLICATE)
 
-        if event.op in SENSITIVE_OPS and self.user.role != "owner":
+        # Capability gate runs before the PIN gate: "may this role do this at
+        # all" is a stronger question than "does it need approval". An op with
+        # no capability entry fails closed — a baker must never be able to push
+        # sale.create just because nobody remembered to deny it.
+        required_cap = capability_for_op(event.op)
+        if required_cap is None:
+            return SyncResultOut(
+                client_event_id=event.client_event_id,
+                status=SyncResultStatus.REJECTED,
+                code="unsupported_op",
+                detail=f"unsupported op: {event.op}",
+            )
+        if not can(self.user.role, required_cap):
+            return SyncResultOut(
+                client_event_id=event.client_event_id,
+                status=SyncResultStatus.REJECTED,
+                code="forbidden_for_role",
+                detail=f"role {self.user.role} cannot perform {event.op}",
+            )
+
+        if needs_owner_pin(self.user.role, event.op, SENSITIVE_OPS):
             challenge_id = self._resolve_challenge(event.payload)
             if challenge_id is None:
                 return SyncResultOut(
@@ -239,6 +265,8 @@ class SyncService:
             "stock.receive": self._stock_receive,
             "stock.spoil": self._stock_spoil,
             "production.record": self._production_record,
+            "handover.create": self._handover_create,
+            "handover.accept": self._handover_accept,
             "supply.create": self._supply_create,
             "supply.update": self._supply_update,
             "supply.delete": self._supply_delete,
@@ -466,9 +494,11 @@ class SyncService:
         """Bakery: record a day's production of a sellable product, with a
         spoiled count. Creates a production lot valued at recipe cost.
 
-        Spoiled units deduct ingredient supplies here — sold units deduct at
-        sale time (the bakery flow), but spoiled units never reach a sale, so
-        without this the ingredient counts drift upward forever.
+        This is where ingredient supplies are deducted, for the *full* produced
+        quantity. Ingredient consumption used to happen at sale time (via
+        `supply_deductions` on sale.create), which overstated ingredients on
+        hand for as long as finished stock went unsold — see migration
+        0011_baker_handovers.
         """
         shop = await self.db.get(Shop, self.shop_id)
         if shop is None or shop.shop_type != "bakery":
@@ -547,17 +577,22 @@ class SyncService:
                 user_id=self.user.id,
                 created_at=datetime.now(UTC),
             ))
-            # Ingredients consumed by units that will never be sold.
-            for item in recipe:
-                per_unit = supply_qty_per_unit.get(item.supply_id, item.quantity)
-                await self.db.execute(
-                    Supply.__table__.update()
-                    .where(Supply.id == item.supply_id, Supply.shop_id == self.shop_id)
-                    .values(
-                        quantity_on_hand=Supply.quantity_on_hand - (per_unit * spoiled),
-                        updated_at=datetime.now(UTC),
-                    )
+
+        # Ingredients are consumed by the whole bake, sold or not. Deducting
+        # the full produced quantity here (not just the spoiled part, and not
+        # at sale time) is what keeps the supply count honest for stock that
+        # sits: a tray baked on Monday and sold across the following fortnight
+        # used its flour on Monday.
+        for item in recipe:
+            per_unit = supply_qty_per_unit.get(item.supply_id, item.quantity)
+            await self.db.execute(
+                Supply.__table__.update()
+                .where(Supply.id == item.supply_id, Supply.shop_id == self.shop_id)
+                .values(
+                    quantity_on_hand=Supply.quantity_on_hand - (per_unit * produced),
+                    updated_at=datetime.now(UTC),
                 )
+            )
 
         await self.db.execute(
             Product.__table__.update()
@@ -565,6 +600,158 @@ class SyncService:
             .values(stock=Product.stock + (produced - spoiled),
                     updated_at=datetime.now(UTC))
         )
+
+    # ---------- handovers (docs/18-handovers.md) ----------
+
+    async def _shop_user(self, user_id: UUID) -> User | None:
+        """A user in *this* shop, or None. FKs alone would allow a client to
+        reference a user in another tenant."""
+        u = await self.db.get(User, user_id)
+        if u is None or u.shop_id != self.shop_id:
+            return None
+        return u
+
+    async def _handover_create(self, p: dict[str, Any]) -> None:
+        """Baker declares what they handed to the counter.
+
+        Deliberately moves no stock: production.record already created these
+        units and the counter's sale will consume them. This is the first of
+        two independent counts — the control, not the inventory movement.
+        """
+        handover_id = UUID(p["id"])
+        if await self.db.get(Handover, handover_id):
+            return  # idempotent
+        shop = await self.db.get(Shop, self.shop_id)
+        if shop is None or shop.shop_type != "bakery":
+            raise DomainError("handover.create is bakery-only", code="bad_shop_type")
+
+        lines = p.get("items") or []
+        if not lines:
+            raise DomainError("handover needs at least one line", code="invalid_payload")
+
+        to_user_id = UUID(p["to_user_id"]) if p.get("to_user_id") else None
+        if to_user_id is not None and await self._shop_user(to_user_id) is None:
+            raise DomainError("recipient not in this shop", code="not_found", status=404)
+
+        shift_id = UUID(p["shift_id"]) if p.get("shift_id") else None
+        if shift_id is not None:
+            shift = await self.db.get(Shift, shift_id)
+            if shift is None or shift.shop_id != self.shop_id:
+                raise DomainError("shift not in this shop", code="not_found", status=404)
+
+        self.db.add(Handover(
+            id=handover_id,
+            shop_id=self.shop_id,
+            from_user_id=self.user.id,
+            to_user_id=to_user_id,
+            shift_id=shift_id,
+            occurred_at=_parse_dt(p["occurred_at"]),
+            status=HANDOVER_PENDING,
+            note=p.get("note"),
+            device_id=self.device_id,
+            created_at=datetime.now(UTC),
+        ))
+        await self.db.flush()  # items' FK must not race the parent insert
+
+        seen: set[UUID] = set()
+        for line in lines:
+            product_id = UUID(line["product_id"])
+            if product_id in seen:
+                raise DomainError(
+                    "duplicate product in handover", code="invalid_payload"
+                )
+            seen.add(product_id)
+            product = await self._get_shop_product(product_id)
+            if product is None:
+                raise DomainError("product not found", code="not_found", status=404)
+            qty = Decimal(line["qty_handed"])
+            if qty < 0:
+                raise DomainError("qty_handed must not be negative", code="invalid_payload")
+            self.db.add(HandoverItem(
+                id=UUID(line["id"]) if line.get("id") else None,
+                shop_id=self.shop_id,
+                handover_id=handover_id,
+                product_id=product_id,
+                product_name_snapshot=line.get("product_name_snapshot") or product.name,
+                qty_handed=qty,
+            ))
+
+    async def _handover_accept(self, p: dict[str, Any]) -> None:
+        """Counter declares what it actually received — the second count.
+
+        Rejects self-acceptance: if the baker could accept their own handover
+        the two counts collapse into one and the control is worth nothing. This
+        is enforced here rather than in the UI because the UI is not a boundary.
+        """
+        handover_id = UUID(p["handover_id"])
+        handover = await self.db.get(Handover, handover_id)
+        if handover is None or handover.shop_id != self.shop_id:
+            raise DomainError("handover not found", code="not_found", status=404)
+        if handover.status != HANDOVER_PENDING:
+            raise ConflictError(
+                "handover already reconciled",
+                server_payload={
+                    "handover_id": str(handover_id),
+                    "status": handover.status,
+                    "accepted_at": handover.accepted_at.isoformat()
+                    if handover.accepted_at else None,
+                },
+            )
+        if handover.from_user_id == self.user.id:
+            raise DomainError(
+                "the person who handed over cannot also accept",
+                code="self_accept_forbidden",
+            )
+
+        counted: dict[UUID, Decimal] = {}
+        for line in p.get("items") or []:
+            counted[UUID(line["product_id"])] = Decimal(line["qty_received"])
+
+        rows = (await self.db.execute(
+            select(HandoverItem).where(HandoverItem.handover_id == handover_id)
+        )).scalars().all()
+        missing = [str(r.product_id) for r in rows if r.product_id not in counted]
+        if missing:
+            # A partially counted handover has no meaningful variance.
+            raise DomainError(
+                f"every line must be counted; missing {', '.join(missing)}",
+                code="incomplete_count",
+            )
+
+        discrepancies: list[dict[str, str]] = []
+        for row in rows:
+            qty = counted[row.product_id]
+            if qty < 0:
+                raise DomainError("qty_received must not be negative", code="invalid_payload")
+            row.qty_received = qty
+            if qty != row.qty_handed:
+                discrepancies.append({
+                    "product": row.product_name_snapshot,
+                    "handed": str(row.qty_handed),
+                    "received": str(qty),
+                })
+
+        handover.accepted_by_user_id = self.user.id
+        handover.accepted_at = datetime.now(UTC)
+        handover.accept_note = p.get("note")
+        handover.status = HANDOVER_DISPUTED if discrepancies else HANDOVER_ACCEPTED
+
+        if discrepancies:
+            # Surfaced in the owner's audit log, not just a report column — an
+            # unexplained gap between two staff counts is the thing they most
+            # need to see the day it happens.
+            self.db.add(AuditLog(
+                shop_id=self.shop_id,
+                user_id=self.user.id,
+                action="handover.variance",
+                entity_type="handover",
+                entity_id=handover_id,
+                old_value={"from_user_id": str(handover.from_user_id)},
+                new_value={"lines": discrepancies},
+                device_id=self.device_id,
+                note="counter's count differs from the baker's",
+                created_at=datetime.now(UTC),
+            ))
 
     async def _sale_create(self, p: dict[str, Any]) -> None:
         sale_id = UUID(p["id"])
@@ -627,23 +814,26 @@ class SyncService:
         self.db.add(sale)
 
         shop = await self.db.get(Shop, self.shop_id)
-        is_bakery = shop is not None and shop.shop_type == "bakery"
 
+        # Since 0011 a bakery sale is an ordinary sale. Production creates the
+        # stock and the lot (valued at recipe cost) and consumes the
+        # ingredients, so selling a bun draws down lots and stock exactly like
+        # selling a bought-in tin does. Previously bakery sales skipped both,
+        # which left production lots at full qty_remaining forever and made
+        # bakery batch reports meaningless.
         lot_cost_total = Decimal("0")
         for item in items:
             item_id = UUID(item["id"])
             qty = Decimal(item["quantity"])
-            unit_cost = Decimal(item["unit_cost"])
-            if not is_bakery:
-                # COGS comes from the batches actually consumed (FEFO), not
-                # from whatever cost the client had cached. The client's
-                # unit_cost is only the fallback for unlotted stock.
-                unit_cost = await self._consume_lots(
-                    UUID(item["product_id"]), qty,
-                    movement="sale",
-                    fallback_cost=unit_cost,
-                    sale_item_id=item_id,
-                )
+            # COGS comes from the batches actually consumed (FEFO), not from
+            # whatever cost the client had cached. The client's unit_cost is
+            # only the fallback for unlotted stock.
+            unit_cost = await self._consume_lots(
+                UUID(item["product_id"]), qty,
+                movement="sale",
+                fallback_cost=Decimal(item["unit_cost"]),
+                sale_item_id=item_id,
+            )
             lot_cost_total += qty * unit_cost
             self.db.add(SaleItem(
                 id=item_id,
@@ -654,25 +844,22 @@ class SyncService:
                 unit_price=Decimal(item["unit_price"]),
                 unit_cost=unit_cost,
             ))
-            if not is_bakery:
-                # delta-based stock decrement + ledger (skipped for bakery —
-                # ingredient supplies are decremented via supply_deductions)
-                self.db.add(InventoryLog(
-                    shop_id=self.shop_id,
-                    product_id=UUID(item["product_id"]),
-                    movement="sale",
-                    quantity_delta=-qty,
-                    reference_type="sale",
-                    reference_id=sale_id,
-                    user_id=self.user.id,
-                    created_at=datetime.now(UTC),
-                ))
-                await self.db.execute(
-                    Product.__table__.update()
-                    .where(Product.id == UUID(item["product_id"]))
-                    .values(stock=Product.stock - qty,
-                            updated_at=datetime.now(UTC))
-                )
+            self.db.add(InventoryLog(
+                shop_id=self.shop_id,
+                product_id=UUID(item["product_id"]),
+                movement="sale",
+                quantity_delta=-qty,
+                reference_type="sale",
+                reference_id=sale_id,
+                user_id=self.user.id,
+                created_at=datetime.now(UTC),
+            ))
+            await self.db.execute(
+                Product.__table__.update()
+                .where(Product.id == UUID(item["product_id"]))
+                .values(stock=Product.stock - qty,
+                        updated_at=datetime.now(UTC))
+            )
         sale.cost_total = lot_cost_total.quantize(_CENT, rounding=ROUND_HALF_UP)
 
         if p["payment_method"] == "credit":
@@ -718,18 +905,18 @@ class SyncService:
                 status="open",
             ))
 
-        # Bakery: deduct supplies consumed by this sale (client pre-calculated).
-        # Shop-scoped: only supplies belonging to this shop can be decremented.
-        for ded in p.get("supply_deductions", []):
-            supply_id = UUID(ded["supply_id"])
-            delta = Decimal(ded["quantity_delta"])  # negative value
-            await self.db.execute(
-                Supply.__table__.update()
-                .where(Supply.id == supply_id, Supply.shop_id == self.shop_id)
-                .values(
-                    quantity_on_hand=Supply.quantity_on_hand + delta,
-                    updated_at=datetime.now(UTC),
-                )
+        # `supply_deductions` is deliberately ignored. Bakery ingredients are
+        # now deducted by production.record for the whole bake; honouring the
+        # sale-time payload as well would double-count. Clients older than
+        # settings.min_app_version still send the field, which is why that
+        # setting must be raised in the same deploy as migration 0011 — a
+        # straggler client would otherwise have its ingredient deductions
+        # silently dropped and drift upward.
+        if p.get("supply_deductions"):
+            logger.info(
+                "ignoring legacy sale-time supply_deductions shop=%s sale=%s "
+                "(ingredients deduct at production since 0011)",
+                self.shop_id, sale_id,
             )
 
     async def _sale_refund(self, p: dict[str, Any]) -> None:
@@ -742,74 +929,50 @@ class SyncService:
 
         sale.status = "refunded"
 
-        shop = await self.db.get(Shop, self.shop_id)
-        is_bakery = shop is not None and shop.shop_type == "bakery"
-
+        # Bakery refunds are ordinary refunds since 0011: the returned bun goes
+        # back on its lot and back into stock. Ingredients are deliberately NOT
+        # restored — the flour was consumed when the dough was mixed, and a
+        # customer handing the loaf back does not put it in the sack again.
         items = await self.db.execute(select(SaleItem).where(SaleItem.sale_id == sale_id))
         for item in items.scalars():
-            if not is_bakery:
-                self.db.add(InventoryLog(
-                    shop_id=self.shop_id,
-                    product_id=item.product_id,
-                    movement="refund",
-                    quantity_delta=item.quantity,
-                    reference_type="sale",
-                    reference_id=sale_id,
-                    user_id=self.user.id,
-                    created_at=datetime.now(UTC),
-                ))
-                await self.db.execute(
-                    Product.__table__.update()
-                    .where(Product.id == item.product_id)
-                    .values(stock=Product.stock + item.quantity, updated_at=datetime.now(UTC))
-                )
-                # Return quantities to the exact lots this item consumed so
-                # batch reports stay truthful after refunds.
-                consumptions = (await self.db.execute(
-                    select(LotConsumption).where(
-                        LotConsumption.shop_id == self.shop_id,
-                        LotConsumption.sale_item_id == item.id,
-                        LotConsumption.movement == "sale",
-                    )
-                )).scalars().all()
-                now = datetime.now(UTC)
-                for c in consumptions:
-                    lot = await self.db.get(StockLot, c.lot_id)
-                    if lot is not None:
-                        lot.qty_remaining = lot.qty_remaining + c.quantity
-                    self.db.add(LotConsumption(
-                        shop_id=self.shop_id,
-                        lot_id=c.lot_id,
-                        sale_item_id=item.id,
-                        movement="refund_reversal",
-                        quantity=-c.quantity,
-                        unit_cost=c.unit_cost,
-                        consumed_at=now,
-                    ))
-
-        # Bakery: restore ingredient supplies consumed by the original sale.
-        # The original sale.create sync event carries the supply_deductions payload.
-        if is_bakery:
-            original_event = await self.db.execute(
-                select(SyncEvent).where(
-                    SyncEvent.shop_id == self.shop_id,
-                    SyncEvent.op == "sale.create",
-                    SyncEvent.payload["id"].astext == str(sale_id),
-                ).order_by(SyncEvent.id).limit(1)
+            self.db.add(InventoryLog(
+                shop_id=self.shop_id,
+                product_id=item.product_id,
+                movement="refund",
+                quantity_delta=item.quantity,
+                reference_type="sale",
+                reference_id=sale_id,
+                user_id=self.user.id,
+                created_at=datetime.now(UTC),
+            ))
+            await self.db.execute(
+                Product.__table__.update()
+                .where(Product.id == item.product_id)
+                .values(stock=Product.stock + item.quantity, updated_at=datetime.now(UTC))
             )
-            ev = original_event.scalars().first()
-            if ev is not None:
-                for ded in ev.payload.get("supply_deductions", []):
-                    supply_id = UUID(ded["supply_id"])
-                    delta = Decimal(ded["quantity_delta"])  # negative — reverse it
-                    await self.db.execute(
-                        Supply.__table__.update()
-                        .where(Supply.id == supply_id, Supply.shop_id == self.shop_id)
-                        .values(
-                            quantity_on_hand=Supply.quantity_on_hand - delta,
-                            updated_at=datetime.now(UTC),
-                        )
-                    )
+            # Return quantities to the exact lots this item consumed so
+            # batch reports stay truthful after refunds.
+            consumptions = (await self.db.execute(
+                select(LotConsumption).where(
+                    LotConsumption.shop_id == self.shop_id,
+                    LotConsumption.sale_item_id == item.id,
+                    LotConsumption.movement == "sale",
+                )
+            )).scalars().all()
+            now = datetime.now(UTC)
+            for c in consumptions:
+                lot = await self.db.get(StockLot, c.lot_id)
+                if lot is not None:
+                    lot.qty_remaining = lot.qty_remaining + c.quantity
+                self.db.add(LotConsumption(
+                    shop_id=self.shop_id,
+                    lot_id=c.lot_id,
+                    sale_item_id=item.id,
+                    movement="refund_reversal",
+                    quantity=-c.quantity,
+                    unit_cost=c.unit_cost,
+                    consumed_at=now,
+                ))
 
     async def _product_create(self, p: dict[str, Any]) -> None:
         if await self.db.get(Product, UUID(p["id"])):

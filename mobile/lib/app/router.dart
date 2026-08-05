@@ -15,6 +15,8 @@ import 'package:suuqii/features/dashboard/presentation/reports_screen.dart';
 import 'package:suuqii/features/debt/presentation/debt_detail_screen.dart';
 import 'package:suuqii/features/debt/presentation/debts_screen.dart';
 import 'package:suuqii/features/expenses/presentation/expenses_screen.dart';
+import 'package:suuqii/features/handovers/presentation/accept_handover_screen.dart';
+import 'package:suuqii/features/handovers/presentation/baker_handover_screen.dart';
 import 'package:suuqii/features/inventory/presentation/batch_report_screen.dart';
 import 'package:suuqii/features/inventory/presentation/bulk_restock_screen.dart';
 import 'package:suuqii/features/inventory/presentation/inventory_screen.dart';
@@ -22,6 +24,7 @@ import 'package:suuqii/features/inventory/presentation/product_detail_screen.dar
 import 'package:suuqii/features/inventory/presentation/product_edit_screen.dart';
 import 'package:suuqii/features/sales/presentation/pos_screen.dart';
 import 'package:suuqii/features/sales/presentation/recent_sales_screen.dart';
+import 'package:suuqii/features/settings/presentation/data_screen.dart';
 import 'package:suuqii/features/settings/presentation/devices_screen.dart';
 import 'package:suuqii/features/settings/presentation/employees_screen.dart';
 import 'package:suuqii/features/settings/presentation/settings_screen.dart';
@@ -43,14 +46,44 @@ const ownerOnlyPathPrefixes = [
   '/employees',
   '/open-shifts',
   '/shop-settings',
+  // CSV export carries cost prices and margins.
+  '/data',
 ];
 
-/// Single reusable owner-only guard: returns the location to redirect a
-/// non-owner to, or null when [location] is allowed for their role.
-String? ownerOnlyRedirect(String location, {required bool isOwner}) {
+/// Prefixes a baker must never reach: anything that takes payment, moves money
+/// or shows what things cost. A baker landing on these would be a capability
+/// leak, so deep links are redirected too.
+const bakerDeniedPathPrefixes = [
+  '/pos',
+  '/recent-sales',
+  '/debts',
+  '/expenses',
+];
+
+/// Single reusable role guard: returns the location to redirect to, or null
+/// when [location] is allowed.
+///
+/// Bakers are checked before owners-only because their denied set overlaps
+/// routes a cashier may visit — `isOwner: false` alone does not describe them.
+String? roleRedirect(
+  String location, {
+  required bool isOwner,
+  required bool isBaker,
+}) {
+  if (isBaker) {
+    return bakerDeniedPathPrefixes.any(location.startsWith) ||
+            ownerOnlyPathPrefixes.any(location.startsWith)
+        ? '/handover'
+        : null;
+  }
   if (isOwner) return null;
   return ownerOnlyPathPrefixes.any(location.startsWith) ? '/pos' : null;
 }
+
+/// Kept for the existing call sites and tests; [roleRedirect] is the general
+/// form.
+String? ownerOnlyRedirect(String location, {required bool isOwner}) =>
+    roleRedirect(location, isOwner: isOwner, isBaker: false);
 
 class _RouterRefreshNotifier extends ChangeNotifier {
   void trigger() => notifyListeners();
@@ -83,7 +116,6 @@ GoRouter router(RouterRef ref) {
       if (updateRequired) {
         return loc == '/update-required' ? null : '/update-required';
       }
-      if (loc == '/update-required') return '/pos';
 
       final authAsync = ref.read(authControllerProvider);
       if (authAsync.isLoading) return null;
@@ -91,10 +123,16 @@ GoRouter router(RouterRef ref) {
       final auth = authAsync.valueOrNull;
       final publicPaths = {'/login', '/register-shop', '/accept-invite'};
       final isAuthed = auth is Authenticated;
+      // Bakers have no POS, so the post-auth landing route is role-dependent.
+      final home = isAuthed ? auth.homeRoute : '/pos';
+      if (loc == '/update-required') return home;
       if (!isAuthed && !publicPaths.contains(loc)) return '/login';
-      if (isAuthed && publicPaths.contains(loc)) return '/pos';
-      final isOwner = isAuthed && auth.isOwner;
-      return ownerOnlyRedirect(loc, isOwner: isOwner);
+      if (isAuthed && publicPaths.contains(loc)) return home;
+      return roleRedirect(
+        loc,
+        isOwner: isAuthed && auth.isOwner,
+        isBaker: isAuthed && auth.isBaker,
+      );
     },
     routes: [
       GoRoute(
@@ -184,6 +222,16 @@ GoRouter router(RouterRef ref) {
             path: '/supplies',
             builder: (_, __) => const SuppliesScreen(),
           ),
+          // Baker's home: record the bake and declare what went to the counter.
+          GoRoute(
+            path: '/handover',
+            builder: (_, __) => const BakerHandoverScreen(),
+          ),
+          // Counter's side: the second, independent count.
+          GoRoute(
+            path: '/handovers-received',
+            builder: (_, __) => const AcceptHandoverScreen(),
+          ),
           GoRoute(path: '/audit', builder: (_, __) => const AuditScreen()),
           GoRoute(
             path: '/employees',
@@ -200,6 +248,8 @@ GoRouter router(RouterRef ref) {
             path: '/shop-settings',
             builder: (_, __) => const ShopSettingsScreen(),
           ),
+          // Owner-only via the /data redirect guard.
+          GoRoute(path: '/data', builder: (_, __) => const DataScreen()),
           GoRoute(path: '/me', builder: (_, __) => const SettingsScreen()),
         ],
       ),

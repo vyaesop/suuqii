@@ -37,6 +37,12 @@ class DeviceSession(Base):
     device_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
     refresh_token_hash: Mapped[str] = mapped_column(String, nullable=False)
     refresh_jti: Mapped[str] = mapped_column(String, nullable=False)
+    # Which shop this device is currently switched to. NULL = the user's home
+    # shop. Refresh tokens carry only user + device, so this is what stops a
+    # refresh from bouncing a multi-shop owner back to their home shop.
+    active_shop_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("shops.id")
+    )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

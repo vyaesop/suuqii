@@ -294,10 +294,13 @@ void main() {
       // Stock += produced − spoiled.
       expect((await productById('bread')).stock, Decimal.fromInt(8));
 
-      // Supplies deducted for SPOILED units only (sold units deduct at sale
-      // time): 2 × 0.5 kg = 1 kg → 9 kg left.
+      // Supplies deducted for the WHOLE bake, spoiled or not — the flour was
+      // used when the dough was mixed (migration 0011): 10 × 0.5 kg = 5 kg
+      // → 5 kg left. Before 0011 only the spoiled units deducted here and the
+      // rest deducted at sale time, which overstated flour on hand for as long
+      // as the bread went unsold.
       final flour = await db.suppliesDao.getById('flour');
-      expect(flour!.quantityOnHand, Decimal.fromInt(9));
+      expect(flour!.quantityOnHand, Decimal.fromInt(5));
 
       final spoilage = (await consumptionRows()).single;
       expect(spoilage.movement, 'spoilage');
@@ -312,7 +315,8 @@ void main() {
       expect(event.payload, contains(lot.id));
     });
 
-    test('production without spoilage leaves supplies untouched', () async {
+    test('production deducts its ingredients even with nothing spoiled',
+        () async {
       await insertProduct(id: 'bread', purchasePrice: '0');
       await db.suppliesDao.upsertAll([
         Supply(
@@ -342,8 +346,10 @@ void main() {
       );
 
       expect((await productById('bread')).stock, Decimal.fromInt(10));
+      // 10 × 500 g = 5 kg off the sack, at bake time, with nothing sold yet.
       final flour = await db.suppliesDao.getById('flour');
-      expect(flour!.quantityOnHand, Decimal.fromInt(10));
+      expect(flour!.quantityOnHand, Decimal.fromInt(5));
+      // No spoilage, so nothing was drawn back out of the lot.
       expect(await consumptionRows(), isEmpty);
     });
   });

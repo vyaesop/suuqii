@@ -49,6 +49,8 @@ Thumbs.db
 # Logs / dumps
 *.log
 *.dump
+*.db
+*.db-journal
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal

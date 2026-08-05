@@ -3,13 +3,14 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._pagination import decode_time_cursor, encode_cursor
-from app.core.deps import current_user, db_session
+from app.core.capabilities import RECORD_EXPENSE
+from app.core.deps import current_user, db_session, require_cap
 from app.models import Expense, User
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_cap(RECORD_EXPENSE))])
 async def list_expenses(
     limit: int = Query(200, ge=1, le=500),
     cursor: str | None = Query(None),

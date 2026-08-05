@@ -5,13 +5,14 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._pagination import decode_cursor, encode_cursor
-from app.core.deps import current_user, db_session
+from app.core.capabilities import VIEW_COSTS, VIEW_PRODUCTS, can
+from app.core.deps import current_user, db_session, require_cap
 from app.models import Product, StockLot, User
 
 router = APIRouter(prefix="/products", tags=["products"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_cap(VIEW_PRODUCTS))])
 async def list_products(
     q: str | None = Query(None),
     category: str | None = Query(None),
@@ -37,9 +38,8 @@ async def list_products(
     rows = (await db.execute(stmt)).scalars().all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    is_owner = user.role == "owner"
     return {
-        "items": [_dump(p, is_owner=is_owner) for p in rows],
+        "items": [_dump(p, is_owner=can(user.role, VIEW_COSTS)) for p in rows],
         "next_cursor": encode_cursor(rows[-1].name, rows[-1].id) if has_more else None,
         "has_more": has_more,
     }
@@ -63,7 +63,7 @@ def _dump(p: Product, *, is_owner: bool = True) -> dict:
     return d
 
 
-@router.get("/lots")
+@router.get("/lots", dependencies=[Depends(require_cap(VIEW_PRODUCTS))])
 async def list_lots(
     product_id: UUID | None = Query(None),
     include_closed: bool = Query(False),
@@ -83,7 +83,7 @@ async def list_lots(
         stmt = stmt.where(StockLot.qty_remaining > 0)
     stmt = stmt.order_by(StockLot.received_at.desc()).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
-    is_owner = user.role == "owner"
+    is_owner = can(user.role, VIEW_COSTS)
     return {"items": [
         {
             "id": str(lot.id),

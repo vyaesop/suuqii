@@ -10,6 +10,8 @@ import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
@@ -315,6 +317,8 @@ class _EmployeeRow extends StatelessWidget {
         return l.roleOwner;
       case 'cashier':
         return l.roleCashier;
+      case 'baker':
+        return l.employeeRoleBaker;
       default:
         return role;
     }
@@ -334,6 +338,11 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
   String? _error;
   String? _code;
   String? _expiresAt;
+
+  /// Only 'cashier' and 'baker' are invitable; owners come from registration.
+  /// The picker is hidden for non-bakery shops, where 'baker' is meaningless
+  /// and the server rejects it anyway.
+  String _role = 'cashier';
 
   @override
   void dispose() {
@@ -445,6 +454,9 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
       );
     }
 
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    final isBakery = auth is Authenticated && auth.isBakery;
+
     return SuuqSheet(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -474,6 +486,33 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
               prefixIcon: const Icon(Icons.phone_iphone_rounded),
             ),
           ),
+          if (isBakery) ...[
+            const SizedBox(height: SuuqSpacing.md),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'cashier',
+                  label: Text(l.employeeRoleCashier),
+                  icon: const Icon(Icons.point_of_sale_rounded, size: 18),
+                ),
+                ButtonSegment(
+                  value: 'baker',
+                  label: Text(l.employeeRoleBaker),
+                  icon: const Icon(Icons.bakery_dining_rounded, size: 18),
+                ),
+              ],
+              selected: {_role},
+              onSelectionChanged: (s) => setState(() => _role = s.first),
+            ),
+            if (_role == 'baker') ...[
+              const SizedBox(height: SuuqSpacing.xs),
+              Text(
+                l.inviteRoleBakerHint,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
+          ],
           if (_error != null) ...[
             const SizedBox(height: SuuqSpacing.sm),
             Text(_error!, style: TextStyle(color: scheme.error)),
@@ -519,7 +558,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
     });
     try {
       final api = ref.read(authApiProvider);
-      final res = await api.invite(name: name, phone: phone);
+      final res = await api.invite(name: name, phone: phone, role: _role);
       if (!mounted) return;
       setState(() {
         _code = res.code;

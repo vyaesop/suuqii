@@ -19,32 +19,47 @@ class HomeShell extends ConsumerWidget {
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
     final isBakery = auth is Authenticated && auth.isBakery;
+    final isBaker = auth is Authenticated && auth.isBaker;
     final loc = GoRouterState.of(context).matchedLocation;
     final scheme = Theme.of(context).colorScheme;
 
-    // Bakery shops replace the Debts tab with Supplies.
-    final paths = [
-      '/pos',
-      '/inventory',
-      if (isBakery) '/supplies' else '/debts',
-      '/shift',
-      if (isOwner) '/owner' else '/me',
-    ];
+    // Bakers get no POS, no debts and no money surface at all — their tabs are
+    // the bake, the ingredients they draw on, and their shift.
+    final paths = isBaker
+        ? ['/handover', '/inventory', '/supplies', '/shift']
+        : [
+            '/pos',
+            '/inventory',
+            // Bakery shops replace the Debts tab with Supplies.
+            if (isBakery) '/supplies' else '/debts',
+            '/shift',
+            if (isOwner) '/owner' else '/me',
+          ];
     final idx = paths.indexWhere(loc.startsWith).clamp(0, paths.length - 1);
 
-    final destinations = [
-      _NavItem(icon: Icons.point_of_sale_rounded, label: l.navSell),
-      _NavItem(icon: Icons.inventory_2_rounded, label: l.navInventory),
-      if (isBakery)
-        _NavItem(icon: Icons.egg_alt_rounded, label: l.navSupplies)
-      else
-        _NavItem(icon: Icons.account_balance_wallet_rounded, label: l.navDebts),
-      _NavItem(icon: Icons.timelapse_rounded, label: l.navShift),
-      if (isOwner)
-        _NavItem(icon: Icons.insights_rounded, label: l.navDashboard)
-      else
-        _NavItem(icon: Icons.tune_rounded, label: l.navSettings),
-    ];
+    final destinations = isBaker
+        ? [
+            _NavItem(icon: Icons.bakery_dining_rounded, label: l.navHandover),
+            _NavItem(icon: Icons.inventory_2_rounded, label: l.navInventory),
+            _NavItem(icon: Icons.egg_alt_rounded, label: l.navSupplies),
+            _NavItem(icon: Icons.timelapse_rounded, label: l.navShift),
+          ]
+        : [
+            _NavItem(icon: Icons.point_of_sale_rounded, label: l.navSell),
+            _NavItem(icon: Icons.inventory_2_rounded, label: l.navInventory),
+            if (isBakery)
+              _NavItem(icon: Icons.egg_alt_rounded, label: l.navSupplies)
+            else
+              _NavItem(
+                icon: Icons.account_balance_wallet_rounded,
+                label: l.navDebts,
+              ),
+            _NavItem(icon: Icons.timelapse_rounded, label: l.navShift),
+            if (isOwner)
+              _NavItem(icon: Icons.insights_rounded, label: l.navDashboard)
+            else
+              _NavItem(icon: Icons.tune_rounded, label: l.navSettings),
+          ];
 
     return Scaffold(
       appBar: PreferredSize(
@@ -116,6 +131,8 @@ class HomeShell extends ConsumerWidget {
     if (location.startsWith('/inventory')) return l.navInventory;
     if (location.startsWith('/debts')) return l.navDebts;
     if (location.startsWith('/supplies')) return l.navSupplies;
+    if (location.startsWith('/handovers-received')) return l.navCounted;
+    if (location.startsWith('/handover')) return l.navHandover;
     if (location.startsWith('/shift')) return l.navShift;
     if (location.startsWith('/owner')) return l.navDashboard;
     if (location.startsWith('/me')) return l.navSettings;

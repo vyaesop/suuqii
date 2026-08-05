@@ -5,13 +5,14 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._pagination import decode_time_cursor, encode_cursor
-from app.core.deps import current_user, db_session
+from app.core.capabilities import SELL, VIEW_REPORTS, can
+from app.core.deps import current_user, db_session, require_cap
 from app.models import Sale, User
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_cap(SELL))])
 async def list_sales(
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = Query(None),
@@ -35,14 +36,14 @@ async def list_sales(
     rows = (await db.execute(stmt)).scalars().all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    is_owner = user.role == "owner"
+    show_profit = can(user.role, VIEW_REPORTS)
     return {
         "items": [
             {
                 "id": str(s.id),
                 "total": str(s.total),
                 # Profit reveals purchase cost; restrict to owners.
-                **({"profit": str(s.total - s.cost_total)} if is_owner else {}),
+                **({"profit": str(s.total - s.cost_total)} if show_profit else {}),
                 "payment_method": s.payment_method,
                 "status": s.status,
                 "occurred_at": s.occurred_at.isoformat(),

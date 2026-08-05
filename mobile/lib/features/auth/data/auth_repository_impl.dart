@@ -2,6 +2,7 @@ import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/features/auth/data/auth_local_data_source.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
+import 'package:suuqii/features/auth/domain/entities/shop_option.dart';
 
 class AuthRepository {
   AuthRepository({
@@ -92,6 +93,40 @@ class AuthRepository {
   }
 
   Future<String> verifyOwnerPin(String pin) => remote.verifyOwnerPin(pin);
+
+  Future<List<ShopOption>> myShops() => remote.myShops();
+
+  Future<ShopOption> createShop({
+    required String name,
+    required String shopType,
+    String locale = 'en',
+  }) =>
+      remote.createShop(name: name, shopType: shopType, locale: locale);
+
+  /// Move this device to another shop the account belongs to.
+  ///
+  /// Returns the new [Authenticated] state. Wiping the local database is the
+  /// **caller's** job and must happen before this state is published — the
+  /// on-device store holds one shop at a time, and leaving shop A's products
+  /// in place while the session says shop B would corrupt both.
+  Future<Authenticated> switchShop({
+    required String shopId,
+    required String deviceFingerprint,
+    required String userName,
+  }) async {
+    final res = await remote.switchShop(
+      shopId: shopId,
+      deviceFingerprint: deviceFingerprint,
+    );
+    // The person is unchanged — only the shop and their role in it. Carry the
+    // known display name across rather than falling back to the phone number.
+    return _applyBundle(
+      res,
+      userName,
+      shopName: res['shop_name'] as String?,
+      userName: userName,
+    );
+  }
 
   /// Persists owner-edited shop settings so they survive app restarts.
   Future<void> saveShopSettings({

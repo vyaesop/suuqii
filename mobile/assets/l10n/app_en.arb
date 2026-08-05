@@ -1721,5 +1721,145 @@
   "batchColLeft": "Left",
   "batchColRevenue": "Revenue",
   "batchColMargin": "Margin",
-  "dashboardWaste": "Waste (spoilage)"
+  "dashboardWaste": "Waste (spoilage)",
+
+  "navHandover": "Handover",
+  "navCounted": "Received",
+  "handoverLoadFailedTitle": "Couldn't load handovers",
+  "handoverNoProducts": "No products yet. Ask the owner to add what you bake.",
+  "handoverBakedLabel": "Baked",
+  "handoverSpoiledLabel": "Spoiled",
+  "handoverHandedLabel": "To counter",
+  "handoverSubmit": "Hand over",
+  "handoverLineCount": "{count, plural, =0{Nothing entered} =1{1 product} other{{count} products}}",
+  "@handoverLineCount": {
+    "description": "How many products the baker has entered quantities for.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "handoverTotalUnits": "{units} units to counter",
+  "@handoverTotalUnits": {
+    "placeholders": { "units": { "type": "String" } }
+  },
+  "handoverSubmitted": "{count, plural, =1{Handed over 1 product} other{Handed over {count} products}}",
+  "@handoverSubmitted": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "handoverErrorNothingEntered": "Enter what you baked first",
+  "handoverErrorHandedExceedsBaked": "{product}: can't hand over more than you baked",
+  "@handoverErrorHandedExceedsBaked": {
+    "placeholders": { "product": { "type": "String" } }
+  },
+  "handoverRecentTitle": "Your recent handovers",
+  "handoverStatusPending": "{units} units — waiting to be counted",
+  "@handoverStatusPending": {
+    "placeholders": { "units": { "type": "String" } }
+  },
+  "handoverStatusAccepted": "{units} units — counted, matched",
+  "@handoverStatusAccepted": {
+    "placeholders": { "units": { "type": "String" } }
+  },
+  "handoverStatusDisputed": "Counted — {units} units apart",
+  "@handoverStatusDisputed": {
+    "description": "Gross variance: the total absolute difference between the two counts.",
+    "placeholders": { "units": { "type": "String" } }
+  },
+  "handoverNothingPending": "Nothing waiting to be counted.",
+  "handoverPendingLines": "{count, plural, =1{1 product to count} other{{count} products to count}}",
+  "@handoverPendingLines": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "handoverCannotCountOwn": "You handed this over — someone else must count it",
+  "handoverCountTitle": "Count what you received",
+  "handoverCountBlindHint": "Count first, then reveal what the baker declared.",
+  "handoverCountedLabel": "Counted",
+  "handoverReveal": "Reveal",
+  "handoverDeclaredValue": "said {qty}",
+  "@handoverDeclaredValue": {
+    "description": "The baker's declared quantity, shown after the counter reveals it.",
+    "placeholders": { "qty": { "type": "String" } }
+  },
+  "handoverNoteLabel": "Note (optional)",
+  "handoverConfirmCount": "Confirm count",
+  "handoverErrorCountEveryLine": "Enter a count for every product",
+  "handoverAcceptedMatched": "Counts matched",
+  "handoverAcceptedDisputed": "{count, plural, =1{1 product didn't match — the owner will see it} other{{count} products didn't match — the owner will see it}}",
+  "@handoverAcceptedDisputed": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "employeeRoleBaker": "Baker",
+  "employeeRoleCashier": "Salesperson",
+  "employeeRoleOwner": "Owner",
+  "inviteRoleBakerHint": "Bakers record what they bake and hand to the counter. They can't sell or see money.",
+  "posBakeryStockWarning": "{product}: only {stock} left on the counter. Selling anyway.",
+  "@posBakeryStockWarning": {
+    "description": "Bakery stock gate is a warning, not a block — a sync delay must never stop a sale.",
+    "placeholders": {
+      "product": { "type": "String" },
+      "stock": { "type": "String" }
+    }
+  },
+
+  "shopSwitcherTitle": "Switch shop",
+  "shopSwitcherSubtitle": "This device shows one shop at a time. Switching reloads its data.",
+  "shopSwitcherOpen": "Switch shop",
+  "shopSwitchedTo": "Now in {shop}",
+  "@shopSwitchedTo": {
+    "placeholders": { "shop": { "type": "String" } }
+  },
+  "shopSwitchPendingTitle": "Unsent records",
+  "shopSwitchPendingBody": "{count, plural, =1{1 record has not reached the server yet. Switching shop will discard it.} other{{count} records have not reached the server yet. Switching shop will discard them.}}",
+  "@shopSwitchPendingBody": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "shopSwitchDiscardAndSwitch": "Discard and switch",
+  "shopAddTitle": "Add a shop",
+  "shopAddSubtitle": "Run a bakery and a shop from one account. Products, staff and stock stay separate.",
+  "shopAddNameLabel": "Shop name",
+  "shopAddTypeRegular": "Regular shop",
+  "shopAddTypeBakery": "Bakery",
+  "shopAddCreate": "Create shop",
+  "shopAddCreated": "{shop} created — switch to it from the shop menu",
+  "@shopAddCreated": {
+    "placeholders": { "shop": { "type": "String" } }
+  },
+
+  "dataTitle": "Data",
+  "dataExportSales": "Export sales (CSV)",
+  "dataExportProducts": "Export products (CSV)",
+  "dataExportHint": "Opens a spreadsheet file you can share or keep.",
+  "dataExporting": "Preparing file…",
+  "dataExportFailed": "Couldn't prepare the file",
+  "dataImportProducts": "Import products (CSV)",
+  "dataImportHint": "Columns: name, category, selling_price, purchase_price, stock, low_stock_threshold, unit, barcode. Only name is required.",
+  "dataImportPick": "Choose a CSV file",
+  "dataImportChecking": "Checking file…",
+  "dataImportPreview": "{created} new, {updated} updated, {skipped} skipped",
+  "@dataImportPreview": {
+    "description": "Dry-run summary shown before the owner confirms an import.",
+    "placeholders": {
+      "created": { "type": "int" },
+      "updated": { "type": "int" },
+      "skipped": { "type": "int" }
+    }
+  },
+  "dataImportErrors": "{count, plural, =1{1 row has a problem} other{{count} rows have problems}}",
+  "@dataImportErrors": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "dataImportRowError": "Row {row}: {message}",
+  "@dataImportRowError": {
+    "placeholders": {
+      "row": { "type": "int" },
+      "message": { "type": "String" }
+    }
+  },
+  "dataImportFixFirst": "Fix these rows and upload again — nothing was changed.",
+  "dataImportApply": "Apply import",
+  "dataImportDone": "{created} added, {updated} updated",
+  "@dataImportDone": {
+    "placeholders": {
+      "created": { "type": "int" },
+      "updated": { "type": "int" }
+    }
+  }
 }

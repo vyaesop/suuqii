@@ -320,9 +320,9 @@ class LotsRepository {
 
   /// Bakery: record a production run. Stock += produced − spoiled; the lot is
   /// valued at recipe cost (Σ ingredient qty × supply cost, converted to each
-  /// supply's stocked unit); spoiled units deduct their recipe supplies —
-  /// they consumed ingredients but will never hit a sale, which is where
-  /// bakery supplies are normally deducted. Enqueues `production.record`.
+  /// supply's stocked unit); ingredient supplies are deducted for the *full*
+  /// produced quantity, because that is when the flour was actually used.
+  /// Enqueues `production.record`.
   Future<void> recordProduction({
     required String productId,
     required Decimal quantityProduced,
@@ -406,11 +406,18 @@ class LotsRepository {
                 userId: Value(userId),
               ),
             );
-        // Ingredients consumed by units that will never be sold.
-        for (final item in recipe) {
-          final perUnit = qtyPerUnitInSupplyUnit[item.supplyId] ?? item.quantity;
-          await db.suppliesDao.applyDelta(item.supplyId, -(perUnit * spoiled));
-        }
+      }
+      // Ingredients are consumed by the whole bake, sold or not. Deducting the
+      // full produced quantity here (not just the spoiled part, and not at sale
+      // time) is what keeps the supply count honest for stock that sits: a tray
+      // baked on Monday and sold across the following fortnight used its flour
+      // on Monday. Mirrors sync_service._production_record.
+      for (final item in recipe) {
+        final perUnit = qtyPerUnitInSupplyUnit[item.supplyId] ?? item.quantity;
+        await db.suppliesDao.applyDelta(
+          item.supplyId,
+          -(perUnit * quantityProduced),
+        );
       }
       await db.productsDao.applyStockDelta(
         productId,

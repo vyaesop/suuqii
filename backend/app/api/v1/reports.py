@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import VIEW_REPORTS, can
 from app.core.config import settings
 from app.core.deps import current_user, db_session
 from app.models import (
@@ -49,7 +50,7 @@ async def dashboard(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(db_session),
 ):
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -187,7 +188,7 @@ async def sales_series(
     db: AsyncSession = Depends(db_session),
 ):
     """Per-day sales / profit / expense totals for the requested range."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -243,7 +244,7 @@ async def top_products(
     db: AsyncSession = Depends(db_session),
 ):
     """Best-selling products ranked by revenue, with margin %."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -299,7 +300,7 @@ async def payment_mix(
     db: AsyncSession = Depends(db_session),
 ):
     """Revenue split by payment method (cash / mobile / credit)."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -341,7 +342,7 @@ async def ar_aging(
     Buckets: 0-30 days, 31-60 days, 61-90 days, 90+ days.
     Age is measured from the sale date (debt created_at).
     """
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     now = datetime.now(UTC)
@@ -427,7 +428,7 @@ async def inventory_valuation(
 
     For bakery shops, also returns supply stock value (quantity × cost_per_unit).
     """
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     shop = await db.get(Shop, user.shop_id)
@@ -535,7 +536,7 @@ async def adjustments(
     Returns each non-sale, non-refund stock movement with the responsible user,
     helping owners spot patterns that may indicate theft or spoilage.
     """
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -601,7 +602,7 @@ async def cashier_performance(
 ):
     """Per-cashier performance summary: sales, revenue, avg transaction,
     refund rate, and shift variance history."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     start = _range_start(range_)
@@ -707,7 +708,7 @@ async def batch_report(
     """Per-batch economics: what each lot cost, what it sold for, what
     spoiled, what's left. This is the answer to "the 10-birr sodas vs the
     13-birr sodas". Owner-only (exposes purchase costs)."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     stmt = select(StockLot).where(StockLot.shop_id == user.shop_id)
@@ -794,7 +795,7 @@ async def expiring_report(
 ):
     """Lots and supplies expiring within N days (or already expired), with
     value at risk. Owner-only; cashiers see expiry badges from local data."""
-    if user.role != "owner":
+    if not can(user.role, VIEW_REPORTS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     tz = ZoneInfo(settings.timezone)

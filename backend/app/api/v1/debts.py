@@ -3,13 +3,14 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._pagination import decode_time_cursor, encode_cursor
-from app.core.deps import current_user, db_session
+from app.core.capabilities import MANAGE_DEBT
+from app.core.deps import current_user, db_session, require_cap
 from app.models import Debt, User
 
 router = APIRouter(prefix="/debts", tags=["debts"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_cap(MANAGE_DEBT))])
 async def list_debts(
     status: str | None = Query(None),
     limit: int = Query(200, ge=1, le=500),

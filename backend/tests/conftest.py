@@ -41,10 +41,17 @@ _schema_ready = False
 
 
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    """Skip only the tests that actually need Postgres.
+
+    Keyed on the `db` fixture rather than skipping everything, so pure unit
+    tests (the capability matrix, phone normalization, semver parsing) still
+    run — and still catch regressions — on a machine with no scratch database.
+    """
     if TEST_DATABASE_URL is None:
         skip = pytest.mark.skip(reason="TEST_DATABASE_URL not set")
         for item in items:
-            item.add_marker(skip)
+            if "db" in getattr(item, "fixturenames", ()):
+                item.add_marker(skip)
 
 
 @pytest.fixture

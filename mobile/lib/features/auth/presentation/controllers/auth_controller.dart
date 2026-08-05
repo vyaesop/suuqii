@@ -174,6 +174,48 @@ class AuthController extends _$AuthController {
     state = const AsyncData(Unauthenticated());
   }
 
+  /// Move this device to another shop the account belongs to.
+  ///
+  /// Unlike the shop-change path in [login], the old shop's queue is drained
+  /// *first* — we still hold that shop's credentials at this point, so its
+  /// pending events can still be pushed. Once the new tokens arrive they would
+  /// be sent under the wrong shop.
+  Future<Authenticated> switchShop(
+    String shopId, {
+    bool force = false,
+  }) async {
+    final current = state.valueOrNull;
+    if (current is! Authenticated) {
+      throw StateError('Not signed in');
+    }
+    if (current.shopId == shopId) return current;
+
+    final pending = await _flushPendingSync();
+    if (pending > 0 && !force) {
+      throw PendingSyncException(pending);
+    }
+
+    state = const AsyncLoading();
+    try {
+      final repo = await ref.read(authRepositoryProvider.future);
+      final fp = await ref.read(deviceFingerprintProvider.future);
+      final auth = await repo.switchShop(
+        shopId: shopId,
+        deviceFingerprint: fp,
+        userName: current.userName,
+      );
+      // Wipe before publishing the new state: the local store holds one shop
+      // at a time, and any screen rebuilding against the new session must not
+      // see the previous shop's products or sales.
+      await ref.read(appDatabaseProvider).clearAllShopData();
+      state = AsyncData(auth);
+      return auth;
+    } catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+      rethrow;
+    }
+  }
+
   /// Kicks the sync worker and waits briefly for the queue to drain.
   /// Returns the number of events still pending afterwards.
   Future<int> _flushPendingSync() async {

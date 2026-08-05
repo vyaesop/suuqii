@@ -6,13 +6,10 @@ import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/utils/money.dart';
-import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:suuqii/features/inventory/domain/entities/recipe_item.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/shifts/data/shifts_repository.dart';
-import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/features/sync/data/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
@@ -109,6 +106,9 @@ class SalesRepository {
       if (l.qty <= Decimal.zero) {
         throw StateError('Invalid quantity for ${l.product.name}');
       }
+      // Bakery stock depends on the baker's handover having synced from
+      // another device, so overselling is a warning in the POS rather than a
+      // hard stop here — a sync delay must never block a sale.
       if (!isBakery && l.product.stock < l.qty) {
         throw StateError('Insufficient stock for ${l.product.name}');
       }
@@ -122,44 +122,13 @@ class SalesRepository {
     final total = cart.total;
     final method = _paymentMethodKey(paymentMethod);
 
-    // For bakery shops, cost_total is derived from ingredient supply costs
-    // (supply.costPerUnit × qty consumed per recipe), not from product.purchasePrice
-    // which is always 0. Pre-load recipes and supplies outside the transaction
-    // so the same data can be reused in the supply deduction loop inside it.
-    Map<String, List<RecipeItem>> cachedRecipes = {};
-    Map<String, Supply?> cachedSupplies = {};
-    final Map<String, Decimal> productUnitCosts = {};
-    Decimal costTotal;
-
-    if (isBakery) {
-      final productIds = cart.lines.map((l) => l.product.id).toList();
-      cachedRecipes = await db.recipesDao.getForProducts(productIds);
-      final supplyIds = cachedRecipes.values
-          .expand((items) => items.map((i) => i.supplyId))
-          .toSet();
-      for (final id in supplyIds) {
-        cachedSupplies[id] = await db.suppliesDao.getById(id);
-      }
-      Decimal ingredientCostTotal = Decimal.zero;
-      for (final line in cart.lines) {
-        Decimal unitCost = Decimal.zero;
-        for (final item in cachedRecipes[line.product.id] ?? <RecipeItem>[]) {
-          final supply = cachedSupplies[item.supplyId];
-          final supplyUnit = supply?.unit;
-          final costPerUnit = supply?.costPerUnit ?? Decimal.zero;
-          final effectiveUnit = item.recipeUnit ?? supplyUnit ?? 'piece';
-          final qtyPerUnit = supplyUnit != null
-              ? convertUnit(item.quantity, effectiveUnit, supplyUnit)
-              : item.quantity;
-          unitCost += costPerUnit * qtyPerUnit;
-        }
-        productUnitCosts[line.product.id] = unitCost;
-        ingredientCostTotal += unitCost * line.qty;
-      }
-      costTotal = ingredientCostTotal;
-    } else {
-      costTotal = cart.costTotal;
-    }
+    // A bakery sale is an ordinary sale. Production values each lot at recipe
+    // cost and consumes the ingredients when the dough is mixed, so COGS here
+    // comes from the lots this sale draws down — same as a bought-in product.
+    // Until migration 0011 this branched: bakery COGS was recomputed from
+    // recipes per sale and ingredients were deducted at sale time, which
+    // overstated ingredients on hand for as long as stock went unsold.
+    var costTotal = cart.costTotal;
 
     final itemsPayload = <Map<String, dynamic>>[];
 
@@ -183,26 +152,20 @@ class SalesRepository {
       var lotCostTotal = Decimal.zero;
       for (final line in cart.lines) {
         final itemId = const Uuid().v4();
-        final int lineUnitCostSantim;
-        if (isBakery) {
-          lineUnitCostSantim = santimFromDecimal(
-            productUnitCosts[line.product.id] ?? Decimal.zero,
-          );
-        } else {
-          // FEFO lot consumption: COGS is the weighted cost of the batches
-          // this line actually drew from (earliest expiry first, then oldest
-          // receipt). Unlotted stock falls back to product.purchasePrice;
-          // the server recomputes authoritatively at sync-apply time.
-          lineUnitCostSantim = await db.lotsDao.consumeFefo(
-            productId: line.product.id,
-            quantity: line.qty,
-            movement: 'sale',
-            saleItemId: itemId,
-            fallbackCostSantim:
-                santimFromDecimal(line.product.purchasePrice),
-            now: now,
-          );
-        }
+        // FEFO lot consumption: COGS is the weighted cost of the batches this
+        // line actually drew from (earliest expiry first, then oldest receipt).
+        // Bakery lots are valued at recipe cost by production.record, so this
+        // is correct for both shop types. Unlotted stock falls back to
+        // product.purchasePrice; the server recomputes authoritatively at
+        // sync-apply time.
+        final lineUnitCostSantim = await db.lotsDao.consumeFefo(
+          productId: line.product.id,
+          quantity: line.qty,
+          movement: 'sale',
+          saleItemId: itemId,
+          fallbackCostSantim: santimFromDecimal(line.product.purchasePrice),
+          now: now,
+        );
         final lineUnitCost = decimalFromSantim(lineUnitCostSantim);
         lotCostTotal += lineUnitCost * line.qty;
         await db.into(db.saleItemsTable).insert(
@@ -217,34 +180,30 @@ class SalesRepository {
               ),
             );
 
-        // stock delta + ledger. Skipped for bakery — ingredient supplies are
-        // the inventory unit; product stock is not tracked per-sale.
-        if (!isBakery) {
-          await db.customUpdate(
-            'UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?',
-            variables: [
-              Variable.withReal(line.qty.toDouble()),
-              Variable.withInt(sqliteDateTimeParam(now)),
-              Variable.withString(line.product.id),
-            ],
-            updates: {db.productsTable},
-            updateKind: UpdateKind.update,
-          );
-        }
-        if (!isBakery) {
-          await db.into(db.inventoryLogsTable).insert(
-                InventoryLogsTableCompanion.insert(
-                  id: const Uuid().v4(),
-                  shopId: currentShopId,
-                  productId: line.product.id,
-                  movement: 'sale',
-                  quantityDelta: -line.qty.toDouble(),
-                  referenceType: const Value('sale'),
-                  referenceId: Value(saleId),
-                  userId: Value(currentUserId),
-                ),
-              );
-        }
+        // Stock delta + ledger, for both shop types. Bakery products carry
+        // real stock since 0011 (production adds it, the sale takes it away).
+        await db.customUpdate(
+          'UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?',
+          variables: [
+            Variable.withReal(line.qty.toDouble()),
+            Variable.withInt(sqliteDateTimeParam(now)),
+            Variable.withString(line.product.id),
+          ],
+          updates: {db.productsTable},
+          updateKind: UpdateKind.update,
+        );
+        await db.into(db.inventoryLogsTable).insert(
+              InventoryLogsTableCompanion.insert(
+                id: const Uuid().v4(),
+                shopId: currentShopId,
+                productId: line.product.id,
+                movement: 'sale',
+                quantityDelta: -line.qty.toDouble(),
+                referenceType: const Value('sale'),
+                referenceId: Value(saleId),
+                userId: Value(currentUserId),
+              ),
+            );
 
         itemsPayload.add({
           'id': itemId,
@@ -256,39 +215,15 @@ class SalesRepository {
         });
       }
 
-      // Non-bakery COGS comes from the lots actually consumed above, which
-      // can differ from the cart's cached purchase prices. Reconcile the sale
-      // row (and the payload total below) with the lot-based figure.
-      if (!isBakery && lotCostTotal != costTotal) {
+      // COGS comes from the lots actually consumed above, which can differ
+      // from the cart's cached prices. Reconcile the sale row (and the payload
+      // total below) with the lot-based figure.
+      if (lotCostTotal != costTotal) {
         costTotal = lotCostTotal;
         await (db.update(db.salesTable)..where((t) => t.id.equals(saleId)))
             .write(
           SalesTableCompanion(costTotal: Value(santimFromDecimal(costTotal))),
         );
-      }
-
-      // Bakery: deduct ingredient supplies consumed by this sale.
-      // Reuses cachedRecipes and cachedSupplies pre-loaded above.
-      final supplyDeductionsPayload = <Map<String, dynamic>>[];
-      if (isBakery) {
-        for (final line in cart.lines) {
-          for (final item in cachedRecipes[line.product.id] ?? <RecipeItem>[]) {
-            final supply = cachedSupplies[item.supplyId];
-            final supplyUnit = supply?.unit;
-            final effectiveUnit = item.recipeUnit ?? supplyUnit ?? 'piece';
-            // Convert recipe quantity to supply's storage unit before deducting.
-            // e.g. recipe says 100g flour, supply tracked in kg → deduct 0.1 kg.
-            final qtyInSupplyUnit = supplyUnit != null
-                ? convertUnit(item.quantity * line.qty, effectiveUnit, supplyUnit)
-                : item.quantity * line.qty;
-            final delta = -qtyInSupplyUnit;
-            await db.suppliesDao.applyDelta(item.supplyId, delta);
-            supplyDeductionsPayload.add({
-              'supply_id': item.supplyId,
-              'quantity_delta': delta.toString(),
-            });
-          }
-        }
       }
 
       String? debtId;
@@ -345,8 +280,9 @@ class SalesRepository {
                 'payment_method': method,
                 'occurred_at': now.toIso8601String(),
                 'items': itemsPayload,
-                if (supplyDeductionsPayload.isNotEmpty)
-                  'supply_deductions': supplyDeductionsPayload,
+                // No `supply_deductions`: ingredients are deducted by
+                // production.record for the whole bake (migration 0011). The
+                // server ignores the field if an older client still sends it.
                 if (debtId != null) 'debt_id': debtId,
                 if (paymentMethod == PaymentMethod.credit)
                   'customer': {
@@ -462,37 +398,35 @@ class SalesRepository {
     await db.transaction(() async {
       await (db.update(db.salesTable)..where((t) => t.id.equals(saleId)))
           .write(const SalesTableCompanion(status: Value('refunded')));
-      // Bakery tracks ingredient supplies, not product stock — skip the
-      // stock restore and inventory log (supply restoration happens server-side).
-      if (!isBakery) {
-        // Put quantities back on the exact lots this sale consumed
-        // (movement 'refund_reversal', negative qty) so batch reports stay
-        // truthful after refunds.
-        await db.lotsDao.reverseSaleConsumptions(saleId, now: now);
-        for (final item in items) {
-          await db.customUpdate(
-            'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?',
-            variables: [
-              Variable.withReal(item.quantity),
-              Variable.withInt(sqliteDateTimeParam(now)),
-              Variable.withString(item.productId),
-            ],
-            updates: {db.productsTable},
-            updateKind: UpdateKind.update,
-          );
-          await db.into(db.inventoryLogsTable).insert(
-                InventoryLogsTableCompanion.insert(
-                  id: const Uuid().v4(),
-                  shopId: currentShopId,
-                  productId: item.productId,
-                  movement: 'refund',
-                  quantityDelta: item.quantity,
-                  referenceType: const Value('sale'),
-                  referenceId: Value(saleId),
-                  userId: Value(currentUserId),
-                ),
-              );
-        }
+      // Both shop types: put quantities back on the exact lots this sale
+      // consumed (movement 'refund_reversal', negative qty) so batch reports
+      // stay truthful. Ingredients are deliberately not restored — the flour
+      // was used when the dough was mixed, and a returned loaf does not undo
+      // that.
+      await db.lotsDao.reverseSaleConsumptions(saleId, now: now);
+      for (final item in items) {
+        await db.customUpdate(
+          'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?',
+          variables: [
+            Variable.withReal(item.quantity),
+            Variable.withInt(sqliteDateTimeParam(now)),
+            Variable.withString(item.productId),
+          ],
+          updates: {db.productsTable},
+          updateKind: UpdateKind.update,
+        );
+        await db.into(db.inventoryLogsTable).insert(
+              InventoryLogsTableCompanion.insert(
+                id: const Uuid().v4(),
+                shopId: currentShopId,
+                productId: item.productId,
+                movement: 'refund',
+                quantityDelta: item.quantity,
+                referenceType: const Value('sale'),
+                referenceId: Value(saleId),
+                userId: Value(currentUserId),
+              ),
+            );
       }
       await db.into(db.syncEventsTable).insert(
             SyncEventsTableCompanion.insert(

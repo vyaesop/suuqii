@@ -2,6 +2,7 @@ import 'package:decimal/decimal.dart';
 import 'package:flutter/widgets.dart';
 import 'package:intl/intl.dart';
 
+import 'package:suuqii/core/utils/ethiopian_date.dart';
 import 'package:suuqii/core/utils/money.dart';
 
 /// intl ships no CLDR data for Afaan Oromo (`om`), so NumberFormat/DateFormat
@@ -27,12 +28,29 @@ extension FormatX on BuildContext {
   /// [money] for int64 santim (persistence representation).
   String moneyFromSantim(int santim) => money(decimalFromSantim(santim));
 
-  /// e.g. "Jan 5, 2026".
-  String dateShort(DateTime d) => DateFormat.yMMMd(intlLocale).format(d);
+  /// The locale the *user* picked, before the intl downgrade.
+  ///
+  /// [intlLocale] maps `om` → `en` because intl ships no CLDR data for Afaan
+  /// Oromo; that must not also switch an Oromo user back to Gregorian dates.
+  String get rawLocale => Localizations.localeOf(this).toString();
 
-  /// e.g. "Jan 5, 2026 2:30 PM".
-  String dateTimeShort(DateTime d) =>
-      DateFormat.yMMMd(intlLocale).add_jm().format(d);
+  /// Whether dates should be shown in the Ethiopian calendar.
+  bool get usesEcDates => usesEthiopianCalendar(rawLocale);
+
+  /// e.g. "Jan 5, 2026", or "ሐምሌ 1, 2018" for am/om.
+  ///
+  /// Ethiopian-calendar users keep their books in EC — showing the Gregorian
+  /// day means they cannot recognise their own records.
+  String dateShort(DateTime d) {
+    if (!usesEcDates) return DateFormat.yMMMd(intlLocale).format(d);
+    return toEthiopian(d).format(latin: rawLocale.startsWith('om'));
+  }
+
+  /// e.g. "Jan 5, 2026 2:30 PM". Time of day is the same in both calendars.
+  String dateTimeShort(DateTime d) {
+    if (!usesEcDates) return DateFormat.yMMMd(intlLocale).add_jm().format(d);
+    return '${dateShort(d)} ${timeShort(d)}';
+  }
 
   /// e.g. "2:30 PM".
   String timeShort(DateTime d) => DateFormat.jm(intlLocale).format(d);

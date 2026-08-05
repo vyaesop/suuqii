@@ -9,10 +9,12 @@ from secrets import token_hex
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.capabilities import BAKER, INVITABLE_ROLES
 from app.core.deps import current_user, db_session
 from app.core.errors import DomainError
 from app.core.rate_limit import limiter
@@ -25,7 +27,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import AsyncSessionLocal
-from app.models import AuditLog, DeviceSession, Invite, Shop, User
+from app.models import AuditLog, DeviceSession, Invite, Shop, ShopMember, User
 from app.schemas.auth import (
     AcceptInviteRequest,
     InviteRequest,
@@ -131,9 +133,20 @@ def _fp_hash(fp: str) -> str:
 async def _issue_token_bundle(
     db: AsyncSession, user: User, device_fingerprint: str, device_label: str | None,
     shop: Shop | None = None,
+    active_shop_id: UUID | None = None,
+    active_role: str | None = None,
 ) -> TokenBundle:
+    """Mint an access/refresh pair.
+
+    [active_shop_id]/[active_role] override the user's home shop for accounts
+    that belong to more than one (see /auth/switch-shop). The token — not the
+    user row — is what scopes a request.
+    """
+    scope_shop_id = active_shop_id or user.shop_id
+    scope_role = active_role or user.role
     access = issue_access_token(
-        user_id=user.id, shop_id=user.shop_id, role=user.role, device_id=device_fingerprint
+        user_id=user.id, shop_id=scope_shop_id, role=scope_role,
+        device_id=device_fingerprint,
     )
     refresh, jti = issue_refresh_token(user_id=user.id, device_id=device_fingerprint)
 
@@ -149,6 +162,7 @@ async def _issue_token_bundle(
         existing.refresh_jti = jti
         existing.revoked_at = None
         existing.last_seen_at = datetime.now(UTC)
+        existing.active_shop_id = scope_shop_id
         if device_label:
             existing.device_label = device_label
     else:
@@ -158,6 +172,7 @@ async def _issue_token_bundle(
             device_fingerprint=fp_h,
             refresh_token_hash=sha256(refresh.encode()).hexdigest(),
             refresh_jti=jti,
+            active_shop_id=scope_shop_id,
             last_seen_at=datetime.now(UTC),
             created_at=datetime.now(UTC),
         ))
@@ -165,11 +180,11 @@ async def _issue_token_bundle(
     # Resolve shop_type: use passed shop object, or load from DB if needed.
     resolved_shop = shop
     if resolved_shop is None:
-        resolved_shop = await db.get(Shop, user.shop_id)
+        resolved_shop = await db.get(Shop, scope_shop_id)
 
     return TokenBundle(
         access=access, refresh=refresh,
-        user_id=user.id, shop_id=user.shop_id, role=user.role,
+        user_id=user.id, shop_id=scope_shop_id, role=scope_role,
         shop_type=resolved_shop.shop_type if resolved_shop else "regular",
         shop_name=resolved_shop.name if resolved_shop else "",
         debt_threshold=str(resolved_shop.debt_threshold)
@@ -206,6 +221,14 @@ async def register_shop(request: Request, req: RegisterShopRequest) -> TokenBund
         except IntegrityError as e:
             # Race with a concurrent registration using the same phone.
             raise DomainError("phone already in use", code="phone_taken", status=409) from e
+
+        # Home shop membership. `current_user` only consults shop_members when
+        # acting away from home, but the switcher lists memberships, so every
+        # account needs its own row from the start.
+        db.add(ShopMember(
+            user_id=owner.id, shop_id=shop.id, role="owner",
+            created_at=datetime.now(UTC),
+        ))
 
         bundle = await _issue_token_bundle(
             db,
@@ -285,9 +308,70 @@ async def refresh(request: Request, req: RefreshRequest) -> TokenBundle:
         if not sess or sess.revoked_at is not None or sess.refresh_jti != payload["jti"]:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "session revoked or rotated")
 
-        bundle = await _issue_token_bundle(db, user, req.device_fingerprint, sess.device_label)
+        # Keep the device in whichever shop it was switched to. Membership is
+        # re-checked here, so revoking someone's access to a shop takes effect
+        # at the next refresh rather than lingering for the token's lifetime.
+        active_shop_id: UUID | None = None
+        active_role: str | None = None
+        if sess.active_shop_id is not None and sess.active_shop_id != user.shop_id:
+            member = (await db.execute(
+                select(ShopMember).where(
+                    ShopMember.user_id == user.id,
+                    ShopMember.shop_id == sess.active_shop_id,
+                )
+            )).scalar_one_or_none()
+            if member is not None:
+                active_shop_id = member.shop_id
+                active_role = member.role
+
+        bundle = await _issue_token_bundle(
+            db, user, req.device_fingerprint, sess.device_label,
+            active_shop_id=active_shop_id, active_role=active_role,
+        )
         await db.commit()
         return bundle
+
+
+class SwitchShopRequest(BaseModel):
+    shop_id: UUID
+    device_fingerprint: str
+
+
+@router.post("/switch-shop", response_model=TokenBundle)
+@limiter.limit("20/minute")
+async def switch_shop(
+    request: Request,
+    req: SwitchShopRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+) -> TokenBundle:
+    """Re-issue this device's tokens scoped to another shop the caller belongs to.
+
+    The client must wipe its local database afterwards: the on-device store
+    holds one shop's data at a time, and mixing two shops' products and sales
+    would corrupt both.
+    """
+    member = (await db.execute(
+        select(ShopMember).where(
+            ShopMember.user_id == user.id,
+            ShopMember.shop_id == req.shop_id,
+        )
+    )).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "not a member of that shop")
+
+    shop = await db.get(Shop, req.shop_id)
+    if shop is None or shop.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "shop not found")
+
+    bundle = await _issue_token_bundle(
+        db, user, req.device_fingerprint, None,
+        shop=shop,
+        active_shop_id=shop.id,
+        active_role=member.role,
+    )
+    await db.commit()
+    return bundle
 
 
 @router.post("/invite", response_model=InviteResponse, status_code=201)
@@ -300,8 +384,15 @@ async def invite(
 ) -> InviteResponse:
     if user.role != "owner":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
-    if req.role not in {"cashier"}:
+    if req.role not in INVITABLE_ROLES:
         raise DomainError("unsupported role", code="bad_role")
+    # Bakers only make sense where there is production to hand over.
+    if req.role == BAKER:
+        shop = await db.get(Shop, user.shop_id)
+        if shop is None or shop.shop_type != "bakery":
+            raise DomainError(
+                "baker accounts require a bakery shop", code="bad_shop_type"
+            )
 
     # Phone numbers are globally unique (idx_users_phone_global); surface a
     # clean 409 instead of an IntegrityError 500.
@@ -355,6 +446,17 @@ async def accept_invite(request: Request, req: AcceptInviteRequest) -> TokenBund
         user.password_hash = hash_password(req.password)
         user.is_active = True
         invite_row.used_at = datetime.now(UTC)
+        # The invite created a placeholder user row but no membership; add it
+        # now that the account is real.
+        if (await db.execute(
+            select(ShopMember).where(
+                ShopMember.user_id == user.id, ShopMember.shop_id == user.shop_id
+            )
+        )).scalar_one_or_none() is None:
+            db.add(ShopMember(
+                user_id=user.id, shop_id=user.shop_id, role=user.role,
+                created_at=datetime.now(UTC),
+            ))
 
         bundle = await _issue_token_bundle(db, user, req.device_fingerprint, req.device_label)
         await db.commit()

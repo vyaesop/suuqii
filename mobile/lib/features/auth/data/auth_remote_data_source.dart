@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import 'package:suuqii/features/auth/domain/entities/shop_option.dart';
+
 class AuthRemoteDataSource {
   AuthRemoteDataSource(this._dio);
   final Dio _dio;
@@ -154,6 +156,52 @@ class AuthRemoteDataSource {
       ),
     );
     if (res.statusCode != 200) throw _toError(res);
+  }
+
+  /// One shop this account may act in.
+  ///
+  /// A single-shop account gets exactly one of these, which is why the
+  /// switcher UI hides itself below two.
+  Future<List<ShopOption>> myShops() async {
+    final res = await _request(
+      () => _dio.get<Map<String, dynamic>>('/v1/shops/mine'),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+    final items = (res.data?['shops'] as List? ?? []).cast<Map<String, dynamic>>();
+    return items.map(ShopOption.fromJson).toList();
+  }
+
+  /// Re-issue this device's tokens against another shop. The caller must wipe
+  /// the local database afterwards — it holds one shop's data at a time.
+  Future<Map<String, dynamic>> switchShop({
+    required String shopId,
+    required String deviceFingerprint,
+  }) async {
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/auth/switch-shop',
+        data: {'shop_id': shopId, 'device_fingerprint': deviceFingerprint},
+      ),
+    );
+    if (res.statusCode != 200) throw _toError(res);
+    return res.data!;
+  }
+
+  /// Open an additional shop owned by this account (e.g. a bakery alongside a
+  /// regular shop). Does not switch to it.
+  Future<ShopOption> createShop({
+    required String name,
+    required String shopType,
+    String locale = 'en',
+  }) async {
+    final res = await _request(
+      () => _dio.post<Map<String, dynamic>>(
+        '/v1/shops',
+        data: {'name': name, 'shop_type': shopType, 'locale': locale},
+      ),
+    );
+    if (res.statusCode != 201 && res.statusCode != 200) throw _toError(res);
+    return ShopOption.fromJson(res.data!);
   }
 
   Future<({String code, String expiresAt})> invite({

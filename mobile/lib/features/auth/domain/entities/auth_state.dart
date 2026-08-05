@@ -78,4 +78,26 @@ final class Authenticated extends AuthState {
   /// Owners see the full app; cashiers get the restricted surface described
   /// in docs/17-roles.md (owner-only routes hidden, sensitive ops PIN-gated).
   bool get isOwner => role == 'owner';
+
+  /// Bakers produce and hand over. They never see money — mirrors
+  /// `ROLE_CAPS[BAKER]` in backend/app/core/capabilities.py.
+  bool get isBaker => role == 'baker';
+
+  /// May take payment. False for bakers, which is why they get no POS tab.
+  bool get canSell => isOwner || role == 'cashier';
+
+  /// May see revenue, cost or margin anywhere in the UI.
+  bool get canSeeMoney => canSell;
+
+  /// May declare a handover to the counter (bakers, and owners covering).
+  bool get canCreateHandover => isBaker || isOwner;
+
+  /// May count in a handover. Deliberately disjoint from
+  /// [canCreateHandover] for bakers: one person doing both collapses the two
+  /// independent counts and the control is worth nothing. The server enforces
+  /// this too — the UI is not a boundary.
+  bool get canAcceptHandover => canSell;
+
+  /// Landing route after login, by role.
+  String get homeRoute => isBaker ? '/handover' : '/pos';
 }

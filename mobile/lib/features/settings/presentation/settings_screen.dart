@@ -7,6 +7,7 @@ import 'package:suuqii/core/l10n/locale_controller.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/settings/presentation/controllers/theme_controller.dart';
+import 'package:suuqii/features/settings/presentation/shop_switcher_sheet.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -68,6 +69,22 @@ class SettingsScreen extends ConsumerWidget {
               title: Text(l.settingsOpenShifts),
               subtitle: Text(l.settingsOpenShiftsSubtitle),
               onTap: () => context.push('/open-shifts'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.swap_horiz_rounded),
+              title: Text(l.shopSwitcherOpen),
+              subtitle: Text(l.shopSwitcherSubtitle),
+              onTap: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => const ShopSwitcherSheet(),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.download_outlined),
+              title: Text(l.dataTitle),
+              subtitle: Text(l.dataExportHint),
+              onTap: () => context.push('/data'),
             ),
             const Divider(),
           ],
