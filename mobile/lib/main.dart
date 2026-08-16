@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
@@ -17,6 +19,14 @@ import 'package:suuqii/features/sync/data/sync_worker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // The bundled Noto Sans Ethiopic (Amharic rendering) is OFL-licensed, which
+  // requires shipping its license text. google_fonts registers only its own.
+  LicenseRegistry.addLicense(() async* {
+    final ofl =
+        await rootBundle.loadString('assets/fonts/NotoSansEthiopic-OFL.txt');
+    yield LicenseEntryWithLineBreaks(['NotoSansEthiopic'], ofl);
+  });
 
   // Sentry must come up before the DB is opened and the container is built,
   // so crashes during startup (failed migration, corrupt DB file, provider

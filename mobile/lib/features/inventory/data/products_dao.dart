@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 
 import 'package:suuqii/core/storage/app_database.dart';
 import 'package:suuqii/core/storage/tables/products_table.dart';
+import 'package:suuqii/core/utils/ethiopic.dart';
 import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
 
@@ -22,13 +23,21 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
       ..where((t) => t.shopId.equals(shopId))
       ..where((t) => t.deletedAt.isNull())
       ..orderBy([(t) => OrderingTerm.asc(t.name)]);
-    if (query != null && query.isNotEmpty) {
-      q.where((t) => t.name.like('%$query%'));
-    }
     if (category != null && category.isNotEmpty) {
       q.where((t) => t.category.equals(category));
     }
-    return q.watch().map((rows) => rows.map(_toDomain).toList());
+    // Name matching happens in Dart, not SQL LIKE: Amharic homophone letters
+    // (ሰ/ሠ, ሀ/ሐ/ኀ, …) must match across spellings, which needs foldForSearch
+    // on both sides. Result sets are shop-sized, so this stays cheap.
+    var stream = q.watch();
+    if (query != null && query.trim().isNotEmpty) {
+      final needle = foldForSearch(query.trim());
+      stream = stream.map(
+        (rows) =>
+            rows.where((r) => foldForSearch(r.name).contains(needle)).toList(),
+      );
+    }
+    return stream.map((rows) => rows.map(_toDomain).toList());
   }
 
   Future<Product?> getById(String id) async {

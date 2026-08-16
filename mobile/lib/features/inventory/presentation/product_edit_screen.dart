@@ -10,6 +10,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/services/cloudinary_service.dart';
+import 'package:suuqii/core/utils/ethiopic.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
@@ -998,10 +999,11 @@ class _CategoryField extends StatelessWidget {
     return Autocomplete<String>(
       initialValue: TextEditingValue(text: controller.text),
       optionsBuilder: (value) {
-        final q = value.text.trim().toLowerCase();
+        // foldForSearch so Amharic homophone spellings match (ጸጉር/ፀጉር).
+        final q = foldForSearch(value.text.trim());
         // Show all categories when the field is empty; otherwise filter.
         if (q.isEmpty) return categories;
-        return categories.where((c) => c.toLowerCase().contains(q));
+        return categories.where((c) => foldForSearch(c).contains(q));
       },
       fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmit) {
         return TextFormField(

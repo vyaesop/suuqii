@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/utils/ethiopic.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/debt/domain/entities/debt.dart';
@@ -152,14 +153,15 @@ class _DebtList extends ConsumerWidget {
           message: context.errorMessage(e),
         ),
         data: (all) {
-          final q = query.trim().toLowerCase();
+          // foldForSearch so Amharic homophone spellings match (ሰላም/ሠላም).
+          final q = foldForSearch(query.trim());
           final items = q.isEmpty
               ? all
               : all
                   .where(
                     (d) =>
-                        d.customerName.toLowerCase().contains(q) ||
-                        (d.customerPhone ?? '').toLowerCase().contains(q),
+                        foldForSearch(d.customerName).contains(q) ||
+                        foldForSearch(d.customerPhone ?? '').contains(q),
                   )
                   .toList();
           if (items.isEmpty && q.isNotEmpty) {

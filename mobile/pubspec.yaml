@@ -55,3 +55,21 @@ flutter:
   generate: true
   assets:
     - assets/images/
+    - assets/fonts/NotoSansEthiopic-OFL.txt
+  # Bundled (not runtime-fetched) so Amharic renders identically on every
+  # device, offline included — cheap/old Androids ship incomplete Ethiopic
+  # system fonts, and Inter has no Ethiopic glyphs at all. Wired up as
+  # fontFamilyFallback in app_theme.dart.
+  fonts:
+    - family: NotoSansEthiopic
+      fonts:
+        - asset: assets/fonts/NotoSansEthiopic-Light.ttf
+          weight: 300
+        - asset: assets/fonts/NotoSansEthiopic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansEthiopic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSansEthiopic-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/NotoSansEthiopic-Bold.ttf
+          weight: 700

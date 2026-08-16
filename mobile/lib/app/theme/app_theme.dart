@@ -11,6 +11,27 @@ import 'package:suuqii/app/theme/tokens.dart';
 class AppTheme {
   AppTheme._();
 
+  /// Inter has no Ethiopic glyphs; without an explicit fallback, Amharic text
+  /// renders in whatever the device ships, at whatever weights it has. The
+  /// bundled Noto Sans Ethiopic (pubspec `fonts:`) keeps ፊደል rendering — and
+  /// its w300–w700 weights — identical on every device.
+  static const List<String> _ethiopicFallback = ['NotoSansEthiopic'];
+
+  static TextStyle _inter({
+    double? fontSize,
+    FontWeight? fontWeight,
+    double? letterSpacing,
+    double? height,
+    Color? color,
+  }) =>
+      GoogleFonts.inter(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        letterSpacing: letterSpacing,
+        height: height,
+        color: color,
+      ).copyWith(fontFamilyFallback: _ethiopicFallback);
+
   static ThemeData light() => _build(Brightness.light);
   static ThemeData dark() => _build(Brightness.dark);
 
@@ -58,83 +79,85 @@ class AppTheme {
         ? Typography.whiteMountainView
         : Typography.blackMountainView;
 
-    final textTheme = GoogleFonts.interTextTheme(baseText).copyWith(
-      displayLarge: GoogleFonts.inter(
+    final textTheme = GoogleFonts.interTextTheme(baseText)
+        .apply(fontFamilyFallback: _ethiopicFallback)
+        .copyWith(
+      displayLarge: _inter(
         fontSize: 44,
         fontWeight: FontWeight.w300,
         letterSpacing: -1,
         color: scheme.onSurface,
       ),
-      displayMedium: GoogleFonts.inter(
+      displayMedium: _inter(
         fontSize: 36,
         fontWeight: FontWeight.w300,
         letterSpacing: -0.5,
         color: scheme.onSurface,
       ),
-      displaySmall: GoogleFonts.inter(
+      displaySmall: _inter(
         fontSize: 28,
         fontWeight: FontWeight.w500,
         letterSpacing: -0.3,
         color: scheme.onSurface,
       ),
-      headlineLarge: GoogleFonts.inter(
+      headlineLarge: _inter(
         fontSize: 26,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
         color: scheme.onSurface,
       ),
-      headlineMedium: GoogleFonts.inter(
+      headlineMedium: _inter(
         fontSize: 22,
         fontWeight: FontWeight.w600,
         color: scheme.onSurface,
       ),
-      headlineSmall: GoogleFonts.inter(
+      headlineSmall: _inter(
         fontSize: 18,
         fontWeight: FontWeight.w600,
         color: scheme.onSurface,
       ),
-      titleLarge: GoogleFonts.inter(
+      titleLarge: _inter(
         fontSize: 18,
         fontWeight: FontWeight.w600,
         color: scheme.onSurface,
       ),
-      titleMedium: GoogleFonts.inter(
+      titleMedium: _inter(
         fontSize: 15,
         fontWeight: FontWeight.w600,
         color: scheme.onSurface,
       ),
-      titleSmall: GoogleFonts.inter(
+      titleSmall: _inter(
         fontSize: 13,
         fontWeight: FontWeight.w600,
         color: scheme.onSurface,
       ),
-      bodyLarge: GoogleFonts.inter(
+      bodyLarge: _inter(
         fontSize: 16,
         height: 1.4,
         color: scheme.onSurface,
       ),
-      bodyMedium: GoogleFonts.inter(
+      bodyMedium: _inter(
         fontSize: 14,
         height: 1.4,
         color: scheme.onSurfaceVariant,
       ),
-      bodySmall: GoogleFonts.inter(
+      bodySmall: _inter(
         fontSize: 12,
         height: 1.3,
         color: scheme.onSurfaceVariant,
       ),
-      labelLarge: GoogleFonts.inter(
+      labelLarge: _inter(
         fontSize: 14,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.1,
       ),
-      labelMedium: GoogleFonts.inter(
+      labelMedium: _inter(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.4,
         color: scheme.onSurfaceVariant,
       ),
-      labelSmall: GoogleFonts.inter(
+      labelSmall: _inter(
         fontSize: 11,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.8,
@@ -165,7 +188,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         foregroundColor: scheme.onSurface,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.inter(
+        titleTextStyle: _inter(
           fontSize: 17,
           fontWeight: FontWeight.w600,
           color: scheme.onSurface,
@@ -198,7 +221,7 @@ class AppTheme {
             horizontal: SuuqSpacing.lg,
           ),
           shape: SuuqShape.button,
-          textStyle: GoogleFonts.inter(
+          textStyle: _inter(
             fontSize: 15,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.1,
@@ -212,7 +235,7 @@ class AppTheme {
           foregroundColor: scheme.onPrimary,
           elevation: 0,
           shape: SuuqShape.button,
-          textStyle: GoogleFonts.inter(
+          textStyle: _inter(
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -223,7 +246,7 @@ class AppTheme {
           minimumSize: const Size(0, 54),
           shape: SuuqShape.button,
           side: BorderSide(color: scheme.outline),
-          textStyle: GoogleFonts.inter(
+          textStyle: _inter(
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -233,7 +256,7 @@ class AppTheme {
         style: TextButton.styleFrom(
           minimumSize: const Size(0, 48),
           padding: const EdgeInsets.symmetric(horizontal: SuuqSpacing.sm),
-          textStyle: GoogleFonts.inter(
+          textStyle: _inter(
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -246,7 +269,7 @@ class AppTheme {
         focusElevation: 0,
         hoverElevation: 0,
         highlightElevation: 0,
-        extendedTextStyle: GoogleFonts.inter(
+        extendedTextStyle: _inter(
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
@@ -261,15 +284,15 @@ class AppTheme {
           horizontal: SuuqSpacing.md,
           vertical: SuuqSpacing.md,
         ),
-        labelStyle: GoogleFonts.inter(
+        labelStyle: _inter(
           fontSize: 14,
           color: scheme.onSurfaceVariant,
         ),
-        hintStyle: GoogleFonts.inter(
+        hintStyle: _inter(
           fontSize: 14,
           color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
         ),
-        prefixStyle: GoogleFonts.inter(
+        prefixStyle: _inter(
           fontSize: 14,
           color: scheme.onSurfaceVariant,
         ),
@@ -293,7 +316,7 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: scheme.surfaceContainer,
         side: BorderSide(color: scheme.outlineVariant),
-        labelStyle: GoogleFonts.inter(
+        labelStyle: _inter(
           fontSize: 13,
           fontWeight: FontWeight.w500,
           color: scheme.onSurface,
@@ -313,7 +336,7 @@ class AppTheme {
           selectedBackgroundColor: scheme.primary,
           selectedForegroundColor: scheme.onPrimary,
           side: BorderSide(color: scheme.outlineVariant),
-          textStyle: GoogleFonts.inter(
+          textStyle: _inter(
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -328,7 +351,7 @@ class AppTheme {
         indicatorColor: scheme.primaryContainer,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
-          return GoogleFonts.inter(
+          return _inter(
             fontSize: 11,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
@@ -371,19 +394,19 @@ class AppTheme {
           vertical: SuuqSpacing.xxs,
         ),
         minVerticalPadding: SuuqSpacing.sm,
-        titleTextStyle: GoogleFonts.inter(
+        titleTextStyle: _inter(
           fontSize: 15,
           fontWeight: FontWeight.w500,
           color: scheme.onSurface,
         ),
-        subtitleTextStyle: GoogleFonts.inter(
+        subtitleTextStyle: _inter(
           fontSize: 13,
           color: scheme.onSurfaceVariant,
         ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: scheme.inverseSurface,
-        contentTextStyle: GoogleFonts.inter(
+        contentTextStyle: _inter(
           fontSize: 14,
           fontWeight: FontWeight.w500,
           color: scheme.onInverseSurface,
@@ -402,11 +425,11 @@ class AppTheme {
           borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         indicatorSize: TabBarIndicatorSize.label,
-        labelStyle: GoogleFonts.inter(
+        labelStyle: _inter(
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
-        unselectedLabelStyle: GoogleFonts.inter(
+        unselectedLabelStyle: _inter(
           fontSize: 14,
           fontWeight: FontWeight.w500,
         ),

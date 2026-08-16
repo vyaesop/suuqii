@@ -54,6 +54,81 @@ void main() {
         isEmpty,
         reason: 'app_$locale.arb has empty values for: ${empty.join(', ')}',
       );
+
+      // Every placeholder the template declares must survive translation —
+      // a dropped {amount} or {name} silently produces broken sentences at
+      // runtime. Checking for '{placeholder' (no closing brace) also accepts
+      // ICU plural/select syntax like '{count, plural, …}'.
+      final placeholderMisses = <String>[];
+      for (final key in enKeys) {
+        final meta = en['@$key'];
+        if (meta is! Map<String, dynamic>) continue;
+        final placeholders = meta['placeholders'];
+        if (placeholders is! Map<String, dynamic>) continue;
+        final value = translated[key];
+        if (value is! String) continue;
+        for (final name in placeholders.keys) {
+          if (!value.contains('{$name')) {
+            placeholderMisses.add('$key is missing {$name}');
+          }
+        }
+      }
+      expect(
+        placeholderMisses,
+        isEmpty,
+        reason: 'app_$locale.arb drops placeholders: '
+            '${placeholderMisses.join('; ')}',
+      );
     });
   }
+
+  // Keys whose value is legitimately locale-neutral (brand name, bare
+  // placeholder compositions, language names shown in their own script).
+  // A new key landing here unreviewed is usually an untranslated stub —
+  // add it to this list only after confirming it needs no translation.
+  const localeNeutralKeys = {
+    'appTitle',
+    'settingsProfileSubtitle',
+    'settingsLanguageEnglish',
+    'settingsLanguageOromo',
+    'settingsLanguageAmharic',
+    'suppliesTileSubtitleNoCost',
+    'reportRank',
+    'registerPhoneHint',
+    'posQtyUnit',
+    'posQtyTimes',
+    'cartMinusAmount',
+    'cartPricePerUnit',
+    'receiptQtyUnitPrice',
+    'receiptSaleNumber',
+    'receiptShareLine',
+  };
+
+  test('every translatable app_am.arb value is actually written in Ethiopic',
+      () {
+    final en = readArb('assets/l10n/app_en.arb');
+    final am = readArb('assets/l10n/app_am.arb');
+    final ethiopic = RegExp('[ሀ-፿]');
+
+    final untranslated = messageKeys(am)
+        .where((k) => !localeNeutralKeys.contains(k))
+        .where((k) => am[k] is String && !ethiopic.hasMatch(am[k] as String))
+        .toList()
+      ..sort();
+    // If a key is genuinely locale-neutral, add it to localeNeutralKeys;
+    // otherwise it shipped as an English stub.
+    expect(
+      untranslated,
+      isEmpty,
+      reason: 'app_am.arb values with no Ethiopic script: '
+          '${untranslated.join(', ')}',
+    );
+    final staleNeutral =
+        localeNeutralKeys.difference(messageKeys(en)).toList()..sort();
+    expect(
+      staleNeutral,
+      isEmpty,
+      reason: 'localeNeutralKeys lists removed keys: ${staleNeutral.join(', ')}',
+    );
+  });
 }
