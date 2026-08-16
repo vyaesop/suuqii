@@ -25,13 +25,16 @@ plugins {
 
 include(":app")
 
+// The one NDK every module builds against. Keep in sync with
+// app/build.gradle.kts.
+val ndk = "28.2.13676358"
+
 // Flutter 3.24.0's plugin loader doesn't inject the flutter extension into
 // library subprojects. Newer packages (jni 0.14.x, package_info_plus 9.x, etc.)
 // expect `flutter.compileSdkVersion`, `flutter.ndkVersion`, etc. to be
 // available. This stub registers those values before each subproject is evaluated.
-class FlutterExtensionStub {
+class FlutterExtensionStub(val ndkVersion: String) {
     val compileSdkVersion: Int = 36
-    val ndkVersion: String = "28.2.13676358"
     val minSdkVersion: Int = 21
     val targetSdkVersion: Int = 36
     val versionCode: String = "1"
@@ -40,6 +43,17 @@ class FlutterExtensionStub {
 
 gradle.beforeProject {
     if (name != "app") {
-        extra["flutter"] = FlutterExtensionStub()
+        extra["flutter"] = FlutterExtensionStub(ndk)
+
+        // Some plugins ignore the stub and hardcode an NDK of their own —
+        // jni 0.14.2 pins 27.0.12077973 — which makes Gradle download a second
+        // NDK just for that module. Registering the override here, before the
+        // module's own build script runs, means this callback fires after the
+        // script has set its version but before the Android plugin reads it.
+        afterEvaluate {
+            extensions.findByName("android")?.withGroovyBuilder {
+                setProperty("ndkVersion", ndk)
+            }
+        }
     }
 }
