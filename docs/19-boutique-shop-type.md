@@ -1,7 +1,7 @@
 # 19 — Boutique / apparel shop type
 
-Status: **Phases 0–3 implemented** (proposed 2026-09-16, built 2026-09-18).
-Phases 4 (boutique analytics) and 5 (barcode scanning, layaway) are not built.
+Status: **Phases 0–4 implemented** (proposed 2026-09-16, built 2026-09-18).
+Phase 5 (barcode scanning, layaway) is not built.
 Section 13 is the wire contract both sides were built against and is
 authoritative wherever the earlier prose differs from it.
 
