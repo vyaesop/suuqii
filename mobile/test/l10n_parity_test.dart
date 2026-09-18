@@ -109,6 +109,9 @@ void main() {
     'saleDetailReturnLine',
     // "{stock} · ×{inCart}" — bare placeholder composition on a size chip.
     'variantChipStockInCart',
+    // "{percent}%" and "+{count}" — a number and a symbol, nothing to say.
+    'sizeCurvePercent',
+    'reportRebuyMore',
   };
 
   test('every translatable app_am.arb value is actually written in Ethiopic',

@@ -12,6 +12,7 @@ import 'package:suuqii/features/auth/presentation/screens/login_screen.dart';
 import 'package:suuqii/features/auth/presentation/screens/register_shop_screen.dart';
 import 'package:suuqii/features/dashboard/presentation/owner_dashboard_screen.dart';
 import 'package:suuqii/features/dashboard/presentation/reports_screen.dart';
+import 'package:suuqii/features/dashboard/presentation/size_curve_screen.dart';
 import 'package:suuqii/features/debt/presentation/debt_detail_screen.dart';
 import 'package:suuqii/features/debt/presentation/debts_screen.dart';
 import 'package:suuqii/features/expenses/presentation/expenses_screen.dart';
@@ -227,6 +228,14 @@ GoRouter router(RouterRef ref) {
                 path: 'batches',
                 builder: (_, state) => BatchReportScreen(
                   productId: state.uri.queryParameters['product'],
+                ),
+              ),
+              // Boutique size curve for one style, opened from the style
+              // screen and from a rebuy row; owner-only via the same guard.
+              GoRoute(
+                path: 'size-curve',
+                builder: (_, state) => SizeCurveScreen(
+                  styleId: state.uri.queryParameters['style'] ?? '',
                 ),
               ),
             ],

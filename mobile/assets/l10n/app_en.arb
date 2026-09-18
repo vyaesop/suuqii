@@ -2190,5 +2190,74 @@
   "@styleVariantCapError": {"placeholders": {"max": {"type": "int"}}},
   "errSkuCollision": "That SKU is already used by another product",
   "ownerPinStepOf": "Approval {step} of {total} — an exchange needs one for the sale and one for the return.",
-  "@ownerPinStepOf": {"placeholders": {"step": {"type": "int"}, "total": {"type": "int"}}}
+  "@ownerPinStepOf": {"placeholders": {"step": {"type": "int"}, "total": {"type": "int"}}},
+  "reportRebuyList": "REBUY LIST",
+  "@reportRebuyList": {
+    "description": "All-caps section header on the reports screen: styles whose sizes need rebuying"
+  },
+  "reportRebuyEmpty": "Every style still has all its sizes.",
+  "reportRebuySizesLeft": "{inStock} of {total} sizes in stock",
+  "@reportRebuySizesLeft": {
+    "placeholders": { "inStock": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "reportRebuyMissing": "{label} · {sold} sold",
+  "@reportRebuyMissing": {
+    "description": "Chip for one sold-out variant: its size/colour and how many sold in 30 days",
+    "placeholders": { "label": { "type": "String" }, "sold": { "type": "String" } }
+  },
+  "reportRebuyMore": "+{count}",
+  "@reportRebuyMore": {
+    "description": "Overflow chip: how many further sold-out sizes a rebuy row has",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "reportDeadStock": "DEAD STOCK",
+  "@reportDeadStock": {
+    "description": "All-caps section header on the reports screen"
+  },
+  "reportDeadStockCaption": "Tied up in stock that has not sold in {days} days",
+  "@reportDeadStockCaption": {
+    "placeholders": { "days": { "type": "int" } }
+  },
+  "reportDeadStockEmpty": "Nothing is standing still — everything has sold recently.",
+  "reportDeadStockAge": "{days} days on the shelf",
+  "@reportDeadStockAge": {
+    "placeholders": { "days": { "type": "int" } }
+  },
+  "reportDeadStockLastSold": "Last sold {date}",
+  "@reportDeadStockLastSold": {
+    "placeholders": { "date": { "type": "String" } }
+  },
+  "reportDeadStockNeverSold": "Never sold",
+  "reportDeadStockMore": "Only the {count} oldest are shown.",
+  "@reportDeadStockMore": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "reportTopStyles": "TOP STYLES",
+  "@reportTopStyles": {
+    "description": "All-caps section header on the reports screen"
+  },
+  "reportTopStylesEmpty": "No styles sold in this range.",
+  "reportStyleVariantCount": "{count} variants",
+  "@reportStyleVariantCount": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "sizeCurveTitle": "Size curve",
+  "sizeCurveBySize": "BY SIZE",
+  "sizeCurveByColor": "BY COLOUR",
+  "sizeCurveReceived": "Received",
+  "sizeCurveSold": "Sold",
+  "sizeCurveOnHand": "On hand",
+  "sizeCurveSoldOfReceived": "{sold} of {received}",
+  "@sizeCurveSoldOfReceived": {
+    "placeholders": { "sold": { "type": "String" }, "received": { "type": "String" } }
+  },
+  "sizeCurvePercent": "{percent}%",
+  "@sizeCurvePercent": {
+    "description": "Sell-through as a percentage",
+    "placeholders": { "percent": { "type": "String" } }
+  },
+  "sizeCurveEmptyTitle": "Nothing received yet",
+  "sizeCurveEmptyMessage": "Receive a shipment for this style to see which sizes sell.",
+  "sizeCurveOneSize": "One size",
+  "sizeCurveNoColor": "No colour"
 }

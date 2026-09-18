@@ -177,6 +177,73 @@ leakage = Σ (list_price − unit_price) × qty over lines with `list_price > un
 For `shop_type = boutique` each `low_stock` entry is a *style* with a broken
 size run (`{id, name, stock, sizes_out}`), not a product.
 
+### Boutique analytics (docs/19 §14) — all VIEW_REPORTS (owner-only)
+Offered by the client only for shops whose features have `has_variants`.
+Money is a decimal string, quantities are decimal strings with no trailing
+zeros (`"3"`), dates are `YYYY-MM-DD`, and `from`/`to` is half-open
+`[from, to)` defaulting to the last 30 days. Every row is shop-scoped and
+excludes soft-deleted styles/products/sales. `sold` and `revenue` are net of
+returns: a resellable return reduces sold and comes back to on-hand, a damaged
+return reduces sold and is a loss, not stock.
+
+#### `GET /v1/reports/size-curve?style_id=&from=&to=`
+The buying grid for one style.
+```json
+{"style": {"id":"…","name":"Slim jeans","brand":"Levi's|null"},
+ "sizes":  [{"size":"32|null","received":"12","sold":"9","on_hand":"3",
+             "sell_through":"0.75","revenue":"10800.00"}],
+ "colors": [{"color":"Blue|null","received":"24", …}],
+ "totals": {"received":"48","sold":"30","on_hand":"18","revenue":"36000.00"}}
+```
+`received` is Σ `stock_lots.qty_received` **all time** (the whole buy);
+`sold`/`revenue` are windowed. `sell_through = sold / received` to 3 dp, `"0"`
+when nothing was received. Sizes follow the style's `size_set` preset order
+(`app/core/size_presets.py`, mirrored in
+`mobile/lib/core/shop_type/size_presets.dart`); sizes outside the preset, and
+styles with no preset, sort numerics-first then lexicographically, with the
+unsized row last. Unknown or another shop's `style_id` → 404.
+
+#### `GET /v1/reports/dead-stock?days=60&limit=&cursor=`
+Variants with `stock > 0` and no sale in the last `days` days (1..365, default
+60). Keyset paginated like `/v1/products`.
+```json
+{"days":60,
+ "items":[{"product_id":"…","name":"Slim jeans · 32 · Blue","style_id":"…|null",
+           "size":"32|null","color":"Blue|null","stock":"3","age_days":104,
+           "last_sold_at":"2026-06-04|null","unit_cost":"800.00","value":"2400.00"}],
+ "total_value":"2400.00","next_cursor":"…|null","has_more":false}
+```
+`age_days` counts from the oldest **open** lot's `received_at` (the stock
+actually sitting there), falling back to the product row's `created_at` for
+stock that predates lots (CSV import). `value` is `stock ×` the quantity-
+weighted cost of the open lots, falling back to `purchase_price` when there are
+none. Ordered oldest first, then value descending. `total_value` covers every
+qualifying row, not just the page. Cost fields are `"0"` without VIEW_COSTS.
+
+#### `GET /v1/reports/broken-runs`
+The rebuy list.
+```json
+{"items":[{"style_id":"…","name":"Slim jeans","brand":"…|null","image_url":"…|null",
+           "variant_count":8,"in_stock_count":5,"stock_total":"11",
+           "missing":[{"size":"32|null","color":"Blue|null","sold_30d":"9"}]}]}
+```
+A style qualifies only when at least one live variant is **at or below** its
+`low_stock_threshold` *and* at least one other is above it — a fully sold-out
+style is gone, not broken, and is omitted. `missing` is ordered by `sold_30d`
+descending (ties along the size run); styles are ordered by the total
+`sold_30d` of their missing variants, descending.
+
+#### `GET /v1/reports/top-styles?from=&to=&limit=`
+Best sellers rolled up to the style (`limit` 1..50, default 10).
+```json
+{"items":[{"style_id":"…|null","name":"Slim jeans","brand":"…|null",
+           "image_url":"…|null","quantity":"30","revenue":"36000.00",
+           "profit":"12000.00","variant_count":8}]}
+```
+Products with no live style roll up individually under `style_id: null` with
+their own name and `variant_count: 1`. Ranking happens *after* netting
+returns. `profit` is `"0"` without VIEW_COSTS.
+
 ### Returns netting in revenue / profit reports
 `dashboard`, `sales-series`, `top-products`, `payment-mix` and
 `cashier-performance` all account for `sale.return` the same way
@@ -196,6 +263,12 @@ size run (`{id, name, stock, sizes_out}`), not a product.
   combine legacy refunds and returns, attributed to the sale's cashier.
 - Per-day (`sales-series`) and per-method (`payment-mix`) netting keys on the
   return's day and the original sale's payment method respectively.
+- `top-products`, `size-curve`, `broken-runs` and `top-styles` net at the
+  *line* instead: a returned unit is not a unit sold, so it comes off its line
+  at that line's own price (these rankings are pre-cart-discount, so the
+  proportional credit ratio does not apply). One helper — `_returned_lines` in
+  `app/api/v1/reports.py` — serves all four, so "net of returns" means the same
+  thing on every one.
 
 ### `GET/PATCH /v1/shops/settings`
 Adds `return_window_days` (int, 0–90, default 7). Also returned in the login /

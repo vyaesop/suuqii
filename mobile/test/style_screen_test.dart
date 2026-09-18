@@ -66,12 +66,13 @@ Product _variant(String id, {required String size, required int stock}) =>
     );
 
 void main() {
-  Widget buildStyleScreen(List<Product> variants) {
+  Widget buildStyleScreen(
+    List<Product> variants, {
+    Authenticated auth = _ownerAuth,
+  }) {
     return ProviderScope(
       overrides: [
-        authControllerProvider.overrideWith(
-          () => _TestAuthController(_ownerAuth),
-        ),
+        authControllerProvider.overrideWith(() => _TestAuthController(auth)),
         watchStyleProvider('style-1').overrideWith(
           (_) => Stream.value(_style),
         ),
@@ -212,5 +213,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Mark down'), findsNothing);
     expect(find.text('Edit style'), findsOneWidget);
+  });
+
+  testWidgets('the owner can open the size curve for the style',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      buildStyleScreen([_variant('v-32', size: '32', stock: 5)]),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Size curve'), findsOneWidget);
+  });
+
+  testWidgets('a cashier gets no size curve — it is an owner report',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      buildStyleScreen(
+        [_variant('v-32', size: '32', stock: 5)],
+        auth: _cashierAuth,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Size curve'), findsNothing);
+    // The stock actions a cashier does have are untouched.
+    expect(find.text('Receive shipment'), findsOneWidget);
   });
 }

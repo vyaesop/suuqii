@@ -1,17 +1,19 @@
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, case, exists, func, or_, select, text
+from sqlalchemy import and_, case, exists, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.capabilities import VIEW_REPORTS, can
+from app.api.v1._pagination import decode_time_cursor, encode_cursor
+from app.core.capabilities import VIEW_COSTS, VIEW_REPORTS, can
 from app.core.config import settings
-from app.core.deps import current_user, db_session
+from app.core.deps import current_user, db_session, require_cap
 from app.core.shop_features import features_for
+from app.core.size_presets import sort_sizes
 from app.models import (
     Debt,
     Expense,
@@ -99,6 +101,53 @@ async def _return_adjustments(
 
 
 _NO_RETURNS = (0, Decimal("0"), Decimal("0"))
+_NO_LINES = (Decimal("0"), Decimal("0"), Decimal("0"))
+
+
+async def _returned_lines(
+    db: AsyncSession, shop_id: UUID, start: datetime, end: datetime | None = None,
+) -> dict[UUID, tuple[Decimal, Decimal, Decimal]]:
+    """Returns in [start, end) per product → (qty, revenue, profit) to subtract.
+
+    The line-level counterpart of _return_adjustments: that one nets the
+    sale-level refund against revenue, this one nets the units themselves out
+    of a per-product ranking. A returned unit is not a unit sold, so it comes
+    off the line at the line's own price — these reports are pre-cart-discount,
+    so the proportional credit ratio does not apply. A resellable unit gives
+    its cost back and only the margin is lost; a damaged one is gone, so the
+    whole price is.
+
+    Shared by /top-products, /size-curve and /top-styles so "net of returns"
+    means one thing everywhere.
+    """
+    where = [SaleReturn.shop_id == shop_id, SaleReturn.occurred_at >= start]
+    if end is not None:
+        where.append(SaleReturn.occurred_at < end)
+    rows = (await db.execute(
+        select(
+            SaleItem.product_id,
+            func.coalesce(func.sum(SaleReturnItem.quantity), 0).label("qty"),
+            func.coalesce(
+                func.sum(SaleReturnItem.quantity * SaleItem.unit_price), 0
+            ).label("revenue"),
+            func.coalesce(func.sum(case(
+                (
+                    SaleReturnItem.condition == "resellable",
+                    SaleReturnItem.quantity * (SaleItem.unit_price - SaleItem.unit_cost),
+                ),
+                else_=SaleReturnItem.quantity * SaleItem.unit_price,
+            )), 0).label("profit"),
+        )
+        .select_from(SaleReturnItem)
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
+        .join(SaleItem, SaleItem.id == SaleReturnItem.sale_item_id)
+        .where(*where)
+        .group_by(SaleItem.product_id)
+    )).all()
+    return {
+        r.product_id: (Decimal(r.qty), Decimal(r.revenue), Decimal(r.profit))
+        for r in rows
+    }
 
 
 def _range_start(range_: str) -> datetime:
@@ -408,39 +457,14 @@ async def top_products(
         .limit(limit)
     )).all()
 
-    # Returned units come off the line at the line's own price (this report
-    # is pre-cart-discount, so the credit ratio does not apply). A resellable
-    # unit gives its cost back; a damaged one does not.
-    returned = {
-        r.product_id: r for r in (await db.execute(
-            select(
-                SaleItem.product_id,
-                func.coalesce(func.sum(SaleReturnItem.quantity), 0).label("qty"),
-                func.coalesce(
-                    func.sum(SaleReturnItem.quantity * SaleItem.unit_price), 0
-                ).label("revenue"),
-                func.coalesce(func.sum(case(
-                    (
-                        SaleReturnItem.condition == "resellable",
-                        SaleReturnItem.quantity * (SaleItem.unit_price - SaleItem.unit_cost),
-                    ),
-                    else_=SaleReturnItem.quantity * SaleItem.unit_price,
-                )), 0).label("profit"),
-            )
-            .select_from(SaleReturnItem)
-            .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
-            .join(SaleItem, SaleItem.id == SaleReturnItem.sale_item_id)
-            .where(SaleReturn.shop_id == user.shop_id, SaleReturn.occurred_at >= start)
-            .group_by(SaleItem.product_id)
-        )).all()
-    }
+    returned = await _returned_lines(db, user.shop_id, start)
 
     items = []
     for r in rows:
-        ret = returned.get(r.product_id)
-        qty = Decimal(r.qty) - (Decimal(ret.qty) if ret else Decimal("0"))
-        revenue = Decimal(r.revenue) - (Decimal(ret.revenue) if ret else Decimal("0"))
-        profit = Decimal(r.profit) - (Decimal(ret.profit) if ret else Decimal("0"))
+        ret_qty, ret_revenue, ret_profit = returned.get(r.product_id, _NO_LINES)
+        qty = Decimal(r.qty) - ret_qty
+        revenue = Decimal(r.revenue) - ret_revenue
+        profit = Decimal(r.profit) - ret_profit
         # Margin % is on line-item revenue before any cart-level discount.
         # Cart discounts live on sale.discount and are not apportioned to items,
         # so true margin may be slightly lower than reported here.
@@ -1184,4 +1208,510 @@ async def price_leakage(
             }
             for r in by_style_rows
         ],
+    }
+
+
+# ─────────────────────── boutique analytics (docs/19 §14) ───────────────────
+#
+# Four owner-only reads over data the app already stores, answering the three
+# questions a boutique owner actually asks: which sizes to rebuy, what is not
+# moving, and which styles earn. They gate on VIEW_REPORTS through
+# `require_cap` rather than an inline role test — capabilities deny by default,
+# so a role added later gets nothing here until it is granted something.
+#
+# Quantities go out trimmed ("3", not the Numeric(12,3) "3.000"): a boutique
+# variant is a piece (`locks_unit`), so the tail is noise the client would
+# have to strip on every row before drawing a bar.
+
+_QTY = Decimal("0.001")
+_RATIO = Decimal("0.001")
+
+
+def _trim(value: Decimal) -> str:
+    out = format(value, "f")
+    if "." in out:
+        out = out.rstrip("0").rstrip(".")
+    return out or "0"
+
+
+def _qty(value) -> str:
+    d = Decimal(value or 0).quantize(_QTY)
+    return "0" if d == 0 else _trim(d)
+
+
+def _ratio(num: Decimal, den: Decimal) -> str:
+    """Sell-through to 3 dp; "0" when nothing was received (§14.1) — dividing
+    by a zero buy would otherwise read as "sold nothing" for stock that was
+    never bought."""
+    if not den:
+        return "0"
+    return _trim((Decimal(num) / Decimal(den)).quantize(_RATIO, rounding=ROUND_HALF_UP))
+
+
+def _local_date(moment: datetime | None) -> str | None:
+    """Wire dates are the shop's calendar day, not UTC's: a 23:30 sale in
+    Addis (UTC+3) happened *yesterday* in UTC and the owner would not
+    recognise the date."""
+    if moment is None:
+        return None
+    return moment.astimezone(ZoneInfo(settings.timezone)).date().isoformat()
+
+
+@router.get("/size-curve", dependencies=[Depends(require_cap(VIEW_REPORTS))])
+async def size_curve(
+    style_id: UUID = Query(...),
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """The buying grid for one style: bought, sold, left — per size and per
+    colour (docs/19 §14.1).
+
+    `received` is deliberately all-time while `sold`/`revenue` are windowed:
+    sell-through only means anything against the whole buy. Comparing a
+    month's sales to that month's receipts would flatter a style that was
+    bought once and has been selling down ever since.
+    """
+    style = await db.get(Style, style_id)
+    if style is None or style.shop_id != user.shop_id or style.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "style not found")
+    start, end = _window(from_, to)
+
+    variants = (await db.execute(
+        select(Product.id, Product.size, Product.color, Product.stock).where(
+            Product.shop_id == user.shop_id,
+            Product.style_id == style.id,
+            Product.deleted_at.is_(None),
+        )
+    )).all()
+    ids = [v.id for v in variants]
+
+    received: dict[UUID, Decimal] = {}
+    sold: dict[UUID, Decimal] = {}
+    revenue: dict[UUID, Decimal] = {}
+    if ids:
+        for row in (await db.execute(
+            select(
+                StockLot.product_id,
+                func.coalesce(func.sum(StockLot.qty_received), 0).label("qty"),
+            )
+            .where(StockLot.shop_id == user.shop_id, StockLot.product_id.in_(ids))
+            .group_by(StockLot.product_id)
+        )).all():
+            received[row.product_id] = Decimal(row.qty)
+        for row in (await db.execute(
+            select(
+                SaleItem.product_id,
+                func.coalesce(func.sum(SaleItem.quantity), 0).label("qty"),
+                func.coalesce(
+                    func.sum(SaleItem.quantity * SaleItem.unit_price), 0
+                ).label("revenue"),
+            )
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(
+                Sale.shop_id == user.shop_id,
+                Sale.deleted_at.is_(None),
+                _REVENUE_STATUS,
+                Sale.occurred_at >= start,
+                Sale.occurred_at < end,
+                SaleItem.product_id.in_(ids),
+            )
+            .group_by(SaleItem.product_id)
+        )).all():
+            sold[row.product_id] = Decimal(row.qty)
+            revenue[row.product_id] = Decimal(row.revenue)
+    returned = await _returned_lines(db, user.shop_id, start, end)
+
+    # Both views are built in one pass so they can never disagree with each
+    # other or with `totals`.
+    by_size: dict[str | None, list[Decimal]] = {}
+    by_color: dict[str | None, list[Decimal]] = {}
+    totals = [Decimal("0")] * 4
+    for v in variants:
+        ret_qty, ret_revenue, _ = returned.get(v.id, _NO_LINES)
+        cell = [
+            received.get(v.id, Decimal("0")),
+            sold.get(v.id, Decimal("0")) - ret_qty,
+            Decimal(v.stock),
+            revenue.get(v.id, Decimal("0")) - ret_revenue,
+        ]
+        for bucket, key in ((by_size, v.size), (by_color, v.color)):
+            acc = bucket.setdefault(key, [Decimal("0")] * 4)
+            for i in range(4):
+                acc[i] += cell[i]
+        for i in range(4):
+            totals[i] += cell[i]
+
+    def _row(label_key: str, label: str | None, acc: list[Decimal]) -> dict:
+        got, went, left, money = acc
+        return {
+            label_key: label,
+            "received": _qty(got),
+            "sold": _qty(went),
+            "on_hand": _qty(left),
+            "sell_through": _ratio(went, got),
+            "revenue": _money(money),
+        }
+
+    return {
+        "style": {"id": str(style.id), "name": style.name, "brand": style.brand},
+        "sizes": [
+            _row("size", s, by_size[s])
+            for s in sort_sizes(list(by_size), style.size_set)
+        ],
+        "colors": [_row("color", c, by_color[c]) for c in sort_sizes(list(by_color))],
+        "totals": {
+            "received": _qty(totals[0]),
+            "sold": _qty(totals[1]),
+            "on_hand": _qty(totals[2]),
+            "revenue": _money(totals[3]),
+        },
+    }
+
+
+@router.get("/dead-stock", dependencies=[Depends(require_cap(VIEW_REPORTS))])
+async def dead_stock(
+    days: int = Query(60, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Stock on the shelf that nothing has sold for `days` days (docs/19 §14.2).
+
+    Age comes from the oldest *open* lot, not the first ever receipt: a style
+    that sold out and was rebought last week is not dead stock, even though
+    its first carton arrived a year ago.
+    """
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=days)
+
+    open_lots = (
+        select(
+            StockLot.product_id.label("product_id"),
+            func.min(StockLot.received_at).label("oldest_open"),
+            func.sum(StockLot.qty_remaining).label("qty_open"),
+            func.sum(StockLot.qty_remaining * StockLot.unit_cost).label("cost_open"),
+        )
+        .where(StockLot.shop_id == user.shop_id, StockLot.qty_remaining > 0)
+        .group_by(StockLot.product_id)
+        .subquery()
+    )
+    last_sale = (
+        select(
+            SaleItem.product_id.label("product_id"),
+            func.max(Sale.occurred_at).label("last_sold_at"),
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(Sale.shop_id == user.shop_id, Sale.deleted_at.is_(None), _REVENUE_STATUS)
+        .group_by(SaleItem.product_id)
+        .subquery()
+    )
+    # Stock received before lots existed (a CSV import, an early
+    # product.create) has no lot to date it, so the row's own age stands in —
+    # better than claiming it arrived today and sorting it to the bottom.
+    age_key = func.coalesce(open_lots.c.oldest_open, Product.created_at)
+    unit_cost = case(
+        (open_lots.c.qty_open > 0, open_lots.c.cost_open / open_lots.c.qty_open),
+        else_=Product.purchase_price,
+    )
+    value = Product.stock * unit_cost
+
+    base = (
+        select(
+            Product.id,
+            Product.name,
+            Product.style_id,
+            Product.size,
+            Product.color,
+            Product.stock,
+            age_key.label("age_from"),
+            last_sale.c.last_sold_at,
+            unit_cost.label("unit_cost"),
+            value.label("value"),
+        )
+        .outerjoin(open_lots, open_lots.c.product_id == Product.id)
+        .outerjoin(last_sale, last_sale.c.product_id == Product.id)
+        .where(
+            Product.shop_id == user.shop_id,
+            Product.deleted_at.is_(None),
+            Product.stock > 0,
+            or_(last_sale.c.last_sold_at.is_(None), last_sale.c.last_sold_at < cutoff),
+        )
+    )
+
+    # The headline total covers everything that qualifies, not just this page:
+    # it is the "money asleep on the shelf" number and would be meaningless if
+    # it shrank as the owner scrolled.
+    total_value = (await db.execute(
+        select(func.coalesce(func.sum(base.subquery().c.value), 0))
+    )).scalar_one()
+
+    stmt = base
+    decoded = decode_time_cursor(cursor)
+    if decoded:
+        stmt = stmt.where(tuple_(age_key, Product.id) > decoded)
+    # Oldest first, then the biggest money asleep. The keyset runs on
+    # (age_from, id); age_from is a microsecond timestamp, so a tie that the
+    # value ordering would have to break cannot straddle a page in practice.
+    stmt = stmt.order_by(age_key.asc(), value.desc(), Product.id.asc()).limit(limit + 1)
+    rows = (await db.execute(stmt)).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    show_costs = can(user.role, VIEW_COSTS)
+    return {
+        "days": days,
+        "items": [
+            {
+                "product_id": str(r.id),
+                "name": r.name,
+                "style_id": str(r.style_id) if r.style_id else None,
+                "size": r.size,
+                "color": r.color,
+                "stock": _qty(r.stock),
+                "age_days": (now - r.age_from).days,
+                "last_sold_at": _local_date(r.last_sold_at),
+                "unit_cost": _money(r.unit_cost) if show_costs else "0",
+                "value": _money(r.value) if show_costs else "0",
+            }
+            for r in rows
+        ],
+        "total_value": _money(total_value) if show_costs else "0",
+        "next_cursor": encode_cursor(rows[-1].age_from, rows[-1].id) if has_more else None,
+        "has_more": has_more,
+    }
+
+
+@router.get("/broken-runs", dependencies=[Depends(require_cap(VIEW_REPORTS))])
+async def broken_runs(
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """The rebuy list: styles where some sizes have run out while others are
+    still selling (docs/19 §14.3).
+
+    A style whose every variant is depleted is *not* listed: it is gone, not
+    broken, and there is no run left to complete. Listing those would bury the
+    rows the owner can act on today.
+    """
+    start = datetime.now(UTC) - timedelta(days=30)
+
+    variants = (await db.execute(
+        select(
+            Product.id,
+            Product.style_id,
+            Product.size,
+            Product.color,
+            Product.stock,
+            Product.low_stock_threshold,
+            Style.name,
+            Style.brand,
+            Style.image_url,
+            Style.size_set,
+        )
+        .join(Style, Style.id == Product.style_id)
+        .where(
+            Product.shop_id == user.shop_id,
+            Product.deleted_at.is_(None),
+            Style.deleted_at.is_(None),
+        )
+    )).all()
+    if not variants:
+        return {"items": []}
+
+    sold_30d = {
+        row.product_id: Decimal(row.qty)
+        for row in (await db.execute(
+            select(
+                SaleItem.product_id,
+                func.coalesce(func.sum(SaleItem.quantity), 0).label("qty"),
+            )
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(
+                Sale.shop_id == user.shop_id,
+                Sale.deleted_at.is_(None),
+                _REVENUE_STATUS,
+                Sale.occurred_at >= start,
+            )
+            .group_by(SaleItem.product_id)
+        )).all()
+    }
+    returned = await _returned_lines(db, user.shop_id, start)
+
+    styles: dict[UUID, dict] = {}
+    for v in variants:
+        s = styles.setdefault(v.style_id, {
+            "style_id": str(v.style_id), "name": v.name, "brand": v.brand,
+            "image_url": v.image_url, "size_set": v.size_set,
+            "variant_count": 0, "in_stock_count": 0, "stock_total": Decimal("0"),
+            "missing": [],
+        })
+        s["variant_count"] += 1
+        s["stock_total"] += Decimal(v.stock)
+        if Decimal(v.stock) > Decimal(v.low_stock_threshold):
+            s["in_stock_count"] += 1
+        else:
+            moved = sold_30d.get(v.id, Decimal("0")) - returned.get(v.id, _NO_LINES)[0]
+            s["missing"].append({"size": v.size, "color": v.color, "sold_30d": moved})
+
+    items = []
+    for s in styles.values():
+        # Both halves are required: nothing depleted is a healthy run, nothing
+        # left in stock is a dead style, and neither is a rebuy decision.
+        if not s["missing"] or s["in_stock_count"] == 0:
+            continue
+        # Rebuy what moves: inside a style the depleted variants rank by their
+        # own 30-day sales, ties resolved along the size run so the order is
+        # stable between calls.
+        rank = {
+            size: i for i, size in enumerate(sort_sizes(
+                [m["size"] for m in s["missing"]], s["size_set"],
+            ))
+        }
+        s["missing"].sort(key=lambda m: (-m["sold_30d"], rank[m["size"]], m["color"] or ""))
+        items.append({
+            "style_id": s["style_id"],
+            "name": s["name"],
+            "brand": s["brand"],
+            "image_url": s["image_url"],
+            "variant_count": s["variant_count"],
+            "in_stock_count": s["in_stock_count"],
+            "stock_total": _qty(s["stock_total"]),
+            "missing": [
+                {"size": m["size"], "color": m["color"], "sold_30d": _qty(m["sold_30d"])}
+                for m in s["missing"]
+            ],
+            "_demand": sum((m["sold_30d"] for m in s["missing"]), Decimal("0")),
+        })
+
+    items.sort(key=lambda i: (-i["_demand"], i["name"]))
+    for i in items:
+        del i["_demand"]
+    return {"items": items}
+
+
+@router.get("/top-styles", dependencies=[Depends(require_cap(VIEW_REPORTS))])
+async def top_styles(
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = Query(None),
+    limit: int = Query(10, ge=1, le=50),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Best sellers rolled up to the style (docs/19 §14.4).
+
+    An owner thinks "Slim jeans", not eight rows of the same jeans, so
+    /top-products reads as noise in a boutique. Products with no live style
+    roll up as themselves under a null style_id, so a shop that mixes plain
+    stock in with its styles still sees all of it.
+    """
+    start, end = _window(from_, to)
+
+    # Group on the live style, falling back to the product itself. Both sides
+    # of the COALESCE are UUIDs, so one grouping key covers both cases and the
+    # ranking stays a single sort.
+    grp = func.coalesce(Style.id, SaleItem.product_id)
+    rows = (await db.execute(
+        select(
+            grp.label("grp"),
+            Style.id.label("style_id"),
+            Style.name.label("style_name"),
+            Style.brand,
+            Style.image_url,
+            func.min(SaleItem.product_name_snapshot).label("snapshot"),
+            func.coalesce(func.sum(SaleItem.quantity), 0).label("qty"),
+            func.coalesce(
+                func.sum(SaleItem.quantity * SaleItem.unit_price), 0
+            ).label("revenue"),
+            func.coalesce(
+                func.sum(SaleItem.quantity * (SaleItem.unit_price - SaleItem.unit_cost)), 0
+            ).label("profit"),
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .outerjoin(
+            Product,
+            and_(Product.id == SaleItem.product_id, Product.deleted_at.is_(None)),
+        )
+        .outerjoin(
+            Style,
+            and_(Style.id == Product.style_id, Style.deleted_at.is_(None)),
+        )
+        .where(
+            Sale.shop_id == user.shop_id,
+            Sale.deleted_at.is_(None),
+            _REVENUE_STATUS,
+            Sale.occurred_at >= start,
+            Sale.occurred_at < end,
+        )
+        .group_by(grp, Style.id, Style.name, Style.brand, Style.image_url)
+    )).all()
+    if not rows:
+        return {"items": []}
+
+    live_styles = {
+        pid: sid
+        for pid, sid in (await db.execute(
+            select(Product.id, Product.style_id)
+            .join(Style, Style.id == Product.style_id)
+            .where(
+                Product.shop_id == user.shop_id,
+                Product.deleted_at.is_(None),
+                Style.deleted_at.is_(None),
+            )
+        )).all()
+    }
+    variant_counts = {
+        sid: int(n)
+        for sid, n in (await db.execute(
+            select(Product.style_id, func.count(Product.id))
+            .join(Style, Style.id == Product.style_id)
+            .where(
+                Product.shop_id == user.shop_id,
+                Product.deleted_at.is_(None),
+                Style.deleted_at.is_(None),
+            )
+            .group_by(Product.style_id)
+        )).all()
+    }
+
+    # Returns land on the product; fold them onto the group that product
+    # belongs to so a returned variant cools its whole style's ranking.
+    returned = await _returned_lines(db, user.shop_id, start, end)
+    net: dict[UUID, list[Decimal]] = {}
+    for pid, (qty, revenue, profit) in returned.items():
+        acc = net.setdefault(live_styles.get(pid) or pid, [Decimal("0")] * 3)
+        acc[0] += qty
+        acc[1] += revenue
+        acc[2] += profit
+
+    show_costs = can(user.role, VIEW_COSTS)
+    items = []
+    for r in rows:
+        ret = net.get(r.grp, [Decimal("0")] * 3)
+        items.append({
+            "style_id": str(r.style_id) if r.style_id else None,
+            "name": r.style_name or r.snapshot,
+            "brand": r.brand,
+            "image_url": r.image_url,
+            "quantity": Decimal(r.qty) - ret[0],
+            "revenue": Decimal(r.revenue) - ret[1],
+            "profit": Decimal(r.profit) - ret[2],
+            "variant_count": variant_counts.get(r.style_id, 1) if r.style_id else 1,
+        })
+    # Rank after netting: a style whose sales mostly came back must not keep a
+    # top slot it no longer earns.
+    items.sort(key=lambda i: (-i["revenue"], i["name"]))
+    return {
+        "items": [
+            {
+                **i,
+                "quantity": _qty(i["quantity"]),
+                "revenue": _money(i["revenue"]),
+                # Cost is owner-only, like every other margin on this surface.
+                "profit": _money(i["profit"]) if show_costs else "0",
+            }
+            for i in items[:limit]
+        ]
     }

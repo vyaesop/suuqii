@@ -550,6 +550,16 @@ class _StyleBody extends StatelessWidget {
               ],
             ),
           ),
+        if (isOwner) ...[
+          const SizedBox(height: SuuqSpacing.lg),
+          // The buying grid for this style (docs/19 §14.1) — owner-only,
+          // like every other report.
+          OutlinedButton.icon(
+            onPressed: () => context.push('/reports/size-curve?style=${style.id}'),
+            icon: const Icon(Icons.insights_rounded),
+            label: Text(l.sizeCurveTitle),
+          ),
+        ],
         if (canEdit) ...[
           const SizedBox(height: SuuqSpacing.lg),
           FilledButton.icon(

@@ -769,3 +769,125 @@ color, sku, min_selling_price` (nullable). `sale_items` + `list_price`
 (nullable santim). `sale_returns` / `sale_return_items` mirror the server.
 `sales.status` may be `partially_returned`. Pull domain `styles` refreshes from
 `GET /v1/styles`.
+
+---
+
+## 14. Phase 4 wire contract — boutique analytics
+
+Approved 2026-09-18. Phase 4 turns the batch and sale data the app already
+stores into the three questions a boutique owner actually asks: *which sizes
+do I need to rebuy*, *what is not moving*, and *which styles earn*. All four
+endpoints are owner-only (`VIEW_REPORTS`) and are only offered by the client
+when the shop's features have `has_variants`.
+
+Money is a decimal string, quantities are decimal strings, dates are
+`YYYY-MM-DD`, and the `from`/`to` window is half-open `[from, to)` like the
+existing reports. Returns are netted out of "sold" the same way §13.3 nets
+them out of revenue: a resellable return reduces sold and comes back to
+on-hand; a damaged return reduces sold and is counted as a loss, not stock.
+
+### 14.1 `GET /v1/reports/size-curve?style_id=&from=&to=`
+
+The buying grid for one style: what was bought, what sold, what is left, per
+size and per colour.
+
+```json
+{
+  "style": {"id": "…", "name": "Slim jeans", "brand": "Levi's|null"},
+  "sizes": [
+    {"size": "32|null", "received": "12", "sold": "9", "on_hand": "3",
+     "sell_through": "0.75", "revenue": "10800.00"}
+  ],
+  "colors": [
+    {"color": "Blue|null", "received": "24", "sold": "15", "on_hand": "9",
+     "sell_through": "0.625", "revenue": "18000.00"}
+  ],
+  "totals": {"received": "48", "sold": "30", "on_hand": "18", "revenue": "36000.00"}
+}
+```
+
+`received` is Σ `stock_lots.qty_received` for the variant (all time, so the
+curve reflects the whole buy, not just the window); `sold` and `revenue` come
+from sale items in the window, net of returns. `sell_through` is
+`sold / received` rounded to 3 decimals, `"0"` when nothing was received.
+Sizes are ordered by the style's `size_set` preset order when it has one,
+otherwise lexicographically with numerics first. Unknown `style_id` → 404.
+
+### 14.2 `GET /v1/reports/dead-stock?days=60&limit=&cursor=`
+
+Variants still on the shelf that nothing has sold for `days` days.
+
+```json
+{
+  "days": 60,
+  "items": [
+    {"product_id": "…", "name": "Slim jeans · 32 · Blue", "style_id": "…|null",
+     "size": "32|null", "color": "Blue|null", "stock": "3",
+     "age_days": 104, "last_sold_at": "2026-06-04|null",
+     "unit_cost": "800.00", "value": "2400.00"}
+  ],
+  "total_value": "2400.00",
+  "next_cursor": "…|null", "has_more": false
+}
+```
+
+Included when `stock > 0` and the variant has no sale in the last `days`
+days. `age_days` counts from the oldest **open** lot's `received_at` (the
+stock actually sitting there), not from the first ever receipt.
+`last_sold_at` is null when it has never sold. `value` is `stock ×` the
+weighted cost of its open lots, falling back to `purchase_price` for
+unlotted stock. Ordered oldest first, then by value descending. `days` is
+1..365 (default 60). Cost fields require `VIEW_COSTS`, which owners have.
+
+### 14.3 `GET /v1/reports/broken-runs`
+
+The rebuy list: styles selling well enough that some sizes have run out
+while others still have stock.
+
+```json
+{
+  "items": [
+    {"style_id": "…", "name": "Slim jeans", "brand": "…|null", "image_url": "…|null",
+     "variant_count": 8, "in_stock_count": 5, "stock_total": "11",
+     "missing": [{"size": "32|null", "color": "Blue|null", "sold_30d": "9"}]}
+  ]
+}
+```
+
+A style qualifies when at least one live variant is at or below its
+`low_stock_threshold` **and** at least one other live variant is above it —
+a style that is entirely sold out is not a broken run, it is simply gone, and
+listing it would bury the actionable rows. `missing` carries the depleted
+variants with their 30-day sales so the owner rebuys the sizes that actually
+move; it is ordered by `sold_30d` descending. Styles are ordered by the
+total `sold_30d` of their missing variants, descending.
+
+### 14.4 `GET /v1/reports/top-styles?from=&to=&limit=`
+
+Top sellers rolled up to the style, since a boutique owner thinks in styles,
+not in 8 rows of the same jeans.
+
+```json
+{
+  "items": [
+    {"style_id": "…|null", "name": "Slim jeans", "brand": "…|null", "image_url": "…|null",
+     "quantity": "30", "revenue": "36000.00", "profit": "12000.00",
+     "variant_count": 8}
+  ]
+}
+```
+
+Net of returns, same as `/reports/top-products`. Products with no style are
+rolled up individually with `style_id: null` and their own name, so nothing
+is hidden. `profit` requires `VIEW_COSTS`. `limit` is 1..50 (default 10).
+
+### 14.5 Mobile
+
+A "Boutique" section appears in the reports screen for `has_variants` shops,
+above the existing sections, holding: the rebuy list (broken runs) as the
+first and most actionable card, dead stock with its total value, and top
+styles. The size curve opens per style from the style screen and from a
+broken-run row, rendered as a bar per size with sold against received. Each
+view is read-only, owner-only, fetched on demand, and shows a plain empty
+state rather than an error when the shop has no data yet. No new Drift
+tables: these are live report reads like the existing batch report.

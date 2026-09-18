@@ -7,7 +7,9 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
+import 'package:suuqii/features/dashboard/data/boutique_reports_repository.dart';
 import 'package:suuqii/features/dashboard/data/dashboard_repository.dart';
+import 'package:suuqii/features/dashboard/presentation/boutique_reports_section.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 
 class ReportsScreen extends ConsumerStatefulWidget {
@@ -34,7 +36,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ref
             ..invalidate(salesSeriesProvider(range: _range))
             ..invalidate(topProductsProvider(range: _range))
-            ..invalidate(paymentMixProvider(range: _range));
+            ..invalidate(paymentMixProvider(range: _range))
+            // Harmless for non-boutique shops: the section that watches
+            // these is not built, so invalidating them starts no request.
+            ..invalidate(brokenRunsProvider)
+            ..invalidate(deadStockProvider(days: deadStockDefaultDays))
+            ..invalidate(topStylesProvider(range: _range));
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
@@ -59,7 +66,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               onSelectionChanged: (s) => setState(() => _range = s.first),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            _SectionHeader(l.reportSalesOverTime),
+            // Boutique analytics sit above the generic reports: for an
+            // apparel shop they are the ones that change what gets bought.
+            BoutiqueReportsSection(range: _range),
+            ReportSectionHeader(l.reportSalesOverTime),
             const SizedBox(height: SuuqSpacing.xs),
             seriesAsync.when(
               loading: _loadingCard,
@@ -71,7 +81,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     ),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            _SectionHeader(l.reportTopProducts),
+            ReportSectionHeader(l.reportTopProducts),
             const SizedBox(height: SuuqSpacing.xs),
             topAsync.when(
               loading: _loadingCard,
@@ -95,7 +105,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                     ),
             ),
             const SizedBox(height: SuuqSpacing.lg),
-            _SectionHeader(l.reportPaymentMix),
+            ReportSectionHeader(l.reportPaymentMix),
             const SizedBox(height: SuuqSpacing.xs),
             mixAsync.when(
               loading: _loadingCard,
@@ -134,8 +144,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       );
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.text);
+/// All-caps label above each report card. Public so the boutique section
+/// renders its headers in exactly the same voice.
+class ReportSectionHeader extends StatelessWidget {
+  const ReportSectionHeader(this.text, {super.key});
   final String text;
 
   @override
