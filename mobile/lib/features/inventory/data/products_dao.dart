@@ -31,13 +31,90 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     // on both sides. Result sets are shop-sized, so this stays cheap.
     var stream = q.watch();
     if (query != null && query.trim().isNotEmpty) {
-      final needle = foldForSearch(query.trim());
-      stream = stream.map(
-        (rows) =>
-            rows.where((r) => foldForSearch(r.name).contains(needle)).toList(),
-      );
+      final raw = query.trim();
+      final needle = foldForSearch(raw);
+      stream = stream.map((rows) {
+        // A typed or scanned SKU / barcode is an exact identifier, so it wins
+        // over the fuzzy name filter: "JN-32-BLU" must return that one
+        // variant, not every product whose name happens to contain "32".
+        final exact = rows.where((r) => matchesIdentifier(r, raw)).toList();
+        if (exact.isNotEmpty) return exact;
+        return rows
+            .where((r) => foldForSearch(r.name).contains(needle))
+            .toList();
+      });
     }
     return stream.map((rows) => rows.map(_toDomain).toList());
+  }
+
+  /// Exact (case-insensitive for SKUs, which are upper-cased on composition)
+  /// identifier match used before the folded-name search.
+  static bool matchesIdentifier(ProductRow r, String query) {
+    final sku = r.sku;
+    final barcode = r.barcode;
+    return (sku != null && sku.toUpperCase() == query.toUpperCase()) ||
+        (barcode != null && barcode.isNotEmpty && barcode == query);
+  }
+
+  /// Live variants of one style, size/colour order as stored (the UI orders
+  /// them by the style's size preset).
+  Stream<List<Product>> watchByStyle(String styleId) {
+    return (select(productsTable)
+          ..where((t) => t.styleId.equals(styleId))
+          ..where((t) => t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .watch()
+        .map((rows) => rows.map(_toDomain).toList());
+  }
+
+  Future<List<Product>> getByStyle(String styleId) async {
+    final rows = await (select(productsTable)
+          ..where((t) => t.styleId.equals(styleId))
+          ..where((t) => t.deletedAt.isNull()))
+        .get();
+    return rows.map(_toDomain).toList();
+  }
+
+  /// Soft-delete every live variant of [styleId] (style deletion, or a
+  /// `style.create` the server refused).
+  Future<void> softDeleteByStyle(String styleId, DateTime at) => customUpdate(
+        'UPDATE products SET deleted_at = ?, updated_at = ? '
+        'WHERE style_id = ? AND deleted_at IS NULL',
+        variables: [
+          Variable.withInt(sqliteDateTimeParam(at)),
+          Variable.withInt(sqliteDateTimeParam(at)),
+          Variable.withString(styleId),
+        ],
+        updates: {productsTable},
+        updateKind: UpdateKind.update,
+      );
+
+  /// Is [sku] already carried by another live product of this shop?
+  ///
+  /// A hand-typed SKU goes to the server as-is and a duplicate comes back as
+  /// `sku_collision` — a terminal rejection of the whole `product.create` /
+  /// `product.update` — so the clash is caught here while the form is still
+  /// open. Comparison is case-insensitive: composed SKUs are upper-cased, and
+  /// "jn-32" must not be able to shadow "JN-32".
+  Future<bool> skuTaken(
+    String sku, {
+    required String shopId,
+    String? excludingProductId,
+  }) async {
+    final needle = sku.trim().toUpperCase();
+    if (needle.isEmpty) return false;
+    final rows = await customSelect(
+      'SELECT 1 FROM products '
+      'WHERE shop_id = ? AND deleted_at IS NULL '
+      'AND UPPER(sku) = ? AND id <> ? LIMIT 1',
+      variables: [
+        Variable.withString(shopId),
+        Variable.withString(needle),
+        Variable.withString(excludingProductId ?? ''),
+      ],
+      readsFrom: {productsTable},
+    ).get();
+    return rows.isNotEmpty;
   }
 
   Future<Product?> getById(String id) async {
@@ -96,6 +173,13 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         barcode: r.barcode,
         imageUrl: r.imageUrl,
         clientUpdatedAt: r.clientUpdatedAt,
+        styleId: r.styleId,
+        size: r.size,
+        color: r.color,
+        sku: r.sku,
+        minSellingPrice: r.minSellingPrice == null
+            ? null
+            : decimalFromSantim(r.minSellingPrice!),
       );
 
   ProductsTableCompanion _fromDomain(Product p) => ProductsTableCompanion(
@@ -111,5 +195,14 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         barcode: Value(p.barcode),
         imageUrl: Value(p.imageUrl),
         clientUpdatedAt: Value(p.clientUpdatedAt),
+        styleId: Value(p.styleId),
+        size: Value(p.size),
+        color: Value(p.color),
+        sku: Value(p.sku),
+        minSellingPrice: Value(
+          p.minSellingPrice == null
+              ? null
+              : santimFromDecimal(p.minSellingPrice!),
+        ),
       );
 }

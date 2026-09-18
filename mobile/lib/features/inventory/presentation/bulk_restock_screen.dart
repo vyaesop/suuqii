@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/shop_type/shop_features.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/quantity_input.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
@@ -60,6 +62,9 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final productsAsync = ref.watch(watchProductsProvider(query: _query));
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    final features =
+        auth is Authenticated ? auth.features : ShopFeatures.regular;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final lineCount =
@@ -142,6 +147,8 @@ class _BulkRestockScreenState extends ConsumerState<BulkRestockScreen> {
                     return _BulkRow(
                       product: p,
                       line: line,
+                      showExpiry: features.tracksExpiry,
+                      integerOnly: features.locksUnit,
                       onChange: (delta) => _bump(p.id, delta),
                       onSet: (result) => setState(() {
                         if (result == null ||
@@ -311,11 +318,17 @@ class _BulkRow extends StatelessWidget {
   const _BulkRow({
     required this.product,
     required this.line,
+    required this.showExpiry,
+    required this.integerOnly,
     required this.onChange,
     required this.onSet,
   });
   final Product product;
   final _RestockLine? line;
+
+  /// `ShopFeatures.tracksExpiry` / `locksUnit` for the line editor.
+  final bool showExpiry;
+  final bool integerOnly;
   final ValueChanged<Decimal> onChange;
   final ValueChanged<_RestockLine?> onSet;
 
@@ -418,8 +431,8 @@ class _BulkRow extends StatelessWidget {
               TextField(
                 controller: qtyController,
                 autofocus: true,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: quantityKeyboard(integerOnly: integerOnly),
+                inputFormatters: quantityFormatters(integerOnly: integerOnly),
                 decoration: InputDecoration(
                   labelText: ctx.l10n.bulkRestockQuantityLabel(product.unit),
                 ),
@@ -434,35 +447,37 @@ class _BulkRow extends StatelessWidget {
                   prefixText: 'ETB  ',
                 ),
               ),
-              const SizedBox(height: SuuqSpacing.sm),
-              InkWell(
-                onTap: () async {
-                  final now = DateTime.now();
-                  final picked = await showDatePicker(
-                    context: ctx,
-                    initialDate: expiry ?? now,
-                    firstDate: DateTime(now.year, now.month, now.day),
-                    lastDate: DateTime(now.year + 5),
-                  );
-                  if (picked != null) setState(() => expiry = picked);
-                },
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: ctx.l10n.stockReceiveExpiryLabel,
-                    suffixIcon: expiry == null
-                        ? const Icon(Icons.event_rounded)
-                        : IconButton(
-                            icon: const Icon(Icons.clear_rounded, size: 18),
-                            onPressed: () => setState(() => expiry = null),
-                          ),
-                  ),
-                  child: Text(
-                    expiry == null
-                        ? ctx.l10n.stockReceiveNoExpiry
-                        : ctx.dateShort(expiry!),
+              if (showExpiry) ...[
+                const SizedBox(height: SuuqSpacing.sm),
+                InkWell(
+                  onTap: () async {
+                    final now = DateTime.now();
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: expiry ?? now,
+                      firstDate: DateTime(now.year, now.month, now.day),
+                      lastDate: DateTime(now.year + 5),
+                    );
+                    if (picked != null) setState(() => expiry = picked);
+                  },
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: ctx.l10n.stockReceiveExpiryLabel,
+                      suffixIcon: expiry == null
+                          ? const Icon(Icons.event_rounded)
+                          : IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 18),
+                              onPressed: () => setState(() => expiry = null),
+                            ),
+                    ),
+                    child: Text(
+                      expiry == null
+                          ? ctx.l10n.stockReceiveNoExpiry
+                          : ctx.dateShort(expiry!),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
           actions: [

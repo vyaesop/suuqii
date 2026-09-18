@@ -55,6 +55,12 @@ String? _messageForCode(AppLocalizations l, String? code) {
       return l.errCreditLimitExceeded;
     case 'expense_approval_required':
       return l.errExpenseApprovalRequired;
+    case 'below_price_floor':
+      return l.errBelowPriceFloor;
+    case 'return_exceeds_sold':
+      return l.errReturnExceedsSold;
+    case 'sku_collision':
+      return l.errSkuCollision;
     case 'invalid_payload':
       return l.errInvalidPayload;
     case 'conflict':

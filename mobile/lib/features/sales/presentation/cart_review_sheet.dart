@@ -7,8 +7,10 @@ import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/quantity_input.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
+import 'package:suuqii/features/sales/presentation/exchange_controller.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
 
 /// Cart review and edit. Replaces the quick cart shortcut with an
@@ -21,6 +23,9 @@ class CartReviewSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final cart = ref.watch(cartControllerProvider);
+    // During an exchange the returned goods' credit is the discount; an
+    // extra one would double-dip, so the row is shown but locked.
+    final inExchange = ref.watch(exchangeModeProvider) != null;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
@@ -139,7 +144,9 @@ class CartReviewSheet extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   InkWell(
-                    onTap: () => _editDiscount(context, ref, cart),
+                    onTap: inExchange
+                        ? null
+                        : () => _editDiscount(context, ref, cart),
                     borderRadius: BorderRadius.circular(SuuqRadius.sm),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -151,14 +158,23 @@ class CartReviewSheet extends ConsumerWidget {
                             color: scheme.onSurfaceVariant,
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            cart.discount > Decimal.zero
-                                ? l.cartDiscount
-                                : l.cartAddDiscount,
-                            style: theme.textTheme.bodySmall,
+                          Expanded(
+                            child: Text(
+                              inExchange
+                                  ? l.exchangeNoDiscount
+                                  : cart.discount > Decimal.zero
+                                      ? l.cartDiscount
+                                      : l.cartAddDiscount,
+                              style: theme.textTheme.bodySmall,
+                            ),
                           ),
-                          const Spacer(),
-                          if (cart.discount > Decimal.zero)
+                          if (inExchange)
+                            Icon(
+                              Icons.lock_outline_rounded,
+                              size: 16,
+                              color: scheme.onSurfaceVariant,
+                            )
+                          else if (cart.discount > Decimal.zero)
                             Text(
                               l.cartMinusAmount(context.money(cart.discount)),
                               style: theme.textTheme.bodyMedium?.copyWith(
@@ -312,9 +328,14 @@ class _CartLineTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final auth = ref.watch(authControllerProvider).valueOrNull;
-    final isBakery = auth is Authenticated && auth.isBakery;
+    final allowsOversell =
+        auth is Authenticated && auth.features.allowsOversell;
+    final integerOnly = auth is Authenticated && auth.features.locksUnit;
+    final hasLinePricing =
+        auth is Authenticated && auth.features.hasLinePricing;
+    final isOwner = auth is Authenticated && auth.isOwner;
     final stock = line.product.stock;
-    final atStockLimit = !isBakery && line.qty >= stock;
+    final atStockLimit = !allowsOversell && line.qty >= stock;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: SuuqSpacing.sm),
@@ -340,13 +361,49 @@ class _CartLineTile extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  context.l10n.cartPricePerUnit(
-                    context.money(line.product.sellingPrice),
-                    line.product.unit,
+                InkWell(
+                  onTap: hasLinePricing
+                      ? () => _editPrice(context, ref, isOwner: isOwner)
+                      : null,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        context.l10n.cartPricePerUnit(
+                          context.money(line.unitPrice),
+                          line.product.unit,
+                        ),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: hasLinePricing ? scheme.primary : null,
+                          decoration:
+                              hasLinePricing ? TextDecoration.underline : null,
+                        ),
+                      ),
+                      if (line.hasLineDiscount) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          context.l10n.priceWas(
+                            context.money(line.listPrice),
+                          ),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            decoration: TextDecoration.lineThrough,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  style: theme.textTheme.bodySmall,
                 ),
+                if (hasLinePricing && line.isBelowFloor)
+                  Text(
+                    isOwner
+                        ? context.l10n.cartBelowFloorOwner
+                        : context.l10n.cartBelowFloorOwnerPin,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.error,
+                    ),
+                  ),
                 Text(
                   context.money(line.lineTotal),
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -368,7 +425,12 @@ class _CartLineTile extends ConsumerWidget {
                 : () => ref
                     .read(cartControllerProvider.notifier)
                     .setQty(line.product.id, line.qty + Decimal.one),
-            onTapQty: () => _editQty(context, ref, isBakery: isBakery),
+            onTapQty: () => _editQty(
+              context,
+              ref,
+              allowsOversell: allowsOversell,
+              integerOnly: integerOnly,
+            ),
           ),
         ],
       ),
@@ -378,7 +440,8 @@ class _CartLineTile extends ConsumerWidget {
   Future<void> _editQty(
     BuildContext context,
     WidgetRef ref, {
-    required bool isBakery,
+    required bool allowsOversell,
+    required bool integerOnly,
   }) async {
     final controller = TextEditingController(text: _fmtQty(line.qty));
     final result = await showDialog<Decimal?>(
@@ -390,10 +453,11 @@ class _CartLineTile extends ConsumerWidget {
           content: TextField(
             controller: controller,
             autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: quantityKeyboard(integerOnly: integerOnly),
+            inputFormatters: quantityFormatters(integerOnly: integerOnly),
             decoration: InputDecoration(
               labelText: dl.posQuantityLabel(line.product.unit),
-              helperText: isBakery
+              helperText: allowsOversell
                   ? null
                   : dl.posInStockHelper(_fmtQty(line.product.stock)),
             ),
@@ -422,7 +486,7 @@ class _CartLineTile extends ConsumerWidget {
       ref.read(cartControllerProvider.notifier).remove(line.product.id);
       return;
     }
-    if (!isBakery && result > line.product.stock) {
+    if (!allowsOversell && result > line.product.stock) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -437,6 +501,83 @@ class _CartLineTile extends ConsumerWidget {
       return;
     }
     ref.read(cartControllerProvider.notifier).setQty(line.product.id, result);
+  }
+
+  /// "Sold at" (docs/19 §6.6): the negotiated price for this line. The
+  /// cashier sees the list price and the floor — never the cost. Whether a
+  /// below-floor price needs the owner's PIN is settled at checkout.
+  Future<void> _editPrice(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool isOwner,
+  }) async {
+    final controller = TextEditingController(text: _fmtQty(line.unitPrice));
+    final result = await showDialog<Decimal?>(
+      context: context,
+      builder: (ctx) {
+        final dl = ctx.l10n;
+        return AlertDialog(
+          title: Text(dl.cartSoldAtTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                line.product.name,
+                style: Theme.of(ctx).textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: SuuqSpacing.sm),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: dl.cartSoldAtLabel,
+                  prefixText: 'ETB  ',
+                  helperText:
+                      '${dl.cartListPriceHelper(ctx.money(line.listPrice))}'
+                      ' · ${dl.cartFloorHelper(ctx.money(line.floorPrice))}',
+                  helperMaxLines: 2,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, line.listPrice),
+              child: Text(dl.cartClear),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = Decimal.tryParse(
+                  controller.text.trim().replaceAll(',', '.'),
+                );
+                Navigator.pop(ctx, value);
+              },
+              child: Text(dl.posSetButton),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null) return;
+    if (result < Decimal.zero) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.cartPriceNegative)),
+      );
+      return;
+    }
+    ref
+        .read(cartControllerProvider.notifier)
+        .setUnitPrice(line.product.id, result);
   }
 
   static String _fmtQty(Decimal value) {

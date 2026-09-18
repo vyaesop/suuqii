@@ -6,16 +6,20 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/shop_type/shop_features.dart';
+import 'package:suuqii/core/shop_type/shop_type_ui.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/data/styles_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
 import 'package:suuqii/features/inventory/domain/entities/stock_lot.dart';
 import 'package:suuqii/features/inventory/presentation/production_sheet.dart';
 import 'package:suuqii/features/inventory/presentation/spoilage_sheet.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/variant_header.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/expiry_badge.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
@@ -34,7 +38,7 @@ class ProductDetailScreen extends ConsumerWidget {
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final canEdit = auth is Authenticated;
     final isOwner = canEdit && auth.role == 'owner';
-    final isBakery = canEdit && auth.isBakery;
+    final features = canEdit ? auth.features : ShopFeatures.regular;
 
     return Scaffold(
       appBar: AppBar(
@@ -43,8 +47,13 @@ class ProductDetailScreen extends ConsumerWidget {
           if (canEdit)
             IconButton(
               icon: const Icon(Icons.auto_delete_outlined),
-              tooltip: l.spoilageTitle,
-              onPressed: () => _recordSpoilage(context, ref, isOwner: isOwner),
+              tooltip: features.spoilageActionTitle(l),
+              onPressed: () => _recordSpoilage(
+                context,
+                ref,
+                isOwner: isOwner,
+                features: features,
+              ),
             ),
           if (canEdit)
             IconButton(
@@ -71,17 +80,19 @@ class ProductDetailScreen extends ConsumerWidget {
           return _DetailBody(
             product: product,
             isOwner: isOwner,
+            features: features,
             onMarkLotSpoiled: (lot) => _recordSpoilage(
               context,
               ref,
               isOwner: isOwner,
+              features: features,
               lot: lot,
             ),
           );
         },
       ),
       floatingActionButton: canEdit
-          ? (isBakery
+          ? (features.hasProduction
               ? FloatingActionButton.extended(
                   icon: const Icon(Icons.bakery_dining_outlined),
                   onPressed: () => _recordProduction(
@@ -93,8 +104,12 @@ class ProductDetailScreen extends ConsumerWidget {
                 )
               : FloatingActionButton.extended(
                   icon: const Icon(Icons.tune_rounded),
-                  onPressed: () =>
-                      _adjustStock(context, ref, isOwner: isOwner),
+                  onPressed: () => _adjustStock(
+                    context,
+                    ref,
+                    isOwner: isOwner,
+                    features: features,
+                  ),
                   label: Text(l.stockAdjustTitle),
                 ))
           : null,
@@ -107,6 +122,7 @@ class ProductDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     required bool isOwner,
+    required ShopFeatures features,
   }) async {
     final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
@@ -116,7 +132,11 @@ class ProductDetailScreen extends ConsumerWidget {
     final result = await showModalBottomSheet<StockAdjustResult>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => StockAdjustSheet(product: product),
+      builder: (_) => StockAdjustSheet(
+        product: product,
+        showExpiry: features.tracksExpiry,
+        integerOnly: features.locksUnit,
+      ),
     );
     if (result == null) return;
 
@@ -168,6 +188,7 @@ class ProductDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     required bool isOwner,
+    required ShopFeatures features,
     StockLot? lot,
   }) async {
     final l = context.l10n;
@@ -184,6 +205,9 @@ class ProductDetailScreen extends ConsumerWidget {
         initialLotId: lot?.id,
         initialQuantity: lot?.qtyRemaining,
         initialReason: (lot?.isExpired ?? false) ? 'expired' : null,
+        title: features.spoilageActionTitle(l),
+        integerOnly: features.locksUnit,
+        damagedLostWording: features.isDamagedLostWording,
       ),
     );
     if (result == null) return;
@@ -203,7 +227,9 @@ class ProductDetailScreen extends ConsumerWidget {
             lotId: result.lotId,
             ownerChallengeToken: challenge,
           );
-      messenger.showSnackBar(SnackBar(content: Text(l.spoilageSuccess)));
+      messenger.showSnackBar(
+        SnackBar(content: Text(features.spoilageSuccess(l))),
+      );
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text(localizedErrorMessage(l, e))),
@@ -258,11 +284,17 @@ class _DetailBody extends ConsumerWidget {
   const _DetailBody({
     required this.product,
     required this.isOwner,
+    required this.features,
     required this.onMarkLotSpoiled,
   });
   final Product product;
   final bool isOwner;
+  final ShopFeatures features;
   final ValueChanged<StockLot> onMarkLotSpoiled;
+
+  /// Locked-unit shops count pieces; "12 piece" reads as noise there.
+  String _qty(BuildContext context, Decimal d) =>
+      features.locksUnit ? _fmtNum(d) : '${_fmtNum(d)} ${product.unit}';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -271,6 +303,10 @@ class _DetailBody extends ConsumerWidget {
     final scheme = theme.colorScheme;
     final logsAsync = ref.watch(watchInventoryLogProvider(product.id));
     final lotsAsync = ref.watch(watchProductLotsProvider(product.id));
+    // Variants inherit the style image when they have none of their own.
+    final style = product.styleId == null
+        ? null
+        : ref.watch(watchStyleProvider(product.styleId!)).valueOrNull;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -280,6 +316,15 @@ class _DetailBody extends ConsumerWidget {
         96,
       ),
       children: [
+        if (product.isVariant) ...[
+          VariantHeader(
+            product: product,
+            style: style,
+            onOpenStyle: () =>
+                context.push('/inventory/style/${product.styleId}'),
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+        ],
         SectionCard(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -289,7 +334,7 @@ class _DetailBody extends ConsumerWidget {
                 height: 88,
                 child: ProductImage(
                   name: product.name,
-                  imageUrl: product.imageUrl,
+                  imageUrl: product.imageUrl ?? style?.imageUrl,
                 ),
               ),
               const SizedBox(width: SuuqSpacing.md),
@@ -344,7 +389,7 @@ class _DetailBody extends ConsumerWidget {
               child: _Stat(
                 icon: Icons.inventory_2_outlined,
                 label: l.productInStockLabel,
-                value: '${_fmtNum(product.stock)} ${product.unit}',
+                value: _qty(context, product.stock),
                 emphasize: product.isLowStock,
               ),
             ),
@@ -353,12 +398,19 @@ class _DetailBody extends ConsumerWidget {
               child: _Stat(
                 icon: Icons.warning_amber_rounded,
                 label: l.productLowAtLabel,
-                value:
-                    '${_fmtNum(product.lowStockThreshold)} ${product.unit}',
+                value: _qty(context, product.lowStockThreshold),
               ),
             ),
           ],
         ),
+        if (product.minSellingPrice != null) ...[
+          const SizedBox(height: SuuqSpacing.sm),
+          _Stat(
+            icon: Icons.price_change_outlined,
+            label: l.productMinPriceLabel,
+            value: context.money(product.minSellingPrice!),
+          ),
+        ],
         if (isOwner) ...[
           const SizedBox(height: SuuqSpacing.sm),
           _Stat(
@@ -373,6 +425,14 @@ class _DetailBody extends ConsumerWidget {
             icon: Icons.qr_code_scanner_rounded,
             label: l.productBarcodeLabel,
             value: product.barcode!,
+          ),
+        ],
+        if (product.sku != null && product.sku!.isNotEmpty) ...[
+          const SizedBox(height: SuuqSpacing.sm),
+          _Stat(
+            icon: Icons.tag_rounded,
+            label: l.productSkuLabel,
+            value: product.sku!,
           ),
         ],
         const SizedBox(height: SuuqSpacing.lg),
@@ -424,6 +484,7 @@ class _DetailBody extends ConsumerWidget {
                       lot: lots[i],
                       unit: product.unit,
                       isOwner: isOwner,
+                      showExpiry: features.tracksExpiry,
                       onMarkSpoiled: () => onMarkLotSpoiled(lots[i]),
                     ),
                   ],
@@ -465,7 +526,11 @@ class _DetailBody extends ConsumerWidget {
                 children: [
                   for (var i = 0; i < logs.length; i++) ...[
                     if (i > 0) const Divider(height: 1),
-                    _MovementTile(movement: logs[i], unit: product.unit),
+                    _MovementTile(
+                      movement: logs[i],
+                      unit: product.unit,
+                      features: features,
+                    ),
                   ],
                 ],
               ),
@@ -488,11 +553,15 @@ class _LotTile extends StatelessWidget {
     required this.lot,
     required this.unit,
     required this.isOwner,
+    required this.showExpiry,
     required this.onMarkSpoiled,
   });
   final StockLot lot;
   final String unit;
   final bool isOwner;
+
+  /// Expiry badges are meaningless where nothing expires.
+  final bool showExpiry;
   final VoidCallback onMarkSpoiled;
 
   @override
@@ -532,7 +601,7 @@ class _LotTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: SuuqSpacing.xs),
-          if (lot.expiryDate != null && days != null) ...[
+          if (showExpiry && lot.expiryDate != null && days != null) ...[
             ExpiryBadge(expiryDate: lot.expiryDate!, daysToExpiry: days),
             if (days < 0) ...[
               const SizedBox(width: SuuqSpacing.xs),
@@ -617,9 +686,14 @@ class _Stat extends StatelessWidget {
 }
 
 class _MovementTile extends StatelessWidget {
-  const _MovementTile({required this.movement, required this.unit});
+  const _MovementTile({
+    required this.movement,
+    required this.unit,
+    required this.features,
+  });
   final InventoryMovement movement;
   final String unit;
+  final ShopFeatures features;
 
   @override
   Widget build(BuildContext context) {
@@ -667,7 +741,9 @@ class _MovementTile extends StatelessWidget {
             ),
           ),
           Text(
-            '${positive ? "+" : ""}${_fmtNum(movement.quantityDelta)} $unit',
+            features.locksUnit
+                ? '${positive ? "+" : ""}${_fmtNum(movement.quantityDelta)}'
+                : '${positive ? "+" : ""}${_fmtNum(movement.quantityDelta)} $unit',
             style: theme.textTheme.titleMedium?.copyWith(
               color: color,
               fontWeight: FontWeight.w700,
@@ -692,7 +768,7 @@ class _MovementTile extends StatelessWidget {
       case 'adjustment':
         return (Icons.tune_rounded, l.productMovementAdjustment);
       case 'spoilage':
-        return (Icons.auto_delete_outlined, l.productMovementSpoilage);
+        return (Icons.auto_delete_outlined, features.spoilageNoun(l));
       case 'production':
         return (Icons.bakery_dining_outlined, l.productMovementProduction);
       default:

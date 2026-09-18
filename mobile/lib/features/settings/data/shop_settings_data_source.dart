@@ -10,6 +10,7 @@ class ShopSettings {
     required this.shopType,
     required this.debtThreshold,
     required this.expenseApprovalThreshold,
+    this.returnWindowDays = 7,
   });
 
   factory ShopSettings.fromJson(Map<String, dynamic> j) => ShopSettings(
@@ -19,6 +20,7 @@ class ShopSettings {
         shopType: j['shop_type'] as String,
         debtThreshold: j['debt_threshold'] as String,
         expenseApprovalThreshold: j['expense_approval_threshold'] as String,
+        returnWindowDays: (j['return_window_days'] as num?)?.toInt() ?? 7,
       );
 
   final String name;
@@ -27,6 +29,9 @@ class ShopSettings {
   final String shopType;
   final String debtThreshold;
   final String expenseApprovalThreshold;
+
+  /// Days after a sale within which returns are routine (docs/19 §13.4).
+  final int returnWindowDays;
 }
 
 class ShopSettingsDataSource {
@@ -44,6 +49,7 @@ class ShopSettingsDataSource {
     String? locale,
     String? debtThreshold,
     String? expenseApprovalThreshold,
+    int? returnWindowDays,
   }) async {
     final res = await _dio.patch<Map<String, dynamic>>(
       '/v1/shops/settings',
@@ -53,6 +59,7 @@ class ShopSettingsDataSource {
         if (debtThreshold != null) 'debt_threshold': debtThreshold,
         if (expenseApprovalThreshold != null)
           'expense_approval_threshold': expenseApprovalThreshold,
+        if (returnWindowDays != null) 'return_window_days': returnWindowDays,
       },
     );
     return ShopSettings.fromJson(res.data!);

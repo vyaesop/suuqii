@@ -38,6 +38,15 @@ class ProductsRepository {
 
   Future<Product?> byId(String id) => db.productsDao.getById(id);
 
+  /// Whether a hand-typed [sku] already belongs to another live product, so
+  /// the edit form can refuse it before the server does (`sku_collision`).
+  Future<bool> isSkuTaken(String sku, {String? excludingProductId}) =>
+      db.productsDao.skuTaken(
+        sku,
+        shopId: shopId,
+        excludingProductId: excludingProductId,
+      );
+
   Stream<Product?> watchById(String id) =>
       db.productsDao.watchById(id);
 
@@ -73,10 +82,20 @@ class ProductsRepository {
           unit: r.read<String>('unit'),
           barcode: r.readNullable<String>('barcode'),
           imageUrl: r.readNullable<String>('image_url'),
+          styleId: r.readNullable<String>('style_id'),
+          size: r.readNullable<String>('size'),
+          color: r.readNullable<String>('color'),
+          sku: r.readNullable<String>('sku'),
+          minSellingPrice: r.readNullable<int>('min_selling_price') == null
+              ? null
+              : decimalFromSantim(r.read<int>('min_selling_price')),
         );
       }).toList(),
     );
   }
+
+  Stream<List<Product>> watchByStyle(String styleId) =>
+      db.productsDao.watchByStyle(styleId);
 
   /// Distinct non-null categories used in this shop. Reactive so the POS
   /// chip row reflects newly-introduced categories without a manual refresh.
@@ -152,6 +171,8 @@ class ProductsRepository {
     String? category,
     String? barcode,
     String? imageUrl,
+    String? sku,
+    Decimal? minSellingPrice,
     String? ownerChallengeToken,
   }) async {
     final id = const Uuid().v4();
@@ -169,6 +190,8 @@ class ProductsRepository {
       barcode: barcode,
       imageUrl: imageUrl,
       clientUpdatedAt: now,
+      sku: sku,
+      minSellingPrice: minSellingPrice,
     );
 
     await db.transaction(() async {
@@ -191,6 +214,9 @@ class ProductsRepository {
                 'unit': unit,
                 if (barcode != null) 'barcode': barcode,
                 if (imageUrl != null) 'image_url': imageUrl,
+                if (sku != null) 'sku': sku,
+                if (minSellingPrice != null)
+                  'min_selling_price': minSellingPrice.toString(),
                 'client_updated_at': now.toIso8601String(),
                 if (ownerChallengeToken != null)
                   'owner_challenge': ownerChallengeToken,
@@ -215,11 +241,17 @@ class ProductsRepository {
     required String? barcode,
     required String? imageUrl,
     required String? ownerChallengeToken,
+    String? sku,
+    Decimal? minSellingPrice,
   }) async {
     final existing = await db.productsDao.getById(id);
     if (existing == null) throw StateError('Product not found');
     final now = DateTime.now().toUtc();
 
+    // Variant identity (style_id / size / colour) is not editable here — the
+    // style screen owns it — so it is neither sent nor changed; the server
+    // leaves absent keys untouched. sku and min_selling_price are always
+    // sent so that clearing them (null) reaches the server.
     final payload = <String, dynamic>{
       'id': id,
       'client_updated_at': now.toIso8601String(),
@@ -232,6 +264,8 @@ class ProductsRepository {
       'unit': unit,
       'barcode': barcode,
       'image_url': imageUrl,
+      'sku': sku,
+      'min_selling_price': minSellingPrice?.toString(),
       if (ownerChallengeToken != null) 'owner_challenge': ownerChallengeToken,
     };
 
@@ -248,6 +282,11 @@ class ProductsRepository {
       barcode: barcode,
       imageUrl: imageUrl,
       clientUpdatedAt: now,
+      styleId: existing.styleId,
+      size: existing.size,
+      color: existing.color,
+      sku: sku,
+      minSellingPrice: minSellingPrice,
     );
 
     await db.transaction(() async {
@@ -346,6 +385,27 @@ Future<Set<String>> productIdsWithPendingChanges(AppDatabase db) async {
       case 'product.update':
         final id = payload['id'];
         if (id is String) ids.add(id);
+      case 'style.create':
+      case 'style.add_variants':
+        // Variants are created inside the style event, so their rows are
+        // local-only until it lands.
+        final variants = payload['variants'];
+        if (variants is List) {
+          for (final v in variants) {
+            if (v is Map && v['id'] is String) ids.add(v['id'] as String);
+          }
+        }
+      case 'style.update':
+      case 'style.delete':
+        // Renames/markdowns/deletes touch every variant of the style; the
+        // ids are not in the payload, so resolve them locally.
+        final styleId = payload['id'];
+        if (styleId is String) {
+          final rows = await (db.select(db.productsTable)
+                ..where((t) => t.styleId.equals(styleId)))
+              .get();
+          ids.addAll(rows.map((r) => r.id));
+        }
       case 'inventory.adjust':
       case 'stock.receive':
       case 'stock.spoil':
@@ -363,8 +423,9 @@ Future<Set<String>> productIdsWithPendingChanges(AppDatabase db) async {
           }
         }
       case 'sale.refund':
-        // Refunds restore stock locally; the payload only carries the sale
-        // id, so resolve the affected products from local sale items.
+      case 'sale.return':
+        // Refunds and returns restore stock locally; the payload only carries
+        // the sale id, so resolve the affected products from local sale items.
         final saleId = payload['sale_id'];
         if (saleId is String) {
           final rows = await (db.select(db.saleItemsTable)
@@ -417,6 +478,12 @@ Stream<List<Product>> watchRecentProducts(WatchRecentProductsRef ref) {
 @riverpod
 Stream<Product?> watchProduct(WatchProductRef ref, String id) {
   return ref.watch(productsRepositoryProvider).watchById(id);
+}
+
+/// Live variants of one style (boutique).
+@riverpod
+Stream<List<Product>> watchVariants(WatchVariantsRef ref, String styleId) {
+  return ref.watch(productsRepositoryProvider).watchByStyle(styleId);
 }
 
 @riverpod

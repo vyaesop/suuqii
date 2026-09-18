@@ -23,6 +23,29 @@ class ExpiringLot {
   final String productUnit;
 }
 
+/// One lot a return put units back onto.
+class ReversedLot {
+  const ReversedLot({
+    required this.lotId,
+    required this.quantity,
+    required this.unitCostSantim,
+  });
+  final String lotId;
+  final Decimal quantity;
+  final int unitCostSantim;
+}
+
+/// Result of [LotsDao.reverseItemConsumptions].
+class ReversedConsumption {
+  const ReversedConsumption({required this.lots, required this.unitCostSantim});
+
+  final List<ReversedLot> lots;
+
+  /// Weighted unit cost (int santim) of what went back on the lots; 0 when
+  /// nothing was lotted (oversold units).
+  final int unitCostSantim;
+}
+
 /// Local mirror of stock lots + FEFO consumption (docs/16-inventory-lots.md).
 ///
 /// All mutating methods participate in the caller's Drift transaction (Drift
@@ -187,6 +210,119 @@ class LotsDao extends DatabaseAccessor<AppDatabase> with _$LotsDaoMixin {
           movement: 'refund_reversal',
           quantity: -qty,
           unitCostSantim: r.read<int>('unit_cost_santim'),
+          consumedAt: at,
+        ),
+      );
+    }
+  }
+
+  /// Partial-return path (docs/19 §13.3): put [quantity] of one sale item
+  /// back onto the lots it was drawn from, oldest draw first, skipping what
+  /// earlier returns already put back. Writes one `refund_reversal` row
+  /// (negative quantity) per lot touched and returns those lots with the
+  /// quantity and unit cost restored, plus the weighted unit cost — the
+  /// caller needs the same lots again for a damaged unit's spoilage pair.
+  ///
+  /// Units sold beyond any lot (oversell) have no consumption row and so
+  /// nothing to return to; they still count towards stock via the caller.
+  Future<ReversedConsumption> reverseItemConsumptions({
+    required String saleItemId,
+    required Decimal quantity,
+    DateTime? now,
+  }) async {
+    final at = now ?? DateTime.now().toUtc();
+    // Ordered by insertion (rowid), not by id: every lot one sale line draws
+    // from is written with the SAME consumed_at and a random UUID id, so
+    // ordering by id would hand the units back to the lots in an arbitrary
+    // order. rowid is the exact draw order, which is what "FIFO over that
+    // item's consumptions" means.
+    final rows = await customSelect(
+      'SELECT lot_id, quantity, unit_cost_santim FROM lot_consumptions '
+      "WHERE sale_item_id = ? AND movement IN ('sale', 'refund_reversal') "
+      'ORDER BY consumed_at ASC, rowid ASC',
+      variables: [Variable.withString(saleItemId)],
+      readsFrom: {lotConsumptionsTable},
+    ).get();
+    // Net outstanding per lot, in first-draw order (sale rows are positive,
+    // earlier reversals negative). Cost is the lot's original draw cost.
+    final outstanding = <String, Decimal>{};
+    final cost = <String, int>{};
+    for (final c in rows) {
+      final lotId = c.read<String>('lot_id');
+      outstanding[lotId] = (outstanding[lotId] ?? Decimal.zero) +
+          _dec(c.read<double>('quantity'));
+      cost.putIfAbsent(lotId, () => c.read<int>('unit_cost_santim'));
+    }
+
+    final touched = <ReversedLot>[];
+    var remaining = quantity;
+    var costAccum = Decimal.zero; // santim
+    for (final entry in outstanding.entries) {
+      if (remaining <= Decimal.zero) break;
+      final take = entry.value < remaining ? entry.value : remaining;
+      if (take <= Decimal.zero) continue;
+      final lotId = entry.key;
+      final unitCost = cost[lotId]!;
+      await customUpdate(
+        'UPDATE stock_lots SET qty_remaining = qty_remaining + ? WHERE id = ?',
+        variables: [Variable.withReal(take.toDouble()), Variable.withString(lotId)],
+        updates: {stockLotsTable},
+        updateKind: UpdateKind.update,
+      );
+      await into(lotConsumptionsTable).insert(
+        LotConsumptionsTableCompanion.insert(
+          id: const Uuid().v4(),
+          lotId: lotId,
+          saleItemId: Value(saleItemId),
+          movement: 'refund_reversal',
+          quantity: -take.toDouble(),
+          unitCostSantim: unitCost,
+          consumedAt: at,
+        ),
+      );
+      touched.add(ReversedLot(lotId: lotId, quantity: take, unitCostSantim: unitCost));
+      costAccum += take * Decimal.fromInt(unitCost);
+      remaining -= take;
+    }
+    final restored = quantity - remaining;
+    final weighted = restored <= Decimal.zero
+        ? 0
+        : (costAccum / restored)
+            .toDecimal(scaleOnInfinitePrecision: 12)
+            .round()
+            .toBigInt()
+            .toInt();
+    return ReversedConsumption(lots: touched, unitCostSantim: weighted);
+  }
+
+  /// The damaged half of a return: the unit came back onto its lot (via
+  /// [reverseItemConsumptions]) but cannot be sold, so it goes straight back
+  /// off as `spoilage` on the same lots at the same cost. Net lot quantity
+  /// unchanged; the loss shows up in spoilage reporting instead of vanishing.
+  Future<void> spoilReturnedLots({
+    required String saleItemId,
+    required List<ReversedLot> lots,
+    DateTime? now,
+  }) async {
+    final at = now ?? DateTime.now().toUtc();
+    for (final lot in lots) {
+      await customUpdate(
+        'UPDATE stock_lots SET qty_remaining = qty_remaining - ? WHERE id = ?',
+        variables: [
+          Variable.withReal(lot.quantity.toDouble()),
+          Variable.withString(lot.lotId),
+        ],
+        updates: {stockLotsTable},
+        updateKind: UpdateKind.update,
+      );
+      await into(lotConsumptionsTable).insert(
+        LotConsumptionsTableCompanion.insert(
+          id: const Uuid().v4(),
+          lotId: lot.lotId,
+          saleItemId: Value(saleItemId),
+          movement: 'spoilage',
+          quantity: lot.quantity.toDouble(),
+          unitCostSantim: lot.unitCostSantim,
           consumedAt: at,
         ),
       );

@@ -142,6 +142,7 @@ class AuthController extends _$AuthController {
     String? shopName,
     String? debtThreshold,
     String? expenseApprovalThreshold,
+    int? returnWindowDays,
   }) async {
     final current = state.valueOrNull;
     if (current is! Authenticated) return;
@@ -150,12 +151,14 @@ class AuthController extends _$AuthController {
       shopName: shopName,
       debtThreshold: debtThreshold,
       expenseApprovalThreshold: expenseApprovalThreshold,
+      returnWindowDays: returnWindowDays,
     );
     state = AsyncData(
       current.copyWith(
         shopName: shopName,
         debtThreshold: debtThreshold,
         expenseApprovalThreshold: expenseApprovalThreshold,
+        returnWindowDays: returnWindowDays,
       ),
     );
   }

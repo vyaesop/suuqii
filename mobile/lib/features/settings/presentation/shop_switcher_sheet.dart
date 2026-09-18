@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/shop_type/shop_type_ui.dart';
 import 'package:suuqii/features/auth/domain/entities/shop_option.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/settings/presentation/employees_screen.dart'
@@ -115,9 +116,7 @@ class _ShopSwitcherSheetState extends ConsumerState<ShopSwitcherSheet> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(
-                      shop.isBakery
-                          ? Icons.bakery_dining_rounded
-                          : Icons.storefront_rounded,
+                      shopTypeIcon(shop.shopType),
                       color: shop.isActive ? scheme.primary : null,
                     ),
                     title: Text(shop.name),

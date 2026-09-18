@@ -102,6 +102,13 @@ void main() {
     'receiptQtyUnitPrice',
     'receiptSaleNumber',
     'receiptShareLine',
+    'saleDetailQtyPrice',
+    // Bare placeholder compositions on receipts and return rows.
+    'receiptShareLineWas',
+    'receiptShareReturnLine',
+    'saleDetailReturnLine',
+    // "{stock} · ×{inCart}" — bare placeholder composition on a size chip.
+    'variantChipStockInCart',
   };
 
   test('every translatable app_am.arb value is actually written in Ethiopic',

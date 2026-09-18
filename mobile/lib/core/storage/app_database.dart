@@ -10,9 +10,11 @@ import 'package:suuqii/core/storage/tables/handovers_table.dart';
 import 'package:suuqii/core/storage/tables/inventory_logs_table.dart';
 import 'package:suuqii/core/storage/tables/products_table.dart';
 import 'package:suuqii/core/storage/tables/recipes_table.dart';
+import 'package:suuqii/core/storage/tables/sale_returns_table.dart';
 import 'package:suuqii/core/storage/tables/sales_tables.dart';
 import 'package:suuqii/core/storage/tables/shifts_table.dart';
 import 'package:suuqii/core/storage/tables/stock_lots_table.dart';
+import 'package:suuqii/core/storage/tables/styles_table.dart';
 import 'package:suuqii/core/storage/tables/supplies_table.dart';
 import 'package:suuqii/core/storage/tables/sync_events_table.dart';
 import 'package:suuqii/core/storage/tables/sync_meta_table.dart';
@@ -22,6 +24,8 @@ import 'package:suuqii/features/handovers/data/handovers_dao.dart';
 import 'package:suuqii/features/inventory/data/lots_dao.dart';
 import 'package:suuqii/features/inventory/data/products_dao.dart';
 import 'package:suuqii/features/inventory/data/recipes_dao.dart';
+import 'package:suuqii/features/inventory/data/styles_dao.dart';
+import 'package:suuqii/features/sales/data/sale_returns_dao.dart';
 import 'package:suuqii/features/supplies/data/supplies_dao.dart';
 import 'package:suuqii/features/sync/data/sync_queue_dao.dart';
 
@@ -49,6 +53,9 @@ int sqliteDateTimeParam(DateTime value) =>
     LotConsumptionsTable,
     HandoversTable,
     HandoverItemsTable,
+    StylesTable,
+    SaleReturnsTable,
+    SaleReturnItemsTable,
   ],
   daos: [
     SyncQueueDao,
@@ -59,6 +66,8 @@ int sqliteDateTimeParam(DateTime value) =>
     RecipesDao,
     LotsDao,
     HandoversDao,
+    StylesDao,
+    SaleReturnsDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -80,7 +89,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -121,6 +130,22 @@ class AppDatabase extends _$AppDatabase {
           if (from < 10) {
             await m.createTable(handoversTable);
             await m.createTable(handoverItemsTable);
+            await _createIndexes();
+          }
+          if (from < 11) {
+            // Boutique shop type (docs/19): styles + variant columns, the
+            // pre-discount list price on sale items, and the returns tables
+            // (schema only — Phase 2 adds the flow). Existing products keep
+            // working with every new column null.
+            await m.createTable(stylesTable);
+            await m.addColumn(productsTable, productsTable.styleId);
+            await m.addColumn(productsTable, productsTable.size);
+            await m.addColumn(productsTable, productsTable.color);
+            await m.addColumn(productsTable, productsTable.sku);
+            await m.addColumn(productsTable, productsTable.minSellingPrice);
+            await m.addColumn(saleItemsTable, saleItemsTable.listPrice);
+            await m.createTable(saleReturnsTable);
+            await m.createTable(saleReturnItemsTable);
             await _createIndexes();
           }
         },
@@ -194,6 +219,14 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_lot_consumptions_sale_item_id ON lot_consumptions (sale_item_id)',
       'CREATE INDEX IF NOT EXISTS idx_handovers_shop_status ON handovers (shop_id, status)',
       'CREATE INDEX IF NOT EXISTS idx_handover_items_handover_id ON handover_items (handover_id)',
+      'CREATE INDEX IF NOT EXISTS idx_styles_shop_id ON styles (shop_id)',
+      'CREATE INDEX IF NOT EXISTS idx_products_style_id ON products (style_id)',
+      // One live product per (style, size, colour); NULL size/colour rows are
+      // distinct in SQLite, matching the server's partial unique index.
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_products_variant_uq ON products (style_id, size, color) WHERE deleted_at IS NULL AND style_id IS NOT NULL',
+      'CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_returns_sale_id ON sale_returns (sale_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_return_items_return_id ON sale_return_items (return_id)',
     ];
     for (final sql in statements) {
       await customStatement(sql);
@@ -207,6 +240,8 @@ class AppDatabase extends _$AppDatabase {
     await transaction(() async {
       await customStatement('DELETE FROM sync_events');
       await customStatement('DELETE FROM sync_meta');
+      await customStatement('DELETE FROM sale_return_items');
+      await customStatement('DELETE FROM sale_returns');
       await customStatement('DELETE FROM handover_items');
       await customStatement('DELETE FROM handovers');
       await customStatement('DELETE FROM lot_consumptions');
@@ -222,6 +257,7 @@ class AppDatabase extends _$AppDatabase {
       await customStatement('DELETE FROM recipe_items');
       await customStatement('DELETE FROM supplies');
       await customStatement('DELETE FROM products');
+      await customStatement('DELETE FROM styles');
     });
   }
 

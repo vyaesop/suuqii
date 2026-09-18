@@ -6,6 +6,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
+import 'package:suuqii/core/utils/money.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
@@ -392,10 +393,18 @@ class _CollectSheetState extends State<_CollectSheet> {
   final _note = TextEditingController();
   String _method = 'cash';
 
+  /// Half of the remaining balance, rounded up to a whole santim so paying
+  /// "half" twice never strands a one-santim tail on the debt.
+  Decimal get _half =>
+      decimalFromSantim((santimFromDecimal(widget.max) + 1) ~/ 2);
+
   @override
   void initState() {
     super.initState();
-    _amount = TextEditingController(text: widget.max.toString());
+    _amount = TextEditingController(text: widget.max.toString())
+      // Rebuild so the half/full chips and the remaining-after preview
+      // track manual edits.
+      ..addListener(() => setState(() {}));
   }
 
   @override
@@ -405,9 +414,23 @@ class _CollectSheetState extends State<_CollectSheet> {
     super.dispose();
   }
 
+  void _setAmount(Decimal value) {
+    _amount
+      ..text = value.toString()
+      ..selection = TextSelection.collapsed(offset: _amount.text.length);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    final entered = Decimal.tryParse(_amount.text.trim());
+    final isFull = entered == widget.max;
+    final isHalf = !isFull && entered == _half;
+    final remainsAfter = entered != null &&
+            entered > Decimal.zero &&
+            entered < widget.max
+        ? widget.max - entered
+        : null;
     return SuuqSheet(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -435,6 +458,29 @@ class _CollectSheetState extends State<_CollectSheet> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          const SizedBox(height: SuuqSpacing.xs),
+          Row(
+            children: [
+              ChoiceChip(
+                label: Text(l.debtQuickHalf),
+                selected: isHalf,
+                onSelected: (_) => _setAmount(_half),
+              ),
+              const SizedBox(width: SuuqSpacing.xs),
+              ChoiceChip(
+                label: Text(l.debtQuickFull),
+                selected: isFull,
+                onSelected: (_) => _setAmount(widget.max),
+              ),
+            ],
+          ),
+          if (remainsAfter != null) ...[
+            const SizedBox(height: SuuqSpacing.xs),
+            Text(
+              l.debtRemainsAfter(context.money(remainsAfter)),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           const SizedBox(height: SuuqSpacing.sm),
           SegmentedButton<String>(
             segments: [

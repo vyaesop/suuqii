@@ -455,7 +455,9 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
     }
 
     final auth = ref.watch(authControllerProvider).valueOrNull;
-    final isBakery = auth is Authenticated && auth.isBakery;
+    // The baker role only exists where handovers do (docs/17): the role
+    // picker is hidden for every other shop type.
+    final hasBakerRole = auth is Authenticated && auth.features.hasHandovers;
 
     return SuuqSheet(
       child: Column(
@@ -486,7 +488,7 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
               prefixIcon: const Icon(Icons.phone_iphone_rounded),
             ),
           ),
-          if (isBakery) ...[
+          if (hasBakerRole) ...[
             const SizedBox(height: SuuqSpacing.md),
             SegmentedButton<String>(
               segments: [

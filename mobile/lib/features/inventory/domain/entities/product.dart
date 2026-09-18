@@ -14,10 +14,20 @@ class Product {
     this.barcode,
     this.imageUrl,
     this.clientUpdatedAt,
+    this.styleId,
+    this.size,
+    this.color,
+    this.sku,
+    this.minSellingPrice,
   });
 
   final String id;
   final String shopId;
+
+  /// For a variant this is the composed display name
+  /// ("Slim jeans · 32 · Blue", core/shop_type/variant_naming.dart), so
+  /// receipts, search folding and `product_name_snapshot` need no special
+  /// casing.
   final String name;
   final String? category;
   final Decimal purchasePrice;
@@ -26,19 +36,39 @@ class Product {
   final Decimal lowStockThreshold;
   final String unit;
   final String? barcode;
+
+  /// Own image; variants usually have none and fall back to the style image
+  /// at the widget level (`imageUrl ?? style.imageUrl`).
   final String? imageUrl;
   final DateTime? clientUpdatedAt;
 
+  /// Boutique variant fields (docs/19 §3). All null for ordinary products.
+  final String? styleId;
+  final String? size;
+  final String? color;
+  final String? sku;
+
+  /// Haggling floor; null = no floor set.
+  final Decimal? minSellingPrice;
+
   bool get isLowStock => stock <= lowStockThreshold;
 
-  /// A single stock movement (restock, sale, adjustment, etc).
-  /// Read from `inventory_logs`; produced by sales, adjustments, and refunds.
+  bool get isVariant => styleId != null;
 
-  Product copyWith({Decimal? stock, Decimal? sellingPrice}) => Product(
+  Product copyWith({
+    String? name,
+    String? category,
+    Decimal? stock,
+    Decimal? sellingPrice,
+    String? sku,
+    DateTime? clientUpdatedAt,
+    bool clearSku = false,
+  }) =>
+      Product(
         id: id,
         shopId: shopId,
-        name: name,
-        category: category,
+        name: name ?? this.name,
+        category: category ?? this.category,
         purchasePrice: purchasePrice,
         sellingPrice: sellingPrice ?? this.sellingPrice,
         stock: stock ?? this.stock,
@@ -46,7 +76,12 @@ class Product {
         unit: unit,
         barcode: barcode,
         imageUrl: imageUrl,
-        clientUpdatedAt: clientUpdatedAt,
+        clientUpdatedAt: clientUpdatedAt ?? this.clientUpdatedAt,
+        styleId: styleId,
+        size: size,
+        color: color,
+        sku: clearSku ? null : (sku ?? this.sku),
+        minSellingPrice: minSellingPrice,
       );
 }
 

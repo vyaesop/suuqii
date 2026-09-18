@@ -6,8 +6,10 @@ import 'package:suuqii/app/theme/app_theme.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/sales/domain/entities/sale_return.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/features/sales/presentation/checkout_sheet.dart';
+import 'package:suuqii/features/sales/presentation/exchange_controller.dart';
 import 'package:suuqii/l10n/app_localizations.dart';
 
 class _SeededCartController extends CartController {
@@ -17,6 +19,16 @@ class _SeededCartController extends CartController {
 
   @override
   Cart build() => _cart;
+}
+
+/// Exchange mode pre-set, as the return sheet leaves it for the POS.
+class _SeededExchangeMode extends ExchangeMode {
+  _SeededExchangeMode(this._context);
+
+  final ExchangeContext? _context;
+
+  @override
+  ExchangeContext? build() => _context;
 }
 
 /// Counts outstanding-balance lookups so the debounce test can assert one
@@ -49,11 +61,13 @@ void main() {
   Widget buildSubject({
     required Cart cart,
     DebtsRepository? debts,
+    ExchangeContext? exchange,
     ValueChanged<CheckoutResult?>? onResult,
   }) {
     return ProviderScope(
       overrides: [
         cartControllerProvider.overrideWith(() => _SeededCartController(cart)),
+        exchangeModeProvider.overrideWith(() => _SeededExchangeMode(exchange)),
         if (debts != null) debtsRepositoryProvider.overrideWithValue(debts),
       ],
       child: MaterialApp(
@@ -180,5 +194,91 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(debts.lookups, 1);
     await tester.pumpAndSettle();
+  });
+
+  group('exchange mode', () {
+    ExchangeContext exchange(String credit) => ExchangeContext(
+          originalSaleId: 'orig-sale-1234',
+          items: [
+            ReturnLine(
+              saleItemId: 'si-1',
+              quantity: Decimal.one,
+              condition: ReturnCondition.resellable,
+            ),
+          ],
+          reason: ReturnReason.wrongSize,
+          credit: Decimal.parse(credit),
+        );
+
+    testWidgets('nets the credit against the new items and ignores any '
+        'extra cart discount', (tester) async {
+      // 70 of new goods, 40 of credit: the customer tops up 30. The cart's
+      // own discount is not applied — the credit is the discount.
+      final cart = Cart.empty().add(product).setDiscount(Decimal.fromInt(10));
+      CheckoutResult? result;
+      await tester.pumpWidget(
+        buildSubject(
+          cart: cart,
+          exchange: exchange('40'),
+          onResult: (r) => result = r,
+        ),
+      );
+      await openSheet(tester);
+
+      expect(find.text('ETB 30'), findsOneWidget);
+      expect(find.text('Credit applied ETB 40'), findsOneWidget);
+      expect(find.text('Customer pays ETB 30'), findsOneWidget);
+      expect(find.textContaining('discount'), findsNothing);
+      // Credit is not a way to settle an exchange.
+      expect(find.text('Credit'), findsNothing);
+      // Cash is pre-filled with what is actually owed.
+      expect(tester.widget<TextField>(tenderedField()).controller!.text, '30');
+
+      await tester.ensureVisible(find.text('Complete exchange'));
+      await tester.tap(find.text('Complete exchange'));
+      await tester.pumpAndSettle();
+      expect(result, isNotNull);
+      expect(result!.paymentMethod, PaymentMethod.cash);
+      expect(result!.amountTendered, Decimal.fromInt(30));
+    });
+
+    testWidgets('excess credit becomes a refund and needs no cash input',
+        (tester) async {
+      final cart = Cart.empty().add(product); // 70 of new goods
+      CheckoutResult? result;
+      await tester.pumpWidget(
+        buildSubject(
+          cart: cart,
+          exchange: exchange('100'),
+          onResult: (r) => result = r,
+        ),
+      );
+      await openSheet(tester);
+
+      expect(find.text('ETB 0'), findsOneWidget);
+      expect(find.text('Credit applied ETB 70'), findsOneWidget);
+      expect(find.text('Refund ETB 30'), findsWidgets);
+      expect(find.text('REFUND VIA'), findsOneWidget);
+      expect(tenderedField(), findsNothing);
+
+      await tester.tap(find.text('Mobile'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Complete exchange'));
+      await tester.tap(find.text('Complete exchange'));
+      await tester.pumpAndSettle();
+      expect(result, isNotNull);
+      expect(result!.paymentMethod, PaymentMethod.mobileMoney);
+      expect(result!.amountTendered, isNull);
+    });
+
+    testWidgets('an even exchange says so', (tester) async {
+      final cart = Cart.empty().add(product);
+      await tester.pumpWidget(
+        buildSubject(cart: cart, exchange: exchange('70')),
+      );
+      await openSheet(tester);
+      expect(find.text('Even exchange — nothing to pay'), findsWidgets);
+      expect(tenderedField(), findsNothing);
+    });
   });
 }

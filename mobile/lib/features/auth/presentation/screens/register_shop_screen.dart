@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/shop_type/shop_type_ui.dart';
 import 'package:suuqii/core/utils/phone.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/shared/widgets/suuq_logo.dart';
@@ -90,12 +91,7 @@ class _RegisterShopScreenState extends ConsumerState<RegisterShopScreen> {
                         controller: _shopName,
                         decoration: InputDecoration(
                           labelText: l.registerShopNameLabel,
-                          prefixIcon: Icon(
-                            _shopType == 'bakery'
-                                ? Icons.bakery_dining_rounded
-                                : Icons.storefront_rounded,
-                            size: 20,
-                          ),
+                          prefixIcon: Icon(shopTypeIcon(_shopType), size: 20),
                         ),
                         validator: _req,
                       ),
@@ -264,6 +260,16 @@ class _ShopTypeSelector extends StatelessWidget {
             description: l.registerTypeBakeryDesc,
             selected: value == 'bakery',
             onTap: () => onChanged('bakery'),
+          ),
+        ),
+        const SizedBox(width: SuuqSpacing.sm),
+        Expanded(
+          child: _TypeCard(
+            icon: Icons.checkroom_rounded,
+            label: l.registerTypeBoutiqueLabel,
+            description: l.registerTypeBoutiqueDesc,
+            selected: value == 'boutique',
+            onTap: () => onChanged('boutique'),
           ),
         ),
       ],

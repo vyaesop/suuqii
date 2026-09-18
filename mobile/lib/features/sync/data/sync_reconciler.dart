@@ -10,13 +10,16 @@ import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/expenses/data/expenses_repository.dart';
 import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/data/styles_repository.dart';
+import 'package:suuqii/features/sales/domain/entities/sale_return.dart';
 import 'package:suuqii/features/supplies/data/supplies_repository.dart';
+import 'package:uuid/uuid.dart';
 
 part 'sync_reconciler.g.dart';
 
 /// Local snapshot caches that can be re-mirrored from the server after
 /// remote activity (pull) or a locally-discarded write (rejection/conflict).
-enum SyncDomain { products, lots, debts, expenses, supplies }
+enum SyncDomain { products, lots, debts, expenses, supplies, styles }
 
 /// Bridges the sync worker and the feature repositories.
 ///
@@ -39,6 +42,7 @@ class SyncReconciler {
     required this.refreshDebts,
     required this.refreshExpenses,
     required this.refreshSupplies,
+    required this.refreshStyles,
   });
 
   final AppDatabase db;
@@ -52,6 +56,7 @@ class SyncReconciler {
   final Future<void> Function() refreshDebts;
   final Future<void> Function() refreshExpenses;
   final Future<void> Function() refreshSupplies;
+  final Future<void> Function() refreshStyles;
 
   /// Snapshot domains a server-applied op invalidates locally.
   ///
@@ -82,7 +87,14 @@ class SyncReconciler {
       case 'supply.update':
       case 'supply.delete':
         return {SyncDomain.supplies};
+      case 'style.create':
+      case 'style.update':
+      case 'style.add_variants':
+      case 'style.delete':
+        // A style event also creates/renames/deletes its variant products.
+        return {SyncDomain.styles, SyncDomain.products};
       case 'sale.refund':
+      case 'sale.return':
         return {SyncDomain.products, SyncDomain.lots};
       case 'debt.create':
       case 'debt.payment.create':
@@ -121,6 +133,8 @@ class SyncReconciler {
           await (db.update(db.salesTable)..where((t) => t.id.equals(saleId)))
               .write(const SalesTableCompanion(status: Value('refunded')));
         }
+      case 'sale.return':
+        await _applySaleReturn(payload, shop, userId);
       case 'shift.open':
         await db.into(db.shiftsTable).insert(
               ShiftsTableCompanion.insert(
@@ -146,6 +160,16 @@ class SyncReconciler {
             updatedAt: Value(DateTime.now().toUtc()),
           ),
         );
+      case 'style.delete':
+        // Same reasoning as the row deletes below, plus the variants: the
+        // products mirror would keep them alive forever otherwise.
+        final id = payload['id'];
+        if (id is String) {
+          await db.transaction(() async {
+            await db.productsDao.softDeleteByStyle(id, occurredAt);
+            await db.stylesDao.softDelete(id, occurredAt);
+          });
+        }
       case 'product.delete' || 'supply.delete' || 'expense.delete':
         // Snapshot refreshes upsert but never remove rows, so deletions from
         // other devices must be applied here or they linger forever.
@@ -192,10 +216,81 @@ class SyncReconciler {
       }
       return {SyncDomain.products, SyncDomain.lots};
     }
+    if (op == 'style.create') {
+      // Same ghost problem, one level up: the style and every variant it
+      // created must disappear or the boutique keeps selling phantoms.
+      final id = payload['id'];
+      if (id is String) {
+        final now = DateTime.now().toUtc();
+        await db.transaction(() async {
+          await db.productsDao.softDeleteByStyle(id, now);
+          await db.stylesDao.softDelete(id, now);
+        });
+      }
+      return {SyncDomain.styles, SyncDomain.products, SyncDomain.lots};
+    }
+    if (op == 'style.add_variants') {
+      final variants = payload['variants'];
+      if (variants is List) {
+        final now = DateTime.now().toUtc();
+        for (final v in variants) {
+          if (v is Map && v['id'] is String) {
+            await (db.update(db.productsTable)
+                  ..where((t) => t.id.equals(v['id'] as String)))
+                .write(ProductsTableCompanion(deletedAt: Value(now)));
+          }
+        }
+      }
+      return {SyncDomain.styles, SyncDomain.products, SyncDomain.lots};
+    }
+    if (op == 'sale.return') {
+      // The return never happened server-side. Left behind, its rows keep
+      // counting towards the cumulative over-return check (those units could
+      // never be returned again on this device), keep the sale
+      // `partially_returned` (so `refund()` refuses it), and — for an
+      // exchange — keep inflating `effectiveTotalSantim`, which would credit
+      // every later return above what the server books. The restored stock
+      // and lots come back from the snapshot refresh.
+      final id = payload['id'];
+      final saleId = payload['sale_id'];
+      if (id is String && saleId is String) {
+        await db.transaction(() async {
+          await db.saleReturnsDao.deleteReturn(id);
+          await _recomputeSaleStatus(saleId);
+        });
+      }
+      return {SyncDomain.products, SyncDomain.lots};
+    }
     // sale.create: the local sale row is deliberately kept — the cash was
     // physically taken, and the red sync badge is where the owner resolves
     // it. The stock/debt side-effects still revert to server truth below.
     return domainsForOp(op, payload);
+  }
+
+  /// Re-derive `sales.status` from the returns that are actually left:
+  /// none → completed, every sold unit back → refunded, otherwise partial.
+  Future<void> _recomputeSaleStatus(String saleId) async {
+    final saleItems = await (db.select(db.saleItemsTable)
+          ..where((t) => t.saleId.equals(saleId)))
+        .get();
+    final returned = await db.saleReturnsDao.returnedQtyBySaleItem(saleId);
+    final anyReturned =
+        returned.values.any((qty) => qty > Decimal.zero);
+    final fullyReturned = saleItems.isNotEmpty &&
+        saleItems.every(
+          (si) =>
+              (returned[si.id] ?? Decimal.zero) >=
+              Decimal.parse(si.quantity.toString()),
+        );
+    await (db.update(db.salesTable)..where((t) => t.id.equals(saleId))).write(
+      SalesTableCompanion(
+        status: Value(
+          !anyReturned
+              ? 'completed'
+              : (fullyReturned ? 'refunded' : 'partially_returned'),
+        ),
+      ),
+    );
   }
 
   /// Re-mirror the given snapshot domains. Failures are independent: one
@@ -207,6 +302,7 @@ class SyncReconciler {
       SyncDomain.debts: refreshDebts,
       SyncDomain.expenses: refreshExpenses,
       SyncDomain.supplies: refreshSupplies,
+      SyncDomain.styles: refreshStyles,
     };
     for (final domain in domains) {
       try {
@@ -257,10 +353,102 @@ class SyncReconciler {
                 quantity: double.parse(item['quantity'] as String),
                 unitPrice: _santim(item['unit_price']),
                 unitCost: _santim(item['unit_cost']),
+                listPrice: Value(
+                  item['list_price'] is String
+                      ? _santim(item['list_price'])
+                      : null,
+                ),
               ),
               mode: InsertMode.insertOrIgnore,
             );
       }
+    });
+  }
+
+  /// Mirror another device's partial return (docs/19 §13.3) when the sale
+  /// is known here: return rows with the same proportional credit the server
+  /// computed, and the sale's status. Stock and lots converge through the
+  /// `{products, lots}` snapshot refresh — re-implementing the FIFO reversal
+  /// for foreign events would only duplicate what the server already did.
+  /// Idempotent on the return id.
+  Future<void> _applySaleReturn(
+    Map<String, dynamic> payload,
+    String shop,
+    String userId,
+  ) async {
+    final returnId = payload['id'];
+    final saleId = payload['sale_id'];
+    if (returnId is! String || saleId is! String) return;
+    final occurredAt = _parseDt(payload['occurred_at']);
+    if (occurredAt == null) return;
+    final reason = ReturnReason.fromWire(payload['reason'] as String?);
+    if (reason == null) return;
+    await db.transaction(() async {
+      final sale = await (db.select(db.salesTable)
+            ..where((t) => t.id.equals(saleId)))
+          .getSingleOrNull();
+      if (sale == null) return; // never sold here; nothing to annotate
+      if (await db.saleReturnsDao.exists(returnId)) return;
+      final saleItems = {
+        for (final si in await (db.select(db.saleItemsTable)
+              ..where((t) => t.saleId.equals(saleId)))
+            .get())
+          si.id: si,
+      };
+      final returnedSoFar =
+          await db.saleReturnsDao.returnedQtyBySaleItem(saleId);
+      final calculator = await db.saleReturnsDao.calculatorFor(sale);
+      await db.saleReturnsDao.insertReturn(
+        id: returnId,
+        shopId: shop,
+        saleId: saleId,
+        userId: userId,
+        shiftId: payload['shift_id'] as String?,
+        occurredAt: occurredAt,
+        refundAmountSantim: _santim(payload['refund_amount']),
+        refundMethod: switch (payload['refund_method']) {
+          'cash' => RefundMethod.cash,
+          'mobile_money' => RefundMethod.mobileMoney,
+          _ => null,
+        },
+        exchangeSaleId: payload['exchange_sale_id'] as String?,
+        reason: reason,
+        note: payload['note'] as String?,
+      );
+      final items = payload['items'];
+      final nowReturning = <String, Decimal>{};
+      if (items is List) {
+        for (final raw in items) {
+          if (raw is! Map) continue;
+          final item = raw.cast<String, dynamic>();
+          final saleItemId = item['sale_item_id'];
+          final si = saleItemId is String ? saleItems[saleItemId] : null;
+          if (si == null) continue;
+          final qty = Decimal.tryParse(item['quantity'] as String? ?? '');
+          if (qty == null) continue;
+          await db.saleReturnsDao.insertItem(
+            id: (item['id'] as String?) ?? const Uuid().v4(),
+            returnId: returnId,
+            saleItemId: si.id,
+            quantity: qty,
+            condition:
+                ReturnCondition.fromWire(item['condition'] as String?) ??
+                    ReturnCondition.resellable,
+            creditUnitSantim: calculator.creditUnitSantim(si.unitPrice),
+          );
+          nowReturning[si.id] = (nowReturning[si.id] ?? Decimal.zero) + qty;
+        }
+      }
+      final fullyReturned = saleItems.values.every((si) {
+        final back = (returnedSoFar[si.id] ?? Decimal.zero) +
+            (nowReturning[si.id] ?? Decimal.zero);
+        return back >= Decimal.parse(si.quantity.toString());
+      });
+      await (db.update(db.salesTable)..where((t) => t.id.equals(saleId))).write(
+        SalesTableCompanion(
+          status: Value(fullyReturned ? 'refunded' : 'partially_returned'),
+        ),
+      );
     });
   }
 
@@ -305,11 +493,18 @@ SyncReconciler syncReconciler(SyncReconcilerRef ref) {
       () => ref.read(expensesRepositoryProvider).refreshFromServer(),
     ),
     refreshSupplies: () => guarded(
-      // Supplies exist only for bakery shops; the endpoint still answers
-      // (empty) for retail shops, but skip the roundtrip entirely.
+      // Supplies exist only for shops with the feature; the endpoint still
+      // answers (empty) for the others, but skip the roundtrip entirely.
       () async {
-        if (auth()?.isBakery ?? false) {
+        if (auth()?.features.hasSupplies ?? false) {
           await ref.read(suppliesRepositoryProvider).refreshFromServer();
+        }
+      },
+    ),
+    refreshStyles: () => guarded(
+      () async {
+        if (auth()?.features.hasVariants ?? false) {
+          await ref.read(stylesRepositoryProvider).refreshFromServer();
         }
       },
     ),

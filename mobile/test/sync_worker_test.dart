@@ -80,6 +80,7 @@ SyncReconciler _reconciler(AppDatabase db, List<SyncDomain> refreshed) {
     refreshDebts: record(SyncDomain.debts),
     refreshExpenses: record(SyncDomain.expenses),
     refreshSupplies: record(SyncDomain.supplies),
+    refreshStyles: record(SyncDomain.styles),
   );
 }
 
@@ -166,6 +167,26 @@ void main() {
           connectivity: _FakeConnectivity(),
           deviceId: () async => 'test-device',
         );
+
+    test('a kick started inside a transaction does nothing', () async {
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's1'});
+      final dio = _FakeDio((call, data) async => _appliedResponse(data));
+      final w = worker(dio);
+
+      await db.transaction(() async {
+        // Drift resolves the engine from the zone, so a push started here
+        // would run on the open transaction and could send rows the caller
+        // still rolls back.
+        await w.kick().timeout(const Duration(seconds: 5));
+      });
+      expect(dio.calls, 0);
+      expect(await db.syncQueueDao.pendingCount(), 1);
+
+      // Outside the transaction the very same worker drains normally.
+      await w.kick().timeout(const Duration(seconds: 5));
+      expect(dio.calls, 1);
+      expect(await db.syncQueueDao.pendingCount(), 0);
+    });
 
     test('permanent 4xx dead-letters events and terminates', () async {
       await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's1'});

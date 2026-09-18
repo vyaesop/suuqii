@@ -18,9 +18,13 @@ class AuthLocalDataSource {
   static const _kShopType = 'auth.shop_type';
   static const _kDebtThreshold = 'auth.debt_threshold';
   static const _kExpenseApprovalThreshold = 'auth.expense_approval_threshold';
+  static const _kReturnWindowDays = 'auth.return_window_days';
 
   /// Mirrors the server default for both shop thresholds.
   static const _kDefaultThreshold = '500.00';
+
+  /// Mirrors the server default for Shop.return_window_days.
+  static const _kDefaultReturnWindowDays = 7;
 
   Future<void> saveTokens({required String refresh}) async {
     await _secure.writeRefresh(refresh);
@@ -37,6 +41,7 @@ class AuthLocalDataSource {
     String? shopType,
     String? debtThreshold,
     String? expenseApprovalThreshold,
+    int? returnWindowDays,
   }) async {
     await _prefs.setString(_kUserId, userId);
     await _prefs.setString(_kShopId, shopId);
@@ -53,6 +58,9 @@ class AuthLocalDataSource {
         expenseApprovalThreshold,
       );
     }
+    if (returnWindowDays != null) {
+      await _prefs.setInt(_kReturnWindowDays, returnWindowDays);
+    }
   }
 
   /// Updates only the shop-settings fields (owner edited them in-app),
@@ -61,6 +69,7 @@ class AuthLocalDataSource {
     String? shopName,
     String? debtThreshold,
     String? expenseApprovalThreshold,
+    int? returnWindowDays,
   }) async {
     if (shopName != null) await _prefs.setString(_kShopName, shopName);
     if (debtThreshold != null) {
@@ -71,6 +80,9 @@ class AuthLocalDataSource {
         _kExpenseApprovalThreshold,
         expenseApprovalThreshold,
       );
+    }
+    if (returnWindowDays != null) {
+      await _prefs.setInt(_kReturnWindowDays, returnWindowDays);
     }
   }
 
@@ -83,6 +95,7 @@ class AuthLocalDataSource {
     String shopType,
     String debtThreshold,
     String expenseApprovalThreshold,
+    int returnWindowDays,
   })? readProfile() {
     final uid = _prefs.getString(_kUserId);
     final sid = _prefs.getString(_kShopId);
@@ -98,6 +111,8 @@ class AuthLocalDataSource {
       debtThreshold: _prefs.getString(_kDebtThreshold) ?? _kDefaultThreshold,
       expenseApprovalThreshold:
           _prefs.getString(_kExpenseApprovalThreshold) ?? _kDefaultThreshold,
+      returnWindowDays:
+          _prefs.getInt(_kReturnWindowDays) ?? _kDefaultReturnWindowDays,
     );
   }
 
@@ -111,5 +126,6 @@ class AuthLocalDataSource {
     await _prefs.remove(_kShopType);
     await _prefs.remove(_kDebtThreshold);
     await _prefs.remove(_kExpenseApprovalThreshold);
+    await _prefs.remove(_kReturnWindowDays);
   }
 }

@@ -620,6 +620,23 @@
   "debtAmountLabel": "Amount",
   "debtNoteOptional": "Note (optional)",
   "debtEnterValidAmount": "Enter a valid amount",
+  "debtQuickHalf": "Half",
+  "@debtQuickHalf": {
+    "description": "Quick-amount chip in the collect-payment sheet: fills the amount field with half of the remaining balance."
+  },
+  "debtQuickFull": "Full",
+  "@debtQuickFull": {
+    "description": "Quick-amount chip in the collect-payment sheet: fills the amount field with the entire remaining balance."
+  },
+  "debtRemainsAfter": "Remaining after this payment: {amount}",
+  "@debtRemainsAfter": {
+    "description": "Live preview under the amount field in the collect-payment sheet; {amount} is the pre-formatted balance that will still be owed after the entered payment.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "debtPaymentRecorded": "Recorded {amount}",
   "@debtPaymentRecorded": {
     "description": "Snackbar after collecting a debt payment; {amount} is a pre-formatted money amount",
@@ -1623,6 +1640,19 @@
   "@recentSalesRefundedCaps": {
     "description": "Uppercase status pill on a refunded sale."
   },
+  "saleDetailTitle": "Sale details",
+  "saleDetailQtyPrice": "{qty} x {price}",
+  "@saleDetailQtyPrice": {
+    "description": "Sale-detail line: quantity and unit price, e.g. '2 x ETB 25'. Past-sale snapshots store no unit, unlike receiptQtyUnitPrice.",
+    "placeholders": {
+      "qty": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      }
+    }
+  },
   "stockReceiveTitle": "Receive stock",
   "stockReceiveUnitCostLabel": "Unit cost",
   "stockReceiveExpiryLabel": "Expiry date (optional)",
@@ -1861,5 +1891,304 @@
       "created": { "type": "int" },
       "updated": { "type": "int" }
     }
-  }
+  },
+
+  "damagedLostTitle": "Record damaged / lost",
+  "damagedLostMovement": "Damaged / lost",
+  "damagedLostSuccess": "Damaged / lost recorded",
+  "registerTypeBoutiqueLabel": "Boutique",
+  "registerTypeBoutiqueDesc": "Clothes, shoes, bags — by size and colour",
+  "productMinPriceLabel": "Minimum selling price (optional)",
+  "productMinPriceHelper": "Lowest price a haggle may go to",
+  "productSkuOptionalLabel": "SKU (optional)",
+  "productSkuLabel": "SKU",
+  "variantHeaderStyle": "Style",
+  "variantSize": "Size {size}",
+  "@variantSize": {
+    "placeholders": { "size": { "type": "String" } }
+  },
+  "variantColor": "Colour {color}",
+  "@variantColor": {
+    "placeholders": { "color": { "type": "String" } }
+  },
+  "variantPickerPriceVaries": "Price varies by size or colour",
+  "variantPickerHint": "Tap a size to add it to the cart. Hold to add several.",
+  "variantFreeSize": "Free size",
+  "variantChipSemantics": "{name}, {stock} in stock",
+  "@variantChipSemantics": {
+    "placeholders": { "name": { "type": "String" }, "stock": { "type": "String" } }
+  },
+  "variantChipStockInCart": "{stock} · ×{inCart}",
+  "@variantChipStockInCart": {
+    "placeholders": { "stock": { "type": "String" }, "inCart": { "type": "String" } }
+  },
+  "posStyleSemanticLabel": "{name}, {count, plural, =1{1 variant} other{{count} variants}}",
+  "@posStyleSemanticLabel": {
+    "placeholders": { "name": { "type": "String" }, "count": { "type": "int" } }
+  },
+  "posStyleStockSizes": "{stock} in stock · {count, plural, =1{1 size} other{{count} sizes}}",
+  "@posStyleStockSizes": {
+    "placeholders": { "stock": { "type": "String" }, "count": { "type": "int" } }
+  },
+  "inventoryStylesHeader": "Styles",
+  "inventoryProductsHeader": "Other products",
+  "inventoryNewStyle": "New style",
+  "inventoryNewStyleHint": "One garment in several sizes and colours",
+  "inventoryNewProductHint": "A single item without sizes",
+  "inventoryStyleSummary": "{count, plural, =1{1 variant} other{{count} variants}} · {stock} in stock",
+  "@inventoryStyleSummary": {
+    "placeholders": { "count": { "type": "int" }, "stock": { "type": "String" } }
+  },
+  "inventorySizesMissing": "Sizes missing",
+  "inventorySoldOut": "Sold out",
+  "styleWizardTitle": "New style",
+  "styleBrandLabel": "Brand (optional)",
+  "styleSegmentMen": "Men",
+  "styleSegmentWomen": "Women",
+  "styleSegmentKids": "Kids",
+  "styleSegmentUnisex": "Unisex",
+  "styleSkuPrefixLabel": "SKU prefix (optional)",
+  "styleSkuPrefixHelper": "e.g. JN gives JN-32-BLU",
+  "styleSkuPrefixShown": "SKU prefix {prefix}",
+  "@styleSkuPrefixShown": {
+    "placeholders": { "prefix": { "type": "String" } }
+  },
+  "styleSizeSetLabel": "Sizes",
+  "sizePresetLetter": "Letter (XS–3XL)",
+  "sizePresetNumeric": "Numeric (34–48)",
+  "sizePresetWaist": "Waist (26–42)",
+  "sizePresetShoeEu": "Shoes EU (35–46)",
+  "sizePresetKidsAge": "Kids by age",
+  "sizePresetFree": "Free size",
+  "sizePresetCustom": "Custom",
+  "styleSizesDeselectHint": "Untick the sizes you did not buy.",
+  "styleCustomSizesLabel": "Custom sizes",
+  "styleCustomSizesHint": "S, M, L or 38, 40, 42",
+  "styleColorsLabel": "Colours (optional)",
+  "styleColorLabel": "Colour",
+  "styleColorHint": "e.g. Blue, ቀይ",
+  "stylePreviewTitle": "Starting stock (optional)",
+  "stylePreviewHint": "Enter what you have per size and colour. Leave blank for none.",
+  "styleVariantCount": "{count, plural, =1{1 variant} other{{count} variants}}",
+  "@styleVariantCount": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "styleOpeningCostLabel": "Cost per unit for this stock",
+  "styleOpeningCostHelper": "Used to value the starting stock. Defaults to the purchase price.",
+  "styleCreateButton": "Create style",
+  "styleCreated": "{name} created",
+  "@styleCreated": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "styleScreenTitle": "Style",
+  "styleAddVariants": "Add sizes / colours",
+  "styleReceiveShipment": "Receive shipment",
+  "styleEdit": "Edit style",
+  "styleDelete": "Delete style",
+  "styleDeleteConfirmTitle": "Delete this style?",
+  "styleDeleteConfirmBody": "Every size and colour of it will be removed. This only works when all stock is zero.",
+  "styleDeleteHasStock": "Some sizes still have stock. Sell or write them off first.",
+  "styleDeleted": "Style deleted",
+  "styleSaved": "Style saved",
+  "styleNotFound": "Style not found",
+  "styleMatrixTitle": "Sizes and colours",
+  "styleMatrixEmpty": "No sizes or colours yet",
+  "styleMatrixTapHint": "Tap a cell to open that size",
+  "styleBrokenRunPill": "Sizes missing",
+  "styleTotalStock": "Total stock",
+  "styleVariants": "Variants",
+  "styleEditTitle": "Edit style",
+  "styleApplyPriceToVariants": "Apply price to every size and colour",
+  "styleApplyPriceHelper": "Mark down: all variants take the new selling price",
+  "receiveSheetTitle": "Receive shipment",
+  "receiveSheetHint": "Enter the quantity received per size and colour.",
+  "receiveSheetNoteHint": "e.g. Dubai shipment 12/09",
+  "receiveSheetApply": "Receive {count, plural, =1{1 unit} other{{count} units}}",
+  "@receiveSheetApply": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "receiveSheetSuccess": "{count, plural, =1{1 size received} other{{count} sizes received}}",
+  "@receiveSheetSuccess": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "receiveSheetNothing": "Enter at least one quantity",
+  "addVariantsTitle": "Add sizes / colours",
+  "addVariantsSizesHint": "Tick the sizes you bought. Existing ones are already ticked.",
+  "addVariantsApply": "Add {count, plural, =1{1 variant} other{{count} variants}}",
+  "@addVariantsApply": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "addVariantsAdded": "{count, plural, =1{1 variant added} other{{count} variants added}}",
+  "@addVariantsAdded": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "addVariantsNone": "Nothing new to add",
+  "cartSoldAtTitle": "Sold at",
+  "cartSoldAtLabel": "Negotiated price",
+  "cartListPriceHelper": "List price {amount}",
+  "@cartListPriceHelper": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "cartFloorHelper": "Minimum {amount}",
+  "@cartFloorHelper": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "cartBelowFloorOwnerPin": "Below the minimum — owner PIN needed at checkout",
+  "cartBelowFloorOwner": "Below the minimum — this sale will be put on record",
+  "cartPriceNegative": "Price cannot be negative",
+  "priceWas": "was {amount}",
+  "@priceWas": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "receiptShareLineWas": "{name}  {qty}{unit} x {price} (was {list}) = {total}",
+  "@receiptShareLineWas": {
+    "placeholders": { "name": { "type": "String" }, "qty": { "type": "String" }, "unit": { "type": "String" }, "price": { "type": "String" }, "list": { "type": "String" }, "total": { "type": "String" } }
+  },
+  "errBelowPriceFloor": "Priced below the minimum — owner PIN required",
+  "checkoutErrInvalidPrice": "Invalid price for {name}",
+  "@checkoutErrInvalidPrice": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "styleMarkDown": "Mark down",
+  "styleMarkDownTitle": "Mark down style",
+  "styleMarkDownNewPrice": "New selling price",
+  "styleMarkDownCurrent": "Current price {amount}",
+  "@styleMarkDownCurrent": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "styleMarkDownConfirmTitle": "Apply mark-down?",
+  "styleMarkDownConfirmBody": "{oldPrice} → {newPrice} on {count, plural, =1{1 variant} other{{count} variants}}. Every size and colour takes the new price.",
+  "@styleMarkDownConfirmBody": {
+    "placeholders": { "oldPrice": { "type": "String" }, "newPrice": { "type": "String" }, "count": { "type": "int" } }
+  },
+  "styleMarkDownApplied": "Marked down to {amount}",
+  "@styleMarkDownApplied": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "styleMarkDownInvalid": "Enter a valid price",
+  "returnButton": "Return / exchange",
+  "returnSelectItemsHint": "Tick what is coming back",
+  "returnAlreadyReturned": "{qty} returned",
+  "@returnAlreadyReturned": {
+    "placeholders": { "qty": { "type": "String" } }
+  },
+  "returnFullyReturned": "Fully returned",
+  "returnSoldQty": "Sold: {qty}",
+  "@returnSoldQty": {
+    "placeholders": { "qty": { "type": "String" } }
+  },
+  "returnConditionResellable": "Resellable",
+  "returnConditionDamaged": "Damaged",
+  "returnReasonCaps": "REASON",
+  "returnReasonWrongSize": "Wrong size",
+  "returnReasonDefect": "Defect",
+  "returnReasonChangedMind": "Changed mind",
+  "returnReasonOther": "Other",
+  "returnReasonRequired": "Choose a reason",
+  "returnNoItems": "Tick at least one item",
+  "returnNoteHint": "Note (optional)",
+  "returnCredit": "Credit",
+  "returnEverything": "Return everything",
+  "returnRefundCaps": "REFUND",
+  "returnRefundAmountLabel": "Refund amount",
+  "returnRefundAmountHelper": "Up to {amount}",
+  "@returnRefundAmountHelper": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "returnRefundInvalid": "Refund must be between 0 and {amount}",
+  "@returnRefundInvalid": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "returnRefundButton": "Refund {amount}",
+  "@returnRefundButton": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "returnExchangeButton": "Exchange",
+  "returnOutsideWindow": "This sale is older than the {days}-day return window. The return will be recorded and put on record for review.",
+  "@returnOutsideWindow": {
+    "placeholders": { "days": { "type": "int" } }
+  },
+  "returnRecorded": "Return recorded",
+  "returnFailed": "Return failed: {error}",
+  "@returnFailed": {
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "errReturnExceedsSold": "More units than were sold",
+  "errSalePartiallyReturned": "Part of this sale was already returned — use Return / exchange",
+  "recentSalesPartiallyReturnedCaps": "PARTLY RETURNED",
+  "recentSalesReturn": "Return",
+  "saleDetailReturnsCaps": "RETURNS",
+  "saleDetailReturnLine": "{qty} x {name}",
+  "@saleDetailReturnLine": {
+    "placeholders": { "qty": { "type": "String" }, "name": { "type": "String" } }
+  },
+  "saleDetailReturnRefunded": "Refunded {amount}",
+  "@saleDetailReturnRefunded": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "saleDetailReturnExchange": "Exchanged → sale #{id}",
+  "@saleDetailReturnExchange": {
+    "placeholders": { "id": { "type": "String" } }
+  },
+  "saleDetailReturnCredit": "Credit {amount}",
+  "@saleDetailReturnCredit": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "exchangeBannerTitle": "Exchange for sale #{id}",
+  "@exchangeBannerTitle": {
+    "placeholders": { "id": { "type": "String" } }
+  },
+  "exchangeBannerCredit": "Credit {amount}",
+  "@exchangeBannerCredit": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "exchangeCancel": "Cancel exchange",
+  "exchangeCustomerPays": "Customer pays {amount}",
+  "@exchangeCustomerPays": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "exchangeRefund": "Refund {amount}",
+  "@exchangeRefund": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "exchangeEven": "Even exchange — nothing to pay",
+  "exchangeCreditApplied": "Credit applied {amount}",
+  "@exchangeCreditApplied": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "exchangeNoDiscount": "No extra discount during an exchange",
+  "exchangeConfirm": "Complete exchange",
+  "exchangeRecorded": "Exchange recorded",
+  "checkoutRefundMethodCaps": "REFUND VIA",
+  "receiptReturnsCaps": "RETURNED",
+  "receiptShareReturnsHeader": "Returned:",
+  "receiptShareReturnLine": "{name}  {qty} = -{credit}",
+  "@receiptShareReturnLine": {
+    "placeholders": { "name": { "type": "String" }, "qty": { "type": "String" }, "credit": { "type": "String" } }
+  },
+  "receiptShareCredit": "Credit: {amount}",
+  "@receiptShareCredit": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "receiptShareRefunded": "Refunded: {amount}",
+  "@receiptShareRefunded": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "receiptShareExchangeFor": "Exchange for receipt #{id}",
+  "@receiptShareExchangeFor": {
+    "placeholders": { "id": { "type": "String" } }
+  },
+  "receiptShareNewItems": "New items:",
+  "receiptShareCustomerPaid": "Paid: {amount}",
+  "@receiptShareCustomerPaid": {
+    "placeholders": { "amount": { "type": "String" } }
+  },
+  "shopSettingsReturnWindowLabel": "Return window (days)",
+  "shopSettingsReturnWindowHelp": "Returns after this many days are flagged for the owner (0–90).",
+  "shopSettingsReturnWindowInvalid": "Enter a number between 0 and 90",
+  "styleVariantCapError": "Too many sizes and colours — a style can hold at most {max} variants. Remove some and create a second style.",
+  "@styleVariantCapError": {"placeholders": {"max": {"type": "int"}}},
+  "errSkuCollision": "That SKU is already used by another product",
+  "ownerPinStepOf": "Approval {step} of {total} — an exchange needs one for the sale and one for the return.",
+  "@ownerPinStepOf": {"placeholders": {"step": {"type": "int"}, "total": {"type": "int"}}}
 }

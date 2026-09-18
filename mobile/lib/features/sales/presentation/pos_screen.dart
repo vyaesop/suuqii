@@ -7,17 +7,26 @@ import 'package:go_router/go_router.dart';
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/core/shop_type/shop_features.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
+import 'package:suuqii/features/inventory/data/styles_repository.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/domain/entities/style.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/quantity_input.dart';
 import 'package:suuqii/features/sales/data/sales_repository.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/sales/domain/entities/sale_return.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
 import 'package:suuqii/features/sales/presentation/cart_review_sheet.dart';
 import 'package:suuqii/features/sales/presentation/checkout_sheet.dart';
+import 'package:suuqii/features/sales/presentation/exchange_controller.dart';
+import 'package:suuqii/features/sales/presentation/pos_catalog.dart';
 import 'package:suuqii/features/sales/presentation/receipt_sheet.dart';
+import 'package:suuqii/features/sales/presentation/sale_detail_screen.dart';
+import 'package:suuqii/features/sales/presentation/variant_picker_sheet.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/product_image.dart';
@@ -86,12 +95,20 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       });
     }
 
+    final features = auth.features;
     final productsAsync = ref.watch(
       watchProductsProvider(query: _query, category: _category),
     );
+    // Styles are only needed to group the grid; other shop types never open
+    // the stream.
+    final styles = features.hasVariants
+        ? (ref.watch(watchStylesProvider).valueOrNull ?? const <Style>[])
+        : const <Style>[];
+    final stylesById = {for (final s in styles) s.id: s};
     final categoriesAsync = ref.watch(watchCategoriesProvider);
     final syncAsync = ref.watch(productsSyncProvider);
     final cart = ref.watch(cartControllerProvider);
+    final exchange = ref.watch(exchangeModeProvider);
 
     return _PosFrame(
       child: LayoutBuilder(
@@ -137,6 +154,18 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                             builder: (context, innerConstraints) {
                               final crossAxisCount =
                                   innerConstraints.maxWidth >= 760 ? 3 : 2;
+                              // Variant shops collapse each style into one
+                              // tile; everyone else gets a tile per product.
+                              final entries = features.hasVariants
+                                  ? groupCatalog(
+                                      products,
+                                      stylesById,
+                                      query: _query,
+                                    )
+                                  : [
+                                      for (final p in products)
+                                        ProductEntry(p),
+                                    ];
                               return GridView.builder(
                                 padding: const EdgeInsets.fromLTRB(
                                   SuuqSpacing.md,
@@ -151,11 +180,20 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                                   crossAxisSpacing: SuuqSpacing.sm,
                                   mainAxisSpacing: SuuqSpacing.sm,
                                 ),
-                                itemCount: products.length,
-                                itemBuilder: (_, i) => _ProductTile(
-                                  product: products[i],
-                                  isBakery: auth.isBakery,
-                                ),
+                                itemCount: entries.length,
+                                itemBuilder: (_, i) => switch (entries[i]) {
+                                  ProductEntry(:final product) =>
+                                    _ProductTile(
+                                      key: ValueKey(entries[i].key),
+                                      product: product,
+                                      features: features,
+                                    ),
+                                  StyleEntry() => _StyleTile(
+                                      key: ValueKey(entries[i].key),
+                                      entry: entries[i] as StyleEntry,
+                                      features: features,
+                                    ),
+                                },
                               );
                             },
                           ),
@@ -190,10 +228,27 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                           SuuqSpacing.md,
                           SuuqSpacing.md,
                         ),
-                        child: _CartDock(
-                          cart: cart,
-                          onReviewCart: cart.isEmpty ? null : _reviewCart,
-                          onCheckout: cart.isEmpty ? null : _checkout,
+                        child: Column(
+                          children: [
+                            if (exchange != null)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: SuuqSpacing.xs,
+                                ),
+                                child: _ExchangeBanner(
+                                  exchange: exchange,
+                                  onCancel: _cancelExchange,
+                                ),
+                              ),
+                            Expanded(
+                              child: _CartDock(
+                                cart: cart,
+                                onReviewCart:
+                                    cart.isEmpty ? null : _reviewCart,
+                                onCheckout: cart.isEmpty ? null : _checkout,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -202,6 +257,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               : Column(
                   children: [
                     Expanded(child: catalog),
+                    if (exchange != null)
+                      _ExchangeBanner(
+                        exchange: exchange,
+                        onCancel: _cancelExchange,
+                      ),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 180),
                       child: _CartBar(
@@ -239,11 +299,16 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     }
   }
 
+  void _cancelExchange() {
+    ref.read(exchangeModeProvider.notifier).clear();
+  }
+
   Future<void> _checkout() async {
     final messenger = ScaffoldMessenger.of(context);
     final l = context.l10n;
     final snapshot = ref.read(cartControllerProvider);
     if (snapshot.isEmpty) return;
+    final exchange = ref.read(exchangeModeProvider);
 
     final result = await showModalBottomSheet<CheckoutResult>(
       context: context,
@@ -252,40 +317,88 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     );
     if (result == null) return;
 
-    // Credit sales that push the customer's cumulative balance over the
-    // shop's debt threshold need owner approval (docs/17-roles.md): collect
-    // the owner PIN from cashiers upfront so the queued sync op carries the
-    // challenge instead of being rejected server-side later. Owners proceed
-    // without a PIN.
-    String? challenge;
+    // Three things need the owner, all collected upfront so the queued sync
+    // op carries the challenge instead of being rejected server-side later
+    // (docs/17-roles.md, docs/19 §7): a credit sale over the customer's
+    // threshold, a line haggled below its floor, and any return (an exchange
+    // is half return). Owners proceed without a PIN.
+    final salesRepo = ref.read(salesRepositoryProvider);
+    var saleNeedsOwner = false;
     if (result.paymentMethod == PaymentMethod.credit) {
-      final salesRepo = ref.read(salesRepositoryProvider);
-      final needsApproval = await salesRepo.creditSaleNeedsOwnerApproval(
+      saleNeedsOwner = await salesRepo.creditSaleNeedsOwnerApproval(
         customerPhone: result.customerPhone,
         saleTotal: snapshot.total,
       );
-      if (needsApproval && !salesRepo.isOwner) {
+    }
+    saleNeedsOwner |= salesRepo.pricingNeedsOwnerApproval(snapshot);
+    // An exchange writes two events and `owner_challenge` is single-use, so
+    // the sale and the return each need their own token. Both are collected
+    // before anything is written: cancelling the second must abort the whole
+    // exchange, not leave a sale the return can no longer be attached to.
+    final returnNeedsOwner = exchange != null;
+    final prompts = (saleNeedsOwner ? 1 : 0) + (returnNeedsOwner ? 1 : 0);
+    String? challenge;
+    String? returnChallenge;
+    if (prompts > 0 && !salesRepo.isOwner) {
+      var step = 0;
+      if (saleNeedsOwner) {
         if (!mounted) return;
-        challenge = await requestOwnerChallenge(context, ref);
+        challenge = await requestOwnerChallenge(
+          context,
+          ref,
+          step: prompts > 1 ? ++step : null,
+          steps: prompts,
+        );
         if (challenge == null) return;
+      }
+      if (returnNeedsOwner) {
+        if (!mounted) return;
+        returnChallenge = await requestOwnerChallenge(
+          context,
+          ref,
+          step: prompts > 1 ? ++step : null,
+          steps: prompts,
+        );
+        if (returnChallenge == null) return;
       }
     }
 
     try {
-      final saleId = await ref.read(cartControllerProvider.notifier).checkout(
-            paymentMethod: result.paymentMethod,
-            customerName: result.customerName,
-            customerPhone: result.customerPhone,
-            dueDate: result.dueDate,
-            ownerChallengeToken: challenge,
-          );
+      final String saleId;
+      ExchangeSettlement? settlement;
+      if (exchange != null) {
+        settlement = exchange.settle(snapshot.subtotal);
+        final outcome =
+            await ref.read(cartControllerProvider.notifier).checkoutExchange(
+                  exchange: exchange,
+                  paymentMethod: result.paymentMethod,
+                  refundMethod: result.paymentMethod == PaymentMethod.mobileMoney
+                      ? RefundMethod.mobileMoney
+                      : RefundMethod.cash,
+                  ownerChallengeToken: challenge,
+                  returnOwnerChallengeToken: returnChallenge,
+                );
+        saleId = outcome.exchangeSaleId!;
+        ref.read(exchangeModeProvider.notifier).clear();
+        messenger.showSnackBar(SnackBar(content: Text(l.exchangeRecorded)));
+      } else {
+        saleId = await ref.read(cartControllerProvider.notifier).checkout(
+              paymentMethod: result.paymentMethod,
+              customerName: result.customerName,
+              customerPhone: result.customerPhone,
+              dueDate: result.dueDate,
+              ownerChallengeToken: challenge,
+            );
+      }
       if (!mounted) return;
       final auth = ref.read(authControllerProvider).valueOrNull;
       await showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         builder: (_) => ReceiptSheet(
-          cart: snapshot,
+          cart: settlement == null
+              ? snapshot
+              : Cart(snapshot.lines, discount: settlement.creditApplied),
           shopName: auth is Authenticated ? auth.shopName : null,
           paymentMethod: result.paymentMethod,
           saleId: saleId,
@@ -295,6 +408,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           customerName: result.customerName,
           customerPhone: result.customerPhone,
           dueDate: result.dueDate,
+          exchange: exchange,
+          exchangeSettlement: settlement,
         ),
       );
     } catch (error) {
@@ -310,6 +425,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 /// Maps [StateError]s thrown by the sales repository during checkout to
 /// localized messages; falls back to [localizedErrorMessage] otherwise.
 String _checkoutErrorMessage(AppLocalizations l, Object error) {
+  if (error is BelowPriceFloorException) return l.errBelowPriceFloor;
+  if (error is SaleReturnException) return returnErrorMessage(l, error);
   if (error is StateError) {
     final message = error.message;
     if (message == 'Cart is empty') return l.checkoutErrCartEmpty;
@@ -319,6 +436,10 @@ String _checkoutErrorMessage(AppLocalizations l, Object error) {
     const invalidQty = 'Invalid quantity for ';
     if (message.startsWith(invalidQty)) {
       return l.checkoutErrInvalidQuantity(message.substring(invalidQty.length));
+    }
+    const invalidPrice = 'Invalid price for ';
+    if (message.startsWith(invalidPrice)) {
+      return l.checkoutErrInvalidPrice(message.substring(invalidPrice.length));
     }
     const insufficient = 'Insufficient stock for ';
     if (message.startsWith(insufficient)) {
@@ -437,10 +558,17 @@ class _SearchField extends StatelessWidget {
 }
 
 class _ProductTile extends ConsumerWidget {
-  const _ProductTile({required this.product, required this.isBakery});
+  const _ProductTile({
+    required this.product,
+    required this.features,
+    super.key,
+  });
 
   final Product product;
-  final bool isBakery;
+  final ShopFeatures features;
+
+  /// Selling past the on-hand count is a warning here (bakery) or a block.
+  bool get allowsOversell => features.allowsOversell;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -633,7 +761,7 @@ class _ProductTile extends ConsumerWidget {
     // the sale goes through; regular shops still hard-block.
     var overStockWarning = false;
     if (nextQty > product.stock) {
-      if (isBakery) {
+      if (allowsOversell) {
         overStockWarning = true;
       } else if (product.stock <= Decimal.zero) {
         HapticFeedback.heavyImpact();
@@ -706,7 +834,9 @@ class _ProductTile extends ConsumerWidget {
           content: TextField(
             controller: controller,
             autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: quantityKeyboard(integerOnly: features.locksUnit),
+            inputFormatters:
+                quantityFormatters(integerOnly: features.locksUnit),
             decoration: InputDecoration(
               labelText: dl.posQuantityLabel(product.unit),
               helperText: dl.posInStockHelper(_formatQty(product.stock)),
@@ -742,7 +872,7 @@ class _ProductTile extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            isBakery
+            allowsOversell
                 ? context.l10n.posBakeryStockWarning(
                     product.name,
                     _formatQty(product.stock),
@@ -754,7 +884,7 @@ class _ProductTile extends ConsumerWidget {
           ),
         ),
       );
-      if (!isBakery) return;
+      if (!allowsOversell) return;
     }
 
     ref.read(cartControllerProvider.notifier).setQty(product.id, result);
@@ -771,6 +901,173 @@ class _ProductTile extends ConsumerWidget {
           ),
         );
     }
+  }
+}
+
+/// One tile per style on variant shops (docs/19 §6.3): style image, name,
+/// price, total stock and size count, plus a dot when the size run is
+/// broken. Tapping opens the variant picker instead of adding directly —
+/// the cashier still has to say *which* size.
+class _StyleTile extends ConsumerWidget {
+  const _StyleTile({required this.entry, required this.features, super.key});
+
+  final StyleEntry entry;
+  final ShopFeatures features;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final variantIds = entry.variants.map((v) => v.id).toSet();
+    final qty = ref.watch(
+      cartControllerProvider.select(
+        (cart) => cart.lines
+            .where((line) => variantIds.contains(line.product.id))
+            .fold(Decimal.zero, (a, line) => a + line.qty),
+      ),
+    );
+    final inCart = qty > Decimal.zero;
+
+    return Semantics(
+      button: true,
+      label: l.posStyleSemanticLabel(entry.name, entry.variants.length),
+      child: Material(
+        color: inCart ? scheme.primaryContainer : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(SuuqRadius.lg),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(SuuqRadius.lg),
+                    border: Border.all(
+                      color: inCart ? scheme.primary : scheme.outlineVariant,
+                      width: inCart ? 1.5 : 1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: () => showVariantPicker(
+                context,
+                styleName: entry.name,
+                imageUrl: entry.imageUrl,
+                variants: entry.variants,
+                sizeSet: entry.style?.sizeSet,
+                allowsOversell: features.allowsOversell,
+              ),
+              borderRadius: BorderRadius.circular(SuuqRadius.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.all(SuuqSpacing.xs),
+                      child: ProductImage(
+                        name: entry.name,
+                        imageUrl: entry.imageUrl,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SuuqSpacing.sm,
+                      SuuqSpacing.xs,
+                      SuuqSpacing.sm,
+                      SuuqSpacing.sm,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          entry.name,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          context.money(entry.price),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            if (entry.hasBrokenRun) ...[
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: scheme.error,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Expanded(
+                              child: Text(
+                                l.posStyleStockSizes(
+                                  _formatQty(entry.stockTotal),
+                                  entry.sizeCount,
+                                ),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: entry.isLowStock
+                                      ? scheme.error
+                                      : scheme.onSurfaceVariant,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (inCart)
+              Positioned(
+                top: SuuqSpacing.xs,
+                right: SuuqSpacing.xs,
+                child: Container(
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    l.posQtyTimes(_formatQty(qty)),
+                    style: TextStyle(
+                      color: scheme.onPrimary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -990,6 +1287,67 @@ class _CartBar extends StatelessWidget {
   }
 }
 
+/// Pinned above the cart while an exchange is being settled (docs/19 §6.5
+/// step 3): which sale is being exchanged and how much credit the customer
+/// has to spend. Cancelling drops the exchange, not the cart.
+class _ExchangeBanner extends StatelessWidget {
+  const _ExchangeBanner({required this.exchange, required this.onCancel});
+
+  final ExchangeContext exchange;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      color: scheme.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          SuuqSpacing.md,
+          SuuqSpacing.xs,
+          SuuqSpacing.xs,
+          SuuqSpacing.xs,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.swap_horiz_rounded, color: scheme.onTertiaryContainer),
+            const SizedBox(width: SuuqSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    l.exchangeBannerTitle(exchange.originalSaleShort),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onTertiaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    l.exchangeBannerCredit(context.money(exchange.credit)),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onTertiaryContainer,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: l.exchangeCancel,
+              icon: Icon(Icons.close_rounded, color: scheme.onTertiaryContainer),
+              onPressed: onCancel,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CartDock extends StatelessWidget {
   const _CartDock({
     required this.cart,
@@ -1199,7 +1557,8 @@ class _RecentTile extends ConsumerWidget {
     );
     final inCart = qty > Decimal.zero;
     final auth = ref.watch(authControllerProvider).valueOrNull;
-    final isBakery = auth is Authenticated && auth.isBakery;
+    final allowsOversell =
+        auth is Authenticated && auth.features.allowsOversell;
     return Material(
       color: inCart ? scheme.primaryContainer : scheme.surfaceContainer,
       borderRadius: BorderRadius.circular(SuuqRadius.md),
@@ -1221,7 +1580,7 @@ class _RecentTile extends ConsumerWidget {
 
           final nextQty = qty + Decimal.one;
           final overStock = nextQty > product.stock;
-          if (overStock && !isBakery) {
+          if (overStock && !allowsOversell) {
             ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
               ..showSnackBar(

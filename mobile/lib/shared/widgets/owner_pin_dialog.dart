@@ -10,20 +10,28 @@ import 'package:suuqii/features/auth/presentation/providers.dart';
 /// returns the challenge token. Returns null on cancel or wrong PIN.
 ///
 /// Sensitive ops on the API require `X-Owner-Challenge: <token>` (or the
-/// token inside the sync event payload).
+/// token inside the sync event payload). A challenge is single-use, so a
+/// flow that queues two sensitive events has to ask twice; pass [step] and
+/// [steps] then, and the sheet says which approval this is.
 Future<String?> requestOwnerChallenge(
   BuildContext context,
-  WidgetRef ref,
-) async {
+  WidgetRef ref, {
+  int? step,
+  int steps = 1,
+}) async {
   return showModalBottomSheet<String?>(
     context: context,
     isScrollControlled: true,
-    builder: (_) => const _OwnerPinSheet(),
+    builder: (_) => _OwnerPinSheet(step: step, steps: steps),
   );
 }
 
 class _OwnerPinSheet extends ConsumerStatefulWidget {
-  const _OwnerPinSheet();
+  const _OwnerPinSheet({required this.step, required this.steps});
+
+  /// 1-based position in a multi-approval flow, or null for a single one.
+  final int? step;
+  final int steps;
 
   @override
   ConsumerState<_OwnerPinSheet> createState() => _OwnerPinSheetState();
@@ -69,6 +77,13 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
               ),
               const SizedBox(height: 8),
               Text(context.l10n.ownerPinExplain),
+              if (widget.step != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  context.l10n.ownerPinStepOf(widget.step!, widget.steps),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
               const SizedBox(height: 20),
               TextField(
                 controller: _pin,

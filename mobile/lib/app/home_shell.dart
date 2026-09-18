@@ -18,7 +18,9 @@ class HomeShell extends ConsumerWidget {
     final l = AppLocalizations.of(context);
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
-    final isBakery = auth is Authenticated && auth.isBakery;
+    // Boutique shops share the regular nav (docs/19 §13.1): only shops with
+    // ingredient supplies swap the Debts tab for Supplies.
+    final hasSupplies = auth is Authenticated && auth.features.hasSupplies;
     final isBaker = auth is Authenticated && auth.isBaker;
     final loc = GoRouterState.of(context).matchedLocation;
     final scheme = Theme.of(context).colorScheme;
@@ -31,7 +33,7 @@ class HomeShell extends ConsumerWidget {
             '/pos',
             '/inventory',
             // Bakery shops replace the Debts tab with Supplies.
-            if (isBakery) '/supplies' else '/debts',
+            if (hasSupplies) '/supplies' else '/debts',
             '/shift',
             if (isOwner) '/owner' else '/me',
           ];
@@ -47,7 +49,7 @@ class HomeShell extends ConsumerWidget {
         : [
             _NavItem(icon: Icons.point_of_sale_rounded, label: l.navSell),
             _NavItem(icon: Icons.inventory_2_rounded, label: l.navInventory),
-            if (isBakery)
+            if (hasSupplies)
               _NavItem(icon: Icons.egg_alt_rounded, label: l.navSupplies)
             else
               _NavItem(

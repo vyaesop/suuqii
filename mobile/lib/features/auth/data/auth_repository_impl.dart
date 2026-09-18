@@ -71,6 +71,7 @@ class AuthRepository {
       accessToken: '',
       debtThreshold: p.debtThreshold,
       expenseApprovalThreshold: p.expenseApprovalThreshold,
+      returnWindowDays: p.returnWindowDays,
     );
   }
 
@@ -133,11 +134,13 @@ class AuthRepository {
     String? shopName,
     String? debtThreshold,
     String? expenseApprovalThreshold,
+    int? returnWindowDays,
   }) =>
       local.saveShopSettings(
         shopName: shopName,
         debtThreshold: debtThreshold,
         expenseApprovalThreshold: expenseApprovalThreshold,
+        returnWindowDays: returnWindowDays,
       );
 
   Future<void> logout() async {
@@ -163,6 +166,9 @@ class AuthRepository {
         (bundle['debt_threshold'] as String?) ?? kDefaultThreshold;
     final expenseApprovalThreshold =
         (bundle['expense_approval_threshold'] as String?) ?? kDefaultThreshold;
+    final returnWindowDays =
+        (bundle['return_window_days'] as num?)?.toInt() ??
+            kDefaultReturnWindowDays;
 
     tokens.access = access;
     await local.saveTokens(refresh: refresh);
@@ -175,6 +181,7 @@ class AuthRepository {
       shopType: shopType,
       debtThreshold: debtThreshold,
       expenseApprovalThreshold: expenseApprovalThreshold,
+      returnWindowDays: returnWindowDays,
     );
     return Authenticated(
       userId: userId,
@@ -186,6 +193,7 @@ class AuthRepository {
       accessToken: access,
       debtThreshold: debtThreshold,
       expenseApprovalThreshold: expenseApprovalThreshold,
+      returnWindowDays: returnWindowDays,
     );
   }
 }

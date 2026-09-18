@@ -18,13 +18,15 @@ class _TestAuthController extends AuthController {
   Future<AuthState> build() async => auth;
 }
 
-Authenticated _auth(String role) => Authenticated(
+Authenticated _auth(String role, {String shopType = 'regular'}) =>
+    Authenticated(
       userId: 'user-1',
       shopId: 'shop-1',
       role: role,
       userName: 'User',
       shopName: 'Shop',
       accessToken: 'token',
+      shopType: shopType,
     );
 
 Widget _buildShell(Authenticated auth) {
@@ -72,6 +74,41 @@ void main() {
     expect(navLabel('Inventory'), findsOneWidget);
     expect(navLabel('Debts'), findsOneWidget);
     expect(navLabel('Shift'), findsOneWidget);
+  });
+
+  testWidgets('boutique navigation equals the regular navigation',
+      (tester) async {
+    List<String> navLabels() => tester
+        .widgetList<NavigationDestination>(find.byType(NavigationDestination))
+        .map((d) => d.label)
+        .toList();
+
+    await tester.pumpWidget(_buildShell(_auth('owner')));
+    await tester.pumpAndSettle();
+    final regular = navLabels();
+
+    await tester.pumpWidget(_buildShell(_auth('owner', shopType: 'boutique')));
+    await tester.pumpAndSettle();
+    final boutique = navLabels();
+
+    expect(boutique, regular);
+    expect(boutique, ['Sell', 'Inventory', 'Debts', 'Shift', 'Dashboard']);
+    // No Supplies / Handover tab for a boutique (docs/19 §13.1).
+    expect(find.text('Supplies'), findsNothing);
+  });
+
+  testWidgets('bakery navigation swaps Debts for Supplies', (tester) async {
+    await tester.pumpWidget(_buildShell(_auth('owner', shopType: 'bakery')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Supplies'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Debts'), findsNothing);
   });
 
   testWidgets('owner bottom navigation shows the Dashboard item',

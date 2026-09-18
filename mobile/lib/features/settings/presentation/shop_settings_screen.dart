@@ -6,6 +6,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/http/dio_client.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
+import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/settings/data/shop_settings_data_source.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
@@ -62,6 +63,7 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
   late final TextEditingController _name;
   late final TextEditingController _debtThreshold;
   late final TextEditingController _expenseThreshold;
+  late final TextEditingController _returnWindow;
   bool _busy = false;
 
   @override
@@ -72,6 +74,9 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
     _expenseThreshold = TextEditingController(
       text: widget.settings.expenseApprovalThreshold,
     );
+    _returnWindow = TextEditingController(
+      text: '${widget.settings.returnWindowDays}',
+    );
   }
 
   @override
@@ -79,12 +84,16 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
     _name.dispose();
     _debtThreshold.dispose();
     _expenseThreshold.dispose();
+    _returnWindow.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    // The window only governs shops that take returns (docs/19 §13.4).
+    final hasReturns = auth is Authenticated && auth.features.hasReturns;
     return ListView(
       padding: const EdgeInsets.all(SuuqSpacing.md),
       children: [
@@ -118,6 +127,19 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
             prefixText: 'ETB  ',
           ),
         ),
+        if (hasReturns) ...[
+          const SizedBox(height: SuuqSpacing.md),
+          TextField(
+            controller: _returnWindow,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: l.shopSettingsReturnWindowLabel,
+              helperText: l.shopSettingsReturnWindowHelp,
+              helperMaxLines: 3,
+              prefixIcon: const Icon(Icons.event_repeat_outlined),
+            ),
+          ),
+        ],
         const SizedBox(height: SuuqSpacing.lg),
         SizedBox(
           height: 56,
@@ -161,6 +183,18 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
       );
       return;
     }
+    final auth = ref.read(authControllerProvider).valueOrNull;
+    final hasReturns = auth is Authenticated && auth.features.hasReturns;
+    int? returnWindow;
+    if (hasReturns) {
+      returnWindow = int.tryParse(_returnWindow.text.trim());
+      if (returnWindow == null || returnWindow < 0 || returnWindow > 90) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(l.shopSettingsReturnWindowInvalid)),
+        );
+        return;
+      }
+    }
 
     setState(() => _busy = true);
     try {
@@ -168,6 +202,7 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
             name: name,
             debtThreshold: debt.toString(),
             expenseApprovalThreshold: expense.toString(),
+            returnWindowDays: returnWindow,
           );
       // Mirror into auth state + its persistence so offline checks pick the
       // new thresholds up immediately.
@@ -175,6 +210,7 @@ class _ShopSettingsFormState extends ConsumerState<_ShopSettingsForm> {
             shopName: updated.name,
             debtThreshold: updated.debtThreshold,
             expenseApprovalThreshold: updated.expenseApprovalThreshold,
+            returnWindowDays: updated.returnWindowDays,
           );
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(l.shopSettingsSaved)));

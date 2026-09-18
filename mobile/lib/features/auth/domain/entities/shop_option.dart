@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:suuqii/core/shop_type/shop_features.dart';
+
 /// A shop this account may act in, as returned by `GET /v1/shops/mine`.
 ///
 /// The role is per-shop: the same person can be owner of their bakery and a
@@ -34,6 +36,10 @@ class ShopOption {
   final bool isActive;
   final String currency;
 
+  /// Feature flags for this shop's type; see `Authenticated.features`.
+  ShopFeatures get features => ShopFeatures.of(shopType);
+
+  /// Thin alias kept for older call sites; prefer [features].
   bool get isBakery => shopType == 'bakery';
 
   @override

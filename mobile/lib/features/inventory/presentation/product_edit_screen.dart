@@ -1,16 +1,12 @@
-import 'dart:io';
-
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
-import 'package:suuqii/core/services/cloudinary_service.dart';
-import 'package:suuqii/core/utils/ethiopic.dart';
+import 'package:suuqii/core/shop_type/shop_features.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/core/utils/unit_conversion.dart';
 import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
@@ -18,11 +14,17 @@ import 'package:suuqii/features/auth/presentation/controllers/auth_controller.da
 import 'package:suuqii/features/inventory/data/lots_repository.dart';
 import 'package:suuqii/features/inventory/data/products_repository.dart';
 import 'package:suuqii/features/inventory/data/recipes_repository.dart';
+import 'package:suuqii/features/inventory/data/styles_repository.dart';
+import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/domain/entities/style.dart';
 import 'package:suuqii/features/inventory/presentation/stock_adjust_sheet.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/category_field.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/product_photo_field.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/quantity_input.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/variant_header.dart';
 import 'package:suuqii/features/supplies/data/supplies_repository.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
-import 'package:suuqii/shared/widgets/product_image.dart';
 
 const _units = <String>['piece', 'kg', 'quintal', 'liter', 'pack', 'm'];
 
@@ -70,11 +72,23 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   final _category = TextEditingController();
   final _purchase = TextEditingController();
   final _selling = TextEditingController();
+  final _minPrice = TextEditingController();
   final _stock = TextEditingController(text: '0');
   final _threshold = TextEditingController(text: '0');
   final _barcode = TextEditingController();
-  final _imageUrl = TextEditingController();
+  final _sku = TextEditingController();
+
+  /// Set when the last save attempt found the typed SKU on another product;
+  /// cleared as soon as the field changes so the error follows the input.
+  String? _skuTakenError;
   String _unit = 'piece';
+  String? _imageUrl;
+
+  /// The product being edited (null when creating). Variants keep their
+  /// composed name, category and style identity from here — those belong
+  /// to the style and are not editable per variant.
+  Product? _existing;
+  Style? _variantStyle;
 
   // Bakery recipe state: list of (supply, qty controller, recipe unit) tuples
   final List<({Supply supply, TextEditingController qty, String unit})>
@@ -82,8 +96,6 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
 
   bool _loaded = false;
   bool _busy = false;
-  bool _uploading = false;
-  double _uploadProgress = 0;
 
   @override
   void initState() {
@@ -97,10 +109,11 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     _category.dispose();
     _purchase.dispose();
     _selling.dispose();
+    _minPrice.dispose();
     _stock.dispose();
     _threshold.dispose();
     _barcode.dispose();
-    _imageUrl.dispose();
+    _sku.dispose();
     for (final line in _recipeLines) {
       line.qty.dispose();
     }
@@ -115,6 +128,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     if (!mounted || p == null) return;
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.isOwner;
+    _existing = p;
     _name.text = p.name;
     _category.text = p.category ?? '';
     // Purchase price is owner-only data. The server already masks it to 0 in
@@ -124,16 +138,22 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     // overwrite the real cost.
     _purchase.text = isOwner ? p.purchasePrice.toString() : '0';
     _selling.text = p.sellingPrice.toString();
+    _minPrice.text = p.minSellingPrice?.toString() ?? '';
     _stock.text = p.stock.toString();
     _threshold.text = p.lowStockThreshold.toString();
     _barcode.text = p.barcode ?? '';
-    _imageUrl.text = p.imageUrl ?? '';
+    _sku.text = p.sku ?? '';
+    _imageUrl = p.imageUrl;
     _unit = p.unit;
 
-    // Load existing recipe for bakery shops.
+    if (p.styleId != null) {
+      _variantStyle = await ref.read(stylesRepositoryProvider).byId(p.styleId!);
+    }
+
+    // Load existing recipe for shops that produce from ingredients.
     // getForProduct already enriches items with supply name/unit/cost, so we
     // don't need a separate getAll() call here.
-    if (auth is Authenticated && auth.isBakery) {
+    if (auth is Authenticated && auth.features.hasProduction) {
       final existingRecipe = await ref
           .read(recipesRepositoryProvider)
           .getForProduct(widget.productId!);
@@ -158,7 +178,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       }
     }
 
-    setState(() => _loaded = true);
+    if (mounted) setState(() => _loaded = true);
   }
 
   @override
@@ -170,7 +190,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final l = context.l10n;
     final auth = ref.watch(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.role == 'owner';
-    final isBakery = auth is Authenticated && auth.isBakery;
+    final features =
+        auth is Authenticated ? auth.features : ShopFeatures.regular;
+    final isVariant = _existing?.isVariant ?? false;
+    // Locked-unit shops never show the picker; the persisted value is the
+    // type's default (piece) regardless of what a stale row carries.
+    if (features.locksUnit) _unit = features.defaultUnit;
 
     return Scaffold(
       appBar: AppBar(
@@ -180,7 +205,11 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
         actions: [
           if (!widget.isCreating)
             TextButton.icon(
-              onPressed: () => _showStockSheet(context, isOwner: isOwner),
+              onPressed: () => _showStockSheet(
+                context,
+                isOwner: isOwner,
+                features: features,
+              ),
               icon: const Icon(Icons.tune_rounded, size: 18),
               label: Text(l.stockAdjustTitle),
             ),
@@ -199,37 +228,52 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 _Section(
                   title: l.productSectionDetails,
                   children: [
-                    TextFormField(
-                      controller: _name,
-                      onChanged: (_) => setState(() {}),
-                      decoration:
-                          InputDecoration(labelText: l.productNameLabel),
-                      validator: _required,
-                    ),
-                    const SizedBox(height: SuuqSpacing.sm),
-                    _CategoryField(
-                      controller: _category,
-                      categories: ref
-                              .watch(watchCategoriesProvider)
-                              .valueOrNull ??
-                          const [],
-                    ),
-                    const SizedBox(height: SuuqSpacing.sm),
-                    DropdownButtonFormField<String>(
-                      initialValue: _unit,
-                      decoration:
-                          InputDecoration(labelText: l.productUnitLabel),
-                      items: _units
-                          .map(
-                            (u) => DropdownMenuItem(
-                              value: u,
-                              child: Text(_unitDisplayLabel(l, u)),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) =>
-                          setState(() => _unit = v ?? 'piece'),
-                    ),
+                    if (isVariant)
+                      // Name, size and colour come from the style; editing
+                      // them here would desync the composed name.
+                      VariantHeader(
+                        product: _existing!,
+                        style: _variantStyle,
+                        onOpenStyle: _variantStyle == null
+                            ? null
+                            : () => context
+                                .push('/inventory/style/${_variantStyle!.id}'),
+                      )
+                    else ...[
+                      TextFormField(
+                        controller: _name,
+                        onChanged: (_) => setState(() {}),
+                        decoration:
+                            InputDecoration(labelText: l.productNameLabel),
+                        validator: _required,
+                      ),
+                      const SizedBox(height: SuuqSpacing.sm),
+                      CategoryField(
+                        controller: _category,
+                        categories: ref
+                                .watch(watchCategoriesProvider)
+                                .valueOrNull ??
+                            const [],
+                      ),
+                    ],
+                    if (!features.locksUnit) ...[
+                      const SizedBox(height: SuuqSpacing.sm),
+                      DropdownButtonFormField<String>(
+                        initialValue: _unit,
+                        decoration:
+                            InputDecoration(labelText: l.productUnitLabel),
+                        items: _units
+                            .map(
+                              (u) => DropdownMenuItem(
+                                value: u,
+                                child: Text(_unitDisplayLabel(l, u)),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => _unit = v ?? features.defaultUnit),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: SuuqSpacing.lg),
@@ -238,9 +282,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                   children: [
                     Row(
                       children: [
-                        // Bakery shops derive cost from recipe; regular shops
-                        // use an explicit purchase price (owner-only).
-                        if (isOwner && !isBakery) ...[
+                        // Shops that produce from a recipe derive cost from it;
+                        // everyone else enters an explicit purchase price
+                        // (owner-only).
+                        if (isOwner && !features.hasProduction) ...[
                           Expanded(
                             child: TextFormField(
                               controller: _purchase,
@@ -269,9 +314,24 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                         ),
                       ],
                     ),
+                    if (features.hasLinePricing) ...[
+                      const SizedBox(height: SuuqSpacing.sm),
+                      TextFormField(
+                        controller: _minPrice,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: l.productMinPriceLabel,
+                          helperText: l.productMinPriceHelper,
+                          prefixText: 'ETB  ',
+                        ),
+                        validator: _optionalDecimal,
+                      ),
+                    ],
                   ],
                 ),
-                if (isBakery) ...[
+                if (features.hasProduction) ...[
                   const SizedBox(height: SuuqSpacing.lg),
                   _RecipeSection(
                     lines: _recipeLines,
@@ -297,8 +357,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                           child: TextFormField(
                             controller: _stock,
                             enabled: widget.isCreating,
-                            keyboardType: const TextInputType
-                                .numberWithOptions(decimal: true),
+                            keyboardType: quantityKeyboard(
+                              integerOnly: features.locksUnit,
+                            ),
+                            inputFormatters: quantityFormatters(
+                              integerOnly: features.locksUnit,
+                            ),
                             decoration: InputDecoration(
                               labelText: widget.isCreating
                                   ? l.productInitialStockLabel
@@ -314,8 +378,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _threshold,
-                            keyboardType: const TextInputType
-                                .numberWithOptions(decimal: true),
+                            keyboardType: quantityKeyboard(
+                              integerOnly: features.locksUnit,
+                            ),
+                            inputFormatters: quantityFormatters(
+                              integerOnly: features.locksUnit,
+                            ),
                             decoration: InputDecoration(
                               labelText: l.productLowAtLabel,
                               helperText: l.productLowAtHelper,
@@ -331,79 +399,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 _Section(
                   title: l.productSectionImage,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        GestureDetector(
-                          onTap: _uploading ? null : _pickAndUploadImage,
-                          child: Stack(
-                            children: [
-                              ProductImage(
-                                name: _previewName,
-                                imageUrl: _normalizedImageUrl,
-                                size: 84,
-                              ),
-                              if (_uploading)
-                                Positioned.fill(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(
-                                      SuuqRadius.md,
-                                    ),
-                                    child: ColoredBox(
-                                      color: Colors.black54,
-                                      child: Center(
-                                        child: CircularProgressIndicator(
-                                          value: _uploadProgress > 0
-                                              ? _uploadProgress
-                                              : null,
-                                          color: Colors.white,
-                                          strokeWidth: 2,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: SuuqSpacing.md),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              OutlinedButton.icon(
-                                onPressed:
-                                    _uploading ? null : _pickAndUploadImage,
-                                icon: const Icon(
-                                  Icons.upload_rounded,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  _normalizedImageUrl == null
-                                      ? l.productUploadPhoto
-                                      : l.productChangePhoto,
-                                ),
-                              ),
-                              if (_normalizedImageUrl != null) ...[
-                                const SizedBox(height: SuuqSpacing.xs),
-                                TextButton.icon(
-                                  onPressed: () =>
-                                      setState(() => _imageUrl.text = ''),
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 16,
-                                  ),
-                                  label: Text(l.commonRemove),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor:
-                                        Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
+                    ProductPhotoField(
+                      previewName: _previewName,
+                      imageUrl: _imageUrl,
+                      onChanged: (url) => setState(() => _imageUrl = url),
                     ),
                   ],
                 ),
@@ -421,6 +420,26 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                         ),
                       ),
                     ),
+                    if (features.hasVariants) ...[
+                      const SizedBox(height: SuuqSpacing.sm),
+                      TextFormField(
+                        controller: _sku,
+                        textCapitalization: TextCapitalization.characters,
+                        onChanged: (_) {
+                          if (_skuTakenError == null) return;
+                          setState(() => _skuTakenError = null);
+                        },
+                        // The clash is found asynchronously on save, so the
+                        // validator only replays the stored result; editing
+                        // the field re-runs it and so clears the message.
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        validator: (_) => _skuTakenError,
+                        decoration: InputDecoration(
+                          labelText: l.productSkuOptionalLabel,
+                          prefixIcon: const Icon(Icons.tag_rounded, size: 20),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -442,7 +461,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                     ),
                   )
                 : const Icon(Icons.check_rounded),
-            onPressed: _busy ? null : () => _save(isOwner: isOwner, isBakery: isBakery),
+            onPressed: _busy
+                ? null
+                : () => _save(isOwner: isOwner, features: features),
             label: Text(
               widget.isCreating ? l.productCreateButton : l.commonSaveChanges,
             ),
@@ -457,6 +478,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
 
   String? _decimal(String? v) {
     if (v == null || v.trim().isEmpty) return context.l10n.commonRequired;
+    final d = Decimal.tryParse(v.trim());
+    if (d == null || d < Decimal.zero) return context.l10n.productInvalidNumber;
+    return null;
+  }
+
+  String? _optionalDecimal(String? v) {
+    if (v == null || v.trim().isEmpty) return null;
     final d = Decimal.tryParse(v.trim());
     if (d == null || d < Decimal.zero) return context.l10n.productInvalidNumber;
     return null;
@@ -501,86 +529,53 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     });
   }
 
-  Future<void> _pickAndUploadImage() async {
-    final l = context.l10n;
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: Text(ctx.l10n.productTakePhoto),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: Text(ctx.l10n.productChooseFromGallery),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == null) return;
-
-    final picked = await ImagePicker().pickImage(
-      source: source,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-
-    setState(() {
-      _uploading = true;
-      _uploadProgress = 0;
-    });
-
-    try {
-      final url = await CloudinaryService().uploadImage(
-        File(picked.path),
-        onProgress: (sent, total) =>
-            setState(() => _uploadProgress = sent / total),
-      );
-      setState(() => _imageUrl.text = url);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.productUploadFailed(localizedErrorMessage(l, e)))),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
-  }
-
   String get _previewName {
     final name = _name.text.trim();
     return name.isEmpty ? context.l10n.productImagePreviewName : name;
   }
 
-  String? get _normalizedImageUrl {
-    final value = _imageUrl.text.trim();
-    return value.isEmpty ? null : value;
-  }
-
   Future<void> _save({
     required bool isOwner,
-    required bool isBakery,
+    required ShopFeatures features,
   }) async {
     if (!_form.currentState!.validate()) return;
+    final existing = _existing;
+    final isVariant = existing?.isVariant ?? false;
     final selling = Decimal.parse(_selling.text.trim());
-    // Bakery: cost is derived from recipe. Regular: owner enters purchase price.
-    final purchase = isBakery
+    // Recipe shops: cost is derived from the recipe. Others: owner enters it.
+    final purchase = features.hasProduction
         ? Decimal.zero
         : Decimal.parse(_purchase.text.isEmpty ? '0' : _purchase.text.trim());
-    final category = _category.text.trim().isEmpty
-        ? null
-        : _category.text.trim();
+    // A variant's name/category belong to its style and stay as they are.
+    final name = isVariant ? existing!.name : _name.text.trim();
+    final category = isVariant
+        ? existing!.category
+        : (_category.text.trim().isEmpty ? null : _category.text.trim());
     final barcode = _barcode.text.trim().isEmpty ? null : _barcode.text.trim();
-    final imageUrl = _normalizedImageUrl;
+    final sku = !features.hasVariants || _sku.text.trim().isEmpty
+        ? null
+        : _sku.text.trim().toUpperCase();
+    final minPrice = !features.hasLinePricing || _minPrice.text.trim().isEmpty
+        ? null
+        : Decimal.parse(_minPrice.text.trim());
+    final unit = features.locksUnit ? features.defaultUnit : _unit;
     final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
+
+    // A duplicate SKU comes back from the server as `sku_collision`, which
+    // rejects the whole event; catch it here while the field is still on
+    // screen instead of dead-lettering the edit hours later.
+    if (sku != null &&
+        await ref.read(productsRepositoryProvider).isSkuTaken(
+              sku,
+              excludingProductId: widget.productId,
+            )) {
+      if (!mounted) return;
+      setState(() => _skuTakenError = l.errSkuCollision);
+      _form.currentState!.validate();
+      return;
+    }
+    if (!mounted) return;
     final router = GoRouter.of(context);
 
     // product.create and product.update are blanket-sensitive server-side
@@ -590,6 +585,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final needsPin = !isOwner;
     String? challenge;
     if (needsPin) {
+      // The SKU lookup above is async, so the tree may be gone by now.
+      if (!mounted) return;
       challenge = await requestOwnerChallenge(context, ref);
       if (challenge == null) return;
     }
@@ -600,36 +597,40 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       String productId;
       if (widget.isCreating) {
         final created = await repo.create(
-          name: _name.text.trim(),
+          name: name,
           category: category,
           purchasePrice: purchase,
           sellingPrice: selling,
           stock: Decimal.parse(_stock.text.trim()),
           lowStockThreshold: Decimal.parse(_threshold.text.trim()),
-          unit: _unit,
+          unit: unit,
           barcode: barcode,
-          imageUrl: imageUrl,
+          imageUrl: _imageUrl,
+          sku: sku,
+          minSellingPrice: minPrice,
           ownerChallengeToken: challenge,
         );
         productId = created.id;
       } else {
         await repo.update(
           id: widget.productId!,
-          name: _name.text.trim(),
+          name: name,
           category: category,
           purchasePrice: purchase,
           sellingPrice: selling,
           lowStockThreshold: Decimal.parse(_threshold.text.trim()),
-          unit: _unit,
+          unit: unit,
           barcode: barcode,
-          imageUrl: imageUrl,
+          imageUrl: _imageUrl,
+          sku: sku,
+          minSellingPrice: minPrice,
           ownerChallengeToken: challenge,
         );
         productId = widget.productId!;
       }
 
-      // Save recipe for bakery shops
-      if (isBakery) {
+      // Save recipe for shops that produce from ingredients.
+      if (features.hasProduction) {
         final lines = _recipeLines
             .map((line) {
               final qty = Decimal.tryParse(line.qty.text.trim());
@@ -664,6 +665,7 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
   Future<void> _showStockSheet(
     BuildContext context, {
     required bool isOwner,
+    required ShopFeatures features,
   }) async {
     final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
@@ -673,7 +675,11 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final result = await showModalBottomSheet<StockAdjustResult>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => StockAdjustSheet(product: product),
+      builder: (_) => StockAdjustSheet(
+        product: product,
+        showExpiry: features.tracksExpiry,
+        integerOnly: features.locksUnit,
+      ),
     );
     if (result == null) return;
 
@@ -976,76 +982,6 @@ class _Section extends StatelessWidget {
         ),
         ...children,
       ],
-    );
-  }
-}
-
-/// Category field with autocomplete from previously-used categories.
-///
-/// Allows free-form text entry while surfacing existing categories as
-/// suggestions so the product list stays consistent without forcing a
-/// predefined taxonomy on the user.
-class _CategoryField extends StatelessWidget {
-  const _CategoryField({
-    required this.controller,
-    required this.categories,
-  });
-
-  final TextEditingController controller;
-  final List<String> categories;
-
-  @override
-  Widget build(BuildContext context) {
-    return Autocomplete<String>(
-      initialValue: TextEditingValue(text: controller.text),
-      optionsBuilder: (value) {
-        // foldForSearch so Amharic homophone spellings match (ጸጉር/ፀጉር).
-        final q = foldForSearch(value.text.trim());
-        // Show all categories when the field is empty; otherwise filter.
-        if (q.isEmpty) return categories;
-        return categories.where((c) => foldForSearch(c).contains(q));
-      },
-      fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmit) {
-        return TextFormField(
-          controller: autoCtrl,
-          focusNode: focusNode,
-          textCapitalization: TextCapitalization.sentences,
-          onChanged: (v) => controller.text = v,
-          onFieldSubmitted: (_) => onSubmit(),
-          decoration: InputDecoration(
-            labelText: ctx.l10n.productCategoryOptionalLabel,
-            suffixIcon: categories.isNotEmpty
-                ? const Icon(Icons.expand_more, size: 18)
-                : null,
-          ),
-        );
-      },
-      onSelected: (value) => controller.text = value,
-      optionsViewBuilder: (ctx, onSelected, options) {
-        return Align(
-          alignment: Alignment.topLeft,
-          child: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(SuuqRadius.md),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: options.length,
-                itemBuilder: (_, i) {
-                  final option = options.elementAt(i);
-                  return ListTile(
-                    dense: true,
-                    title: Text(option),
-                    onTap: () => onSelected(option),
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

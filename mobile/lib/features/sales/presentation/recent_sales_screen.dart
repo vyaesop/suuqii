@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/error_l10n.dart';
@@ -9,10 +10,10 @@ import 'package:suuqii/features/auth/domain/entities/auth_state.dart';
 import 'package:suuqii/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:suuqii/features/sales/data/sales_repository.dart';
 import 'package:suuqii/features/sales/presentation/receipt_share.dart';
+import 'package:suuqii/features/sales/presentation/sale_detail_screen.dart';
 import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
-import 'package:suuqii/shared/widgets/status_pill.dart';
 
 class RecentSalesScreen extends ConsumerWidget {
   const RecentSalesScreen({super.key});
@@ -21,6 +22,10 @@ class RecentSalesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final salesAsync = ref.watch(watchRecentSalesProvider);
+    final auth = ref.watch(authControllerProvider).valueOrNull;
+    // Boutique: the per-line return sheet on the detail screen replaces the
+    // whole-sale refund button (docs/19 §6.5).
+    final hasReturns = auth is Authenticated && auth.features.hasReturns;
 
     return Scaffold(
       appBar: AppBar(title: Text(l.recentSalesTitle)),
@@ -49,10 +54,14 @@ class RecentSalesScreen extends ConsumerWidget {
             itemCount: sales.length,
             separatorBuilder: (_, __) =>
                 const SizedBox(height: SuuqSpacing.xs),
-            itemBuilder: (_, i) => _SaleTile(
+            itemBuilder: (ctx, i) => _SaleTile(
               sale: sales[i],
+              onTap: () => ctx.push('/recent-sales/${sales[i].id}'),
               onShare: () => _share(context, ref, sales[i]),
-              onRefund: () => _refund(context, ref, sales[i]),
+              onRefund: hasReturns
+                  ? () => ctx.push('/recent-sales/${sales[i].id}')
+                  : () => _refund(context, ref, sales[i]),
+              refundLabel: hasReturns ? l.recentSalesReturn : l.recentSalesRefund,
             ),
           );
         },
@@ -80,33 +89,7 @@ class RecentSalesScreen extends ConsumerWidget {
       return;
     }
     if (!context.mounted) return;
-
-    final paymentLabel = switch (data.paymentMethod) {
-      'cash' => l.receiptPaidCash,
-      'mobile_money' => l.receiptPaidMobile,
-      'credit' => l.receiptOnCredit,
-      _ => data.paymentMethod,
-    };
-    final text = composeReceiptShareText(
-      context,
-      saleId: data.id,
-      soldAt: data.occurredAt,
-      shopName: shopName,
-      lines: [
-        for (final item in data.items)
-          ReceiptShareLine(
-            name: item.name,
-            qty: receiptQtyText(item.quantity),
-            unitPrice: item.unitPrice,
-            lineTotal: item.lineTotal,
-          ),
-      ],
-      subtotal: data.subtotal,
-      discount: data.discount,
-      total: data.total,
-      paymentLabel: paymentLabel,
-    );
-    await shareReceiptText(text);
+    await shareSaleReceiptData(context, data, shopName: shopName);
   }
 
   Future<void> _refund(
@@ -176,6 +159,9 @@ String _refundErrorMessage(AppLocalizations l, Object error) {
     if (error.message == 'Sale already refunded') {
       return l.recentSalesErrAlreadyRefunded;
     }
+    if (error.message == 'Sale partially returned') {
+      return l.errSalePartiallyReturned;
+    }
   }
   return localizedErrorMessage(l, error);
 }
@@ -183,12 +169,16 @@ String _refundErrorMessage(AppLocalizations l, Object error) {
 class _SaleTile extends StatelessWidget {
   const _SaleTile({
     required this.sale,
+    required this.onTap,
     required this.onShare,
     required this.onRefund,
+    required this.refundLabel,
   });
   final RecentSale sale;
+  final VoidCallback onTap;
   final VoidCallback onShare;
   final VoidCallback onRefund;
+  final String refundLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -207,8 +197,10 @@ class _SaleTile extends StatelessWidget {
       'credit' => Icons.access_time_rounded,
       _ => Icons.point_of_sale_rounded,
     };
+    final pill = saleStatusPill(l, sale.status);
 
     return SectionCard(
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -264,16 +256,18 @@ class _SaleTile extends StatelessWidget {
                 onPressed: onShare,
               ),
               if (sale.isRefunded)
-                StatusPill(
-                  label: l.recentSalesRefundedCaps,
-                  intent: PillIntent.danger,
-                )
-              else
+                pill!
+              else ...[
+                if (pill != null) ...[
+                  pill,
+                  const SizedBox(width: SuuqSpacing.xs),
+                ],
                 OutlinedButton.icon(
                   icon: const Icon(Icons.undo_rounded, size: 16),
                   onPressed: onRefund,
-                  label: Text(l.recentSalesRefund),
+                  label: Text(refundLabel),
                 ),
+              ],
             ],
           ),
         ],

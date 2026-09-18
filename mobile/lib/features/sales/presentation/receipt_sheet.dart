@@ -6,6 +6,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
+import 'package:suuqii/features/sales/domain/entities/sale_return.dart';
 import 'package:suuqii/features/sales/presentation/receipt_share.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
@@ -23,6 +24,8 @@ class ReceiptSheet extends StatelessWidget {
     this.customerName,
     this.customerPhone,
     this.dueDate,
+    this.exchange,
+    this.exchangeSettlement,
     super.key,
   });
 
@@ -39,11 +42,17 @@ class ReceiptSheet extends StatelessWidget {
   final String? customerPhone;
   final DateTime? dueDate;
 
+  /// Set when this sale settled an exchange (docs/19 §6.5): the receipt
+  /// then lists the returned lines, the credit and what was paid/refunded.
+  final ExchangeContext? exchange;
+  final ExchangeSettlement? exchangeSettlement;
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final settlement = exchangeSettlement;
 
     return SuuqSheet(
       child: Column(
@@ -105,7 +114,10 @@ class ReceiptSheet extends StatelessWidget {
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Text(l.cartDiscount, style: theme.textTheme.bodySmall),
+                      Text(
+                        exchange != null ? l.returnCredit : l.cartDiscount,
+                        style: theme.textTheme.bodySmall,
+                      ),
                       const Spacer(),
                       Text(
                         l.cartMinusAmount(context.money(cart.discount)),
@@ -152,6 +164,15 @@ class ReceiptSheet extends StatelessWidget {
                         value: context.money(changeDue!),
                       ),
                     ),
+                ],
+                if (settlement != null && settlement.refund > Decimal.zero) ...[
+                  const SizedBox(height: SuuqSpacing.sm),
+                  Divider(color: scheme.outlineVariant, height: 1),
+                  const SizedBox(height: SuuqSpacing.sm),
+                  _MoneyRow(
+                    label: l.recentSalesRefund,
+                    value: context.money(settlement.refund),
+                  ),
                 ],
               ],
             ),
@@ -212,10 +233,18 @@ class ReceiptSheet extends StatelessWidget {
                               l.receiptQtyUnitPrice(
                                 _fmtQty(line.qty.toDouble()),
                                 line.product.unit,
-                                context.money(line.product.sellingPrice),
+                                context.money(line.unitPrice),
                               ),
                               style: theme.textTheme.bodySmall,
                             ),
+                            if (line.hasLineDiscount)
+                              Text(
+                                l.priceWas(context.money(line.listPrice)),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  decoration: TextDecoration.lineThrough,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -232,6 +261,48 @@ class ReceiptSheet extends StatelessWidget {
               },
             ),
           ),
+          if (exchange != null) ...[
+            const SizedBox(height: SuuqSpacing.md),
+            Text(
+              l.receiptReturnsCaps,
+              style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
+            ),
+            const SizedBox(height: SuuqSpacing.xs),
+            Text(
+              l.receiptShareExchangeFor(exchange!.originalSaleShort),
+              style: theme.textTheme.bodySmall,
+            ),
+            for (final item in exchange!.items)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l.saleDetailReturnLine(
+                          _fmtQty(item.quantity.toDouble()),
+                          exchange!.itemNames[item.saleItemId] ?? '',
+                        ),
+                        style: theme.textTheme.bodyMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (item.condition == ReturnCondition.damaged)
+                      Text(
+                        l.returnConditionDamaged,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.error,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            _MoneyRow(
+              label: l.returnCredit,
+              value: context.money(exchange!.credit),
+            ),
+          ],
           const SizedBox(height: SuuqSpacing.lg),
           Row(
             children: [
@@ -294,8 +365,9 @@ class ReceiptSheet extends StatelessWidget {
             name: line.product.name,
             qty: _fmtQty(line.qty.toDouble()),
             unit: line.product.unit,
-            unitPrice: line.product.sellingPrice,
+            unitPrice: line.unitPrice,
             lineTotal: line.lineTotal,
+            listPrice: line.hasLineDiscount ? line.listPrice : null,
           ),
       ],
       subtotal: cart.subtotal,
@@ -307,6 +379,27 @@ class ReceiptSheet extends StatelessWidget {
       customerName: customerName,
       customerPhone: customerPhone,
       dueDate: dueDate,
+      returns: _returnsBlock(),
+    );
+  }
+
+  ReceiptReturnsBlock? _returnsBlock() {
+    final ex = exchange;
+    if (ex == null) return null;
+    return ReceiptReturnsBlock(
+      exchangeForSaleShort: ex.originalSaleShort,
+      lines: [
+        for (final item in ex.items)
+          ReceiptReturnLine(
+            name: ex.itemNames[item.saleItemId] ?? '',
+            qty: _fmtQty(item.quantity.toDouble()),
+            // Per-line credit is not carried in the context; the block's
+            // total is what the customer reads, so lines show quantity only.
+            credit: null,
+          ),
+      ],
+      credit: ex.credit,
+      refunded: exchangeSettlement?.refund ?? Decimal.zero,
     );
   }
 

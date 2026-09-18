@@ -19,6 +19,17 @@ class ProductsTable extends Table {
   TextColumn get unit => text().withDefault(const Constant('piece'))();
   TextColumn get barcode => text().nullable()();
   TextColumn get imageUrl => text().nullable()();
+
+  /// Boutique variants (docs/19 §3): the style this size × colour belongs to.
+  /// Null for ordinary products. No FK — products and styles mirror from the
+  /// server independently and either may arrive first.
+  TextColumn get styleId => text().nullable()();
+  TextColumn get size => text().nullable()();
+  TextColumn get color => text().nullable()();
+  TextColumn get sku => text().nullable()();
+
+  /// Haggling floor, int64 santim. Null = no floor set (Phase 3 line pricing).
+  IntColumn get minSellingPrice => integer().nullable()();
   DateTimeColumn get clientUpdatedAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();

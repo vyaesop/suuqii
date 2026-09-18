@@ -79,7 +79,7 @@ void main() {
       currentUserId: sellerId,
       currentShopId: shopId,
       currentShiftId: null,
-      isBakery: true,
+      allowsOversell: true,
     );
   });
 

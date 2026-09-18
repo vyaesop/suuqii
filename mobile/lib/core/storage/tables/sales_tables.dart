@@ -41,6 +41,10 @@ class SaleItemsTable extends Table {
   IntColumn get unitPrice => integer()();
   IntColumn get unitCost => integer()();
 
+  /// Price before any per-line discount (Phase 3 line pricing), int64
+  /// santim. Null = same as [unitPrice].
+  IntColumn get listPrice => integer().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

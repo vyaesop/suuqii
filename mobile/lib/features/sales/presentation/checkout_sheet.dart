@@ -10,6 +10,7 @@ import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/debt/data/debts_repository.dart';
 import 'package:suuqii/features/sales/domain/entities/sale.dart';
 import 'package:suuqii/features/sales/presentation/cart_controller.dart';
+import 'package:suuqii/features/sales/presentation/exchange_controller.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 class CheckoutResult {
@@ -58,7 +59,9 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
     // Exact-cash fast path: pre-fill the tendered amount with the exact
     // total, fully selected so any typing replaces it. A minimum cash sale
     // needs zero extra input — "Confirm" works immediately.
-    final total = ref.read(cartControllerProvider).total;
+    final cart = ref.read(cartControllerProvider);
+    final exchange = ref.read(exchangeModeProvider);
+    final total = exchange?.settle(cart.subtotal).customerPays ?? cart.total;
     if (total > Decimal.zero) _prefillExact(total);
   }
 
@@ -120,11 +123,17 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
     final l = context.l10n;
     final theme = Theme.of(context);
     final cart = ref.watch(cartControllerProvider);
-    final total = cart.total;
+    // Exchange mode (docs/19 §6.5): the returned goods' credit nets against
+    // the new items, so the big number is what the customer pays now, and
+    // any excess credit is refunded through the chosen method.
+    final exchange = ref.watch(exchangeModeProvider);
+    final settlement = exchange?.settle(cart.subtotal);
+    final total = settlement?.customerPays ?? cart.total;
     final tendered = _parseDecimal(_tendered.text);
     final changeDue = tendered == null ? null : tendered - total;
     final isCash = _method == PaymentMethod.cash;
-    final isCredit = _method == PaymentMethod.credit;
+    final isCredit = _method == PaymentMethod.credit && exchange == null;
+    final nothingToCollect = exchange != null && total == Decimal.zero;
 
     return SuuqSheet(
       child: Column(
@@ -152,7 +161,32 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                if (cart.discount > Decimal.zero)
+                if (settlement != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      l.exchangeCreditApplied(
+                        context.money(settlement.creditApplied),
+                      ),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                  if (settlement.refund > Decimal.zero)
+                    Text(
+                      l.exchangeRefund(context.money(settlement.refund)),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    )
+                  else if (settlement.isEven)
+                    Text(l.exchangeEven, style: theme.textTheme.bodySmall)
+                  else
+                    Text(
+                      l.exchangeCustomerPays(context.money(total)),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                ] else if (cart.discount > Decimal.zero)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
@@ -172,12 +206,17 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
           ),
           const SizedBox(height: SuuqSpacing.lg),
           Text(
-            l.checkoutPaymentCaps,
+            settlement != null && settlement.refund > Decimal.zero
+                ? l.checkoutRefundMethodCaps
+                : l.checkoutPaymentCaps,
             style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2),
           ),
           const SizedBox(height: SuuqSpacing.xs),
           _PaymentPicker(
             value: _method,
+            // Credit cannot settle an exchange: the credit already is the
+            // returned goods, and a refund has to leave the till somehow.
+            allowCredit: exchange == null,
             onChanged: (method) => setState(() {
               _method = method;
               // Coming (back) to cash with nothing typed: restore the
@@ -199,7 +238,15 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
           const SizedBox(height: SuuqSpacing.lg),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 180),
-            child: isCash
+            child: nothingToCollect
+                ? _InfoCard(
+                    key: const ValueKey('exchange_settled'),
+                    icon: Icons.swap_horiz_rounded,
+                    label: settlement!.refund > Decimal.zero
+                        ? l.exchangeRefund(context.money(settlement.refund))
+                        : l.exchangeEven,
+                  )
+                : isCash
                 ? _CashSection(
                     key: const ValueKey('cash'),
                     controller: _tendered,
@@ -252,7 +299,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
               ),
               icon: const Icon(Icons.check_circle_rounded, size: 22),
               onPressed: () {
-                if (isCash) {
+                if (isCash && !nothingToCollect) {
                   if (tendered == null || tendered <= Decimal.zero) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -286,18 +333,25 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                   context,
                   CheckoutResult(
                     paymentMethod: _method,
-                    amountTendered: isCash ? tendered : null,
-                    changeDue:
-                        isCash && changeDue != null && changeDue > Decimal.zero
-                            ? changeDue
-                            : Decimal.zero,
+                    amountTendered:
+                        isCash && !nothingToCollect ? tendered : null,
+                    changeDue: isCash &&
+                            !nothingToCollect &&
+                            changeDue != null &&
+                            changeDue > Decimal.zero
+                        ? changeDue
+                        : Decimal.zero,
                     customerName: isCredit ? _customerName.text.trim() : null,
                     customerPhone: isCredit ? _customerPhone.text.trim() : null,
                     dueDate: _dueDate,
                   ),
                 );
               },
-              label: Text(l.checkoutConfirmTotal(context.money(total))),
+              label: Text(
+                exchange != null
+                    ? l.exchangeConfirm
+                    : l.checkoutConfirmTotal(context.money(total)),
+              ),
             ),
           ),
         ],
@@ -326,10 +380,15 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
 }
 
 class _PaymentPicker extends StatelessWidget {
-  const _PaymentPicker({required this.value, required this.onChanged});
+  const _PaymentPicker({
+    required this.value,
+    required this.onChanged,
+    this.allowCredit = true,
+  });
 
   final PaymentMethod value;
   final ValueChanged<PaymentMethod> onChanged;
+  final bool allowCredit;
 
   @override
   Widget build(BuildContext context) {
@@ -349,13 +408,15 @@ class _PaymentPicker extends StatelessWidget {
           selected: value == PaymentMethod.mobileMoney,
           onTap: () => onChanged(PaymentMethod.mobileMoney),
         ),
-        const SizedBox(width: SuuqSpacing.xs),
-        _PaymentOption(
-          icon: Icons.access_time_rounded,
-          label: l.paymentCredit,
-          selected: value == PaymentMethod.credit,
-          onTap: () => onChanged(PaymentMethod.credit),
-        ),
+        if (allowCredit) ...[
+          const SizedBox(width: SuuqSpacing.xs),
+          _PaymentOption(
+            icon: Icons.access_time_rounded,
+            label: l.paymentCredit,
+            selected: value == PaymentMethod.credit,
+            onTap: () => onChanged(PaymentMethod.credit),
+          ),
+        ],
       ],
     );
   }

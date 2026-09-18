@@ -156,6 +156,10 @@ class LotsRepository {
   /// Receive a stock batch: creates the local lot, nets out units spoiled on
   /// arrival, bumps stock, mirrors the product's last cost, and enqueues
   /// `stock.receive` — all atomically.
+  /// [kick] is false when a caller composes this into its own transaction
+  /// (the style wizard's opening stock): a push started inside an open
+  /// transaction runs its queries on that transaction and can send rows the
+  /// caller still rolls back. The composing call kicks after it commits.
   Future<void> receiveStock({
     required String productId,
     required Decimal quantity,
@@ -164,6 +168,7 @@ class LotsRepository {
     Decimal? spoiledQuantity,
     String? note,
     String? ownerChallengeToken,
+    bool kick = true,
   }) async {
     final spoiled = spoiledQuantity ?? Decimal.zero;
     if (quantity <= Decimal.zero) {
@@ -257,7 +262,7 @@ class LotsRepository {
             ),
           );
     });
-    unawaited(syncWorker.kick());
+    if (kick) unawaited(syncWorker.kick());
   }
 
   /// Record spoilage after the fact (expired, damaged, day-old): consumes

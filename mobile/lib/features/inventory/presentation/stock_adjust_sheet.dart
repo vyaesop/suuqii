@@ -5,6 +5,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/utils/formats.dart';
 import 'package:suuqii/features/inventory/domain/entities/product.dart';
+import 'package:suuqii/features/inventory/presentation/widgets/quantity_input.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 /// Result of the stock sheet: either a proper batch receive (quantity, unit
@@ -43,9 +44,21 @@ class RemoveStockResult extends StockAdjustResult {
 /// or `null` on cancel. The owner-PIN challenge is the caller's
 /// responsibility.
 class StockAdjustSheet extends StatefulWidget {
-  const StockAdjustSheet({required this.product, super.key});
+  const StockAdjustSheet({
+    required this.product,
+    this.showExpiry = true,
+    this.integerOnly = false,
+    super.key,
+  });
 
   final Product product;
+
+  /// `ShopFeatures.tracksExpiry` — apparel never expires, so boutiques get no
+  /// expiry picker on receive.
+  final bool showExpiry;
+
+  /// `ShopFeatures.locksUnit` — whole-number quantities only.
+  final bool integerOnly;
 
   @override
   State<StockAdjustSheet> createState() => _StockAdjustSheetState();
@@ -127,11 +140,12 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
           const SizedBox(height: SuuqSpacing.md),
           TextField(
             controller: _qty,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: quantityKeyboard(integerOnly: widget.integerOnly),
+            inputFormatters:
+                quantityFormatters(integerOnly: widget.integerOnly),
             decoration: InputDecoration(
               labelText: l.stockAdjustQuantityLabel,
-              suffixText: widget.product.unit,
+              suffixText: widget.integerOnly ? null : widget.product.unit,
             ),
             style: const TextStyle(
               fontSize: 22,
@@ -149,35 +163,38 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
                 prefixText: 'ETB  ',
               ),
             ),
-            const SizedBox(height: SuuqSpacing.sm),
-            InkWell(
-              onTap: _pickExpiry,
-              borderRadius: BorderRadius.circular(SuuqRadius.sm),
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: l.stockReceiveExpiryLabel,
-                  suffixIcon: _expiry == null
-                      ? const Icon(Icons.event_rounded)
-                      : IconButton(
-                          icon: const Icon(Icons.clear_rounded, size: 18),
-                          onPressed: () => setState(() => _expiry = null),
-                        ),
-                ),
-                child: Text(
-                  _expiry == null
-                      ? l.stockReceiveNoExpiry
-                      : context.dateShort(_expiry!),
+            if (widget.showExpiry) ...[
+              const SizedBox(height: SuuqSpacing.sm),
+              InkWell(
+                onTap: _pickExpiry,
+                borderRadius: BorderRadius.circular(SuuqRadius.sm),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: l.stockReceiveExpiryLabel,
+                    suffixIcon: _expiry == null
+                        ? const Icon(Icons.event_rounded)
+                        : IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () => setState(() => _expiry = null),
+                          ),
+                  ),
+                  child: Text(
+                    _expiry == null
+                        ? l.stockReceiveNoExpiry
+                        : context.dateShort(_expiry!),
+                  ),
                 ),
               ),
-            ),
+            ],
             const SizedBox(height: SuuqSpacing.sm),
             TextField(
               controller: _spoiled,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: quantityKeyboard(integerOnly: widget.integerOnly),
+              inputFormatters:
+                  quantityFormatters(integerOnly: widget.integerOnly),
               decoration: InputDecoration(
                 labelText: l.stockReceiveSpoiledLabel,
-                suffixText: widget.product.unit,
+                suffixText: widget.integerOnly ? null : widget.product.unit,
               ),
             ),
             const SizedBox(height: SuuqSpacing.sm),

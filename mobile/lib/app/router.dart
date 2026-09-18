@@ -22,8 +22,11 @@ import 'package:suuqii/features/inventory/presentation/bulk_restock_screen.dart'
 import 'package:suuqii/features/inventory/presentation/inventory_screen.dart';
 import 'package:suuqii/features/inventory/presentation/product_detail_screen.dart';
 import 'package:suuqii/features/inventory/presentation/product_edit_screen.dart';
+import 'package:suuqii/features/inventory/presentation/style_screen.dart';
+import 'package:suuqii/features/inventory/presentation/style_wizard_screen.dart';
 import 'package:suuqii/features/sales/presentation/pos_screen.dart';
 import 'package:suuqii/features/sales/presentation/recent_sales_screen.dart';
+import 'package:suuqii/features/sales/presentation/sale_detail_screen.dart';
 import 'package:suuqii/features/settings/presentation/data_screen.dart';
 import 'package:suuqii/features/settings/presentation/devices_screen.dart';
 import 'package:suuqii/features/settings/presentation/employees_screen.dart';
@@ -155,6 +158,13 @@ GoRouter router(RouterRef ref) {
           GoRoute(
             path: '/recent-sales',
             builder: (_, __) => const RecentSalesScreen(),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (_, state) =>
+                    SaleDetailScreen(saleId: state.pathParameters['id']!),
+              ),
+            ],
           ),
           GoRoute(
             path: '/inventory',
@@ -167,6 +177,17 @@ GoRouter router(RouterRef ref) {
               GoRoute(
                 path: 'bulk-restock',
                 builder: (_, __) => const BulkRestockScreen(),
+              ),
+              // Boutique: create a style with its size × colour matrix.
+              // Declared before ':id' so the literal segment wins.
+              GoRoute(
+                path: 'new-style',
+                builder: (_, __) => const StyleWizardScreen(),
+              ),
+              GoRoute(
+                path: 'style/:id',
+                builder: (_, state) =>
+                    StyleScreen(styleId: state.pathParameters['id']!),
               ),
               GoRoute(
                 path: 'edit/:id',

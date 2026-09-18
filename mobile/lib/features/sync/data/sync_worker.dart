@@ -86,7 +86,17 @@ class SyncWorker {
     return SyncFailureKind.permanent;
   }
 
+  /// Drift resolves the engine from the current [Zone], and async
+  /// continuations inherit zone values — so a `kick()` started inside
+  /// `db.transaction` would keep running its queries on that still-open
+  /// transaction and push rows the caller may still roll back. Repositories
+  /// kick after their transaction returns; this is the guard that makes a
+  /// missed one harmless (the next kick picks the work up anyway).
+  bool get _insideTransaction =>
+      Zone.current[#DatabaseConnectionUser] != null;
+
   Future<void> kick() async {
+    if (_insideTransaction) return;
     if (_running) {
       // Interrupt an in-progress backoff / offline wait so new work is
       // picked up promptly instead of being ignored until the sleep ends.

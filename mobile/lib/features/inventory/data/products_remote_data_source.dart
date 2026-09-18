@@ -30,5 +30,12 @@ class ProductsRemoteDataSource {
         clientUpdatedAt: j['client_updated_at'] == null
             ? null
             : DateTime.parse(j['client_updated_at'] as String),
+        styleId: j['style_id'] as String?,
+        size: j['size'] as String?,
+        color: j['color'] as String?,
+        sku: j['sku'] as String?,
+        minSellingPrice: j['min_selling_price'] == null
+            ? null
+            : Decimal.parse(j['min_selling_price'] as String),
       );
 }
