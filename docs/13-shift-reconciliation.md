@@ -40,9 +40,32 @@ expected_closing_cash =
   + sum(debt_payments.amount WHERE shift_id = X AND method = 'cash')
   - sum(expenses.amount WHERE shift_id = X)   -- assumed paid from till
   - sum(refunds.amount WHERE shift_id = X AND payment_method = 'cash')
+  - sum(sale_returns.refund_amount WHERE sale_returns.shift_id = X AND refund_method = 'cash')
 ```
 
 Mobile money sales **do not** affect cash. Credit sales **do not** affect cash. Refunds against non-cash original payments are excluded.
+
+### The two refund paths (as implemented in `ShiftService.expected_cash`)
+
+* **Legacy `sale.refund`** flips the sale to `refunded` and writes no
+  `sale_returns` row. It is subtracted as the *whole* `sales.total`, against the
+  **original sale's** shift. Unchanged since v1. Note: because a `refunded`
+  sale also drops out of `cash_sales`, this path nets to −total rather than 0
+  for a same-shift refund — pre-existing behaviour, kept as-is; the mobile
+  client has no refund term at all and relies on the server value winning.
+* **`sale.return`** (docs/19, partial returns / exchanges) writes a
+  `sale_returns` row carrying the cash actually handed back and the shift it
+  left the till in. Such a sale stays in `cash_sales` at its full total (the
+  customer paid all of it) — including when every line is eventually returned
+  and its status reads `refunded` — and the returns term subtracts only the
+  cash `refund_amount`, in the **return's** shift. `partially_returned` sales
+  count as cash sales. The two paths are kept disjoint (`refunded` AND no
+  `sale_returns` row ⇒ legacy) so a fully returned sale is never subtracted
+  twice.
+
+An exchange is `sale.create` (the new sale's `discount` carries the credit, so
+its `total` is what the customer paid) followed by `sale.return` with
+`exchange_sale_id`; only `refund_amount` (cash, if any) touches the till.
 
 ## Open shift
 

@@ -10,7 +10,9 @@ of truth: a role holds a capability only if it is listed, and an unknown role
 holds nothing. Before this the model was binary (`role != "owner"`), so any new
 role would silently have inherited every cashier permission including the till.
 
-`baker` is only invitable in a shop with `shop_type = 'bakery'`.
+`baker` is only invitable in a shop whose features include production
+(`features_for(shop_type).has_production` — today only `bakery`; see
+`app/core/shop_features.py`, which replaced the scattered `== "bakery"` checks).
 
 | Capability | Cashier | Baker | Owner |
 |---|---|---|---|
@@ -41,7 +43,20 @@ role would silently have inherited every cashier permission including the till.
 | Audit log / anomaly scan | ❌ | ❌ | ✅ |
 | Invite/deactivate employees | ❌ | ❌ | ✅ |
 | Revoke device sessions | ❌ | ❌ | ✅ (own shop only) |
-| Change shop settings (thresholds, locale) | ❌ | ❌ | ✅ |
+| Change shop settings (thresholds, locale, return window) | ❌ | ❌ | ✅ |
+| **Boutique (docs/19 §7)** | | | |
+| Create style / add variants (`style.create`, `style.add_variants`) | 🔑 PIN | ❌ | ✅ |
+| Edit / delete style (`style.update`, `style.delete`) | 🔑 PIN | ❌ | ✅ |
+| Sell at negotiated price ≥ floor | ✅ | ❌ | ✅ |
+| Sell below floor (`min_selling_price`, else tag price when a discount is declared) | 🔑 PIN (server-enforced, `below_price_floor`) | ❌ | ✅ (audited `sale.below_floor`) |
+| Partial return / exchange within `return_window_days` (`sale.return`) | 🔑 PIN | ❌ | ✅ |
+| Return outside window | 🔑 PIN | ❌ | ✅ (audited `sale.return_outside_window`) |
+| Mark down a style (`style.update` + `apply_price_to_variants`) | ❌ (server rejects `forbidden`; cost fields are ignored for non-owners on every style op) | ❌ | ✅ (audited `style.markdown`) |
+| Returns / price-leakage reports | ❌ | ❌ | ✅ |
+
+Boutique gating reuses existing capabilities — `MANAGE_PRODUCTS` for styles,
+`REFUND` for returns, `SELL` for line pricing — plus `SENSITIVE_OPS` and the
+conditional challenge inside `_sale_create`. No new capability constants.
 
 **A baker holds `handover_create` and not `handover_accept`, and a cashier the
 reverse.** That disjointness is the whole point: two independent counts of the

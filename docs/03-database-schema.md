@@ -37,7 +37,9 @@ phone TEXT
 currency CHAR(3) DEFAULT 'ETB'
 debt_threshold NUMERIC(12,2) DEFAULT 500.00   -- above this, requires owner PIN
 locale TEXT DEFAULT 'en'                       -- 'en' | 'om'
+shop_type TEXT DEFAULT 'regular'               -- regular | bakery | boutique (validated in code: app/core/shop_features.py)
 parent_shop_id UUID NULL REFERENCES shops(id)  -- future multi-branch
+return_window_days INTEGER NOT NULL DEFAULT 7  -- 0013: returns after this many days are owner-audited
 created_at, updated_at, deleted_at
 ```
 
@@ -85,10 +87,41 @@ barcode TEXT
 image_url TEXT
 created_at, updated_at, deleted_at
 client_updated_at TIMESTAMPTZ                  -- for LWW conflict resolution
+-- boutique variants (0013, docs/19): a variant IS a product; all nullable
+style_id UUID NULL REFERENCES styles(id)
+size TEXT NULL                                 -- "32", "XL"
+color TEXT NULL                                -- "Blue", "ቀይ"
+sku TEXT NULL                                  -- client-composed, server-stored
+min_selling_price NUMERIC(12,2) NULL           -- haggling floor; NULL = none
 
 INDEX idx_products_shop_name ON (shop_id, name) WHERE deleted_at IS NULL
 INDEX idx_products_low_stock ON (shop_id) WHERE stock <= low_stock_threshold AND deleted_at IS NULL
 INDEX idx_products_barcode ON (shop_id, barcode) WHERE barcode IS NOT NULL
+INDEX products_style_idx ON (style_id) WHERE deleted_at IS NULL
+UNIQUE INDEX products_sku_uq ON (shop_id, sku) WHERE deleted_at IS NULL AND sku IS NOT NULL
+UNIQUE INDEX products_variant_uq ON (style_id, size, color) WHERE deleted_at IS NULL AND style_id IS NOT NULL
+```
+
+### `styles` (0013 — boutique)
+The shared half of a variant family ("Slim jeans"); variants are `products`
+rows with `style_id` set. Renaming a style recomposes variant names inside the
+`style.update` handler. See docs/19 §2–3.
+```sql
+id UUID PK
+shop_id UUID NOT NULL REFERENCES shops(id)
+name TEXT NOT NULL
+brand TEXT
+category TEXT                                  -- reuses product categories
+segment TEXT CHECK (segment IN ('men','women','kids','unisex'))  -- nullable
+image_url TEXT
+default_selling_price NUMERIC(12,2) NOT NULL
+default_purchase_price NUMERIC(12,2) NOT NULL DEFAULT 0
+size_set TEXT CHECK (size_set IN ('letter','numeric','waist','shoe_eu','kids_age','free','custom'))
+sku_prefix VARCHAR(8)                          -- "JN" → JN-32-BLU
+client_updated_at TIMESTAMPTZ
+created_at, updated_at, deleted_at
+
+INDEX styles_shop_idx ON (shop_id) WHERE deleted_at IS NULL
 ```
 
 ### `inventory_logs`
@@ -158,13 +191,55 @@ sale_id UUID NOT NULL REFERENCES sales(id) ON DELETE CASCADE
 product_id UUID NOT NULL REFERENCES products(id)
 product_name_snapshot TEXT NOT NULL            -- freeze name at sale time
 quantity NUMERIC(12,3) NOT NULL
-unit_price NUMERIC(12,2) NOT NULL              -- selling at time of sale
+unit_price NUMERIC(12,2) NOT NULL              -- selling at time of sale (what was charged)
 unit_cost NUMERIC(12,2) NOT NULL               -- purchase at time of sale
+list_price NUMERIC(12,2) NULL                  -- 0013: tag price when rung up; NULL = same as unit_price
 line_total NUMERIC(12,2) GENERATED ALWAYS AS (quantity * unit_price) STORED
 
 INDEX idx_sale_items_sale ON (sale_id)
 INDEX idx_sale_items_product_time ON (product_id)
 ```
+
+### `sale_returns` / `sale_return_items` (0013 — partial returns & exchanges)
+`sale.refund` still flips a whole sale to `refunded`. A return is the per-line
+version and is its own row because one sale can be returned in steps. An
+exchange is a return whose credit was spent on a new sale (`exchange_sale_id`);
+the new sale's `discount` carries the credit so `sales.total` stays "what the
+customer paid". See docs/19 §13.3.
+```sql
+sale_returns (
+  id UUID PK
+  shop_id UUID NOT NULL REFERENCES shops(id)
+  sale_id UUID NOT NULL REFERENCES sales(id)
+  user_id UUID NOT NULL REFERENCES users(id)
+  shift_id UUID REFERENCES shifts(id)          -- the shift the cash LEFT the till in
+  occurred_at TIMESTAMPTZ NOT NULL
+  refund_amount NUMERIC(12,2) NOT NULL CHECK (>= 0)   -- 0 for an even exchange
+  refund_method TEXT CHECK (IN ('cash','mobile_money'))  -- NULL when netted into exchange
+  exchange_sale_id UUID REFERENCES sales(id)
+  reason TEXT CHECK (IN ('wrong_size','defect','changed_mind','other'))
+  note TEXT
+  created_at TIMESTAMPTZ NOT NULL
+)
+INDEX ix_sale_returns_shop_occurred ON (shop_id, occurred_at)
+INDEX ix_sale_returns_sale ON (sale_id)
+INDEX ix_sale_returns_shift ON (shift_id)
+
+sale_return_items (
+  id UUID PK
+  return_id UUID NOT NULL REFERENCES sale_returns(id) ON DELETE CASCADE
+  sale_item_id UUID NOT NULL REFERENCES sale_items(id)
+  quantity NUMERIC(12,3) NOT NULL CHECK (> 0)
+  condition TEXT NOT NULL CHECK (IN ('resellable','damaged'))
+  unit_price NUMERIC(12,2) NOT NULL            -- credited per unit (unit_price × total/subtotal, cents)
+)
+INDEX ix_sale_return_items_return ON (return_id)
+INDEX ix_sale_return_items_sale_item ON (sale_item_id)
+```
+`sales.status` CHECK widened in 0013 to
+`('completed','refunded','voided','partially_returned')`. `sale_return_items`
+has no `shop_id`; its RLS policy joins through `sale_returns` the way
+`sale_items` joins through `sales`.
 
 ### `debts`
 ```sql
@@ -305,6 +380,12 @@ GROUP BY 1, 2;
 CREATE UNIQUE INDEX ON sales_daily_mv (shop_id, day);
 ```
 Refreshed by a cron job every 15 minutes — dashboard reads from the MV, never from raw `sales`.
+
+Known follow-up (0013): the view still filters `status='completed'`, so it
+excludes `partially_returned` sales and sales fully returned through
+`sale.return`, and it does not subtract `sale_returns.refund_amount`; the
+`/reports/*` endpoints query `sales` + `sale_returns` directly and are the
+authoritative numbers until the view is redefined in its own migration.
 
 ## What we deliberately did NOT model
 

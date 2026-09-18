@@ -26,6 +26,7 @@ from app.core.security import (
     issue_refresh_token,
     verify_password,
 )
+from app.core.shop_features import features_for
 from app.db.session import AsyncSessionLocal
 from app.models import AuditLog, DeviceSession, Invite, Shop, ShopMember, User
 from app.schemas.auth import (
@@ -191,6 +192,8 @@ async def _issue_token_bundle(
             if resolved_shop and resolved_shop.debt_threshold is not None else "500.00",
         expense_approval_threshold=str(resolved_shop.expense_approval_threshold)
             if resolved_shop and resolved_shop.expense_approval_threshold is not None else "500.00",
+        return_window_days=resolved_shop.return_window_days
+            if resolved_shop and resolved_shop.return_window_days is not None else 7,
     )
 
 
@@ -389,9 +392,9 @@ async def invite(
     # Bakers only make sense where there is production to hand over.
     if req.role == BAKER:
         shop = await db.get(Shop, user.shop_id)
-        if shop is None or shop.shop_type != "bakery":
+        if shop is None or not features_for(shop.shop_type).has_production:
             raise DomainError(
-                "baker accounts require a bakery shop", code="bad_shop_type"
+                "baker accounts require a shop with production", code="bad_shop_type"
             )
 
     # Phone numbers are globally unique (idx_users_phone_global); surface a

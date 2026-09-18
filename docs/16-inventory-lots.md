@@ -51,7 +51,7 @@ for COGS, flagged `cogs_fallback` in the consumption note.
 |---|---|---|
 | `stock.receive` | id, product_id, quantity, unit_cost, expiry_date?, spoiled_quantity?, note?, occurred_at | Creates lot (qty_remaining = quantity − spoiled). Stock += quantity − spoiled. Spoiled portion recorded as spoilage consumption at unit_cost. Updates product.purchase_price to the new cost (last-cost display). |
 | `stock.spoil` | id, product_id, quantity, lot_id?, reason?, occurred_at | Consumes FEFO (or the named lot). InventoryLog movement='spoilage'. Valued at lot cost → waste report. |
-| `production.record` | id, product_id, quantity_produced, quantity_spoiled?, note?, occurred_at | **Bakery only.** Stock += produced − spoiled (informational; bakery sales don't decrement stock). Spoiled units deduct supplies per recipe (they consumed ingredients but will never hit a sale, which is where bakery supplies are normally deducted) and are valued at recipe cost as spoilage. |
+| `production.record` | id, product_id, quantity_produced, quantity_spoiled?, note?, occurred_at | **Bakery only.** Stock += produced − spoiled, and the lot is valued at recipe cost. Since migration 0011 the **whole bake** deducts its recipe supplies here — the flour is in the dough before anyone knows which loaves burn — and sales no longer deduct ingredients at all (`sale.create` ignores legacy `supply_deductions`). Spoiled units are additionally booked as spoilage against the new lot. See docs/18-handovers.md § "Ingredient timing". |
 
 `inventory.adjust` keeps working: positive delta creates a lot at
 `product.purchase_price`; negative delta consumes FEFO.

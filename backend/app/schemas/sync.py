@@ -5,8 +5,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 SyncOp = Literal[
-    "sale.create", "sale.refund", "sale.void",
+    "sale.create", "sale.refund", "sale.void", "sale.return",
     "product.create", "product.update", "product.delete",
+    "style.create", "style.update", "style.add_variants", "style.delete",
     "inventory.adjust",
     "stock.receive", "stock.spoil", "production.record",
     "handover.create", "handover.accept",

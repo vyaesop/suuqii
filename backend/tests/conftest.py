@@ -148,6 +148,40 @@ async def owner_bakery(db):
 
 
 @pytest.fixture
+async def boutique_shop(db):
+    shop = Shop(
+        id=uuid4(), name="Boutique", phone="+251900000020",
+        shop_type="boutique", debt_threshold=Decimal("500.00"),
+        expense_approval_threshold=Decimal("500.00"),
+    )
+    db.add(shop)
+    await db.flush()
+    return shop
+
+
+@pytest.fixture
+async def boutique_owner(db, boutique_shop):
+    user = User(
+        id=uuid4(), shop_id=boutique_shop.id, name="Boutique Owner",
+        phone="+251900000021", password_hash="x", role="owner", is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@pytest.fixture
+async def boutique_cashier(db, boutique_shop):
+    user = User(
+        id=uuid4(), shop_id=boutique_shop.id, name="Boutique Cashier",
+        phone="+251900000022", password_hash="x", role="cashier", is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+@pytest.fixture
 async def product(db, shop):
     prod = Product(
         id=uuid4(),

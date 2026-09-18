@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from app.core.phone import normalize_phone
+from app.core.shop_features import SHOP_TYPES
 
 # Identity phones are normalized to the canonical local format (09.../07...)
 # at the schema boundary so lookups and uniqueness checks always compare the
@@ -26,8 +27,10 @@ class RegisterShopRequest(BaseModel):
     def _pin_not_password(self) -> "RegisterShopRequest":
         if self.owner_pin == self.password or self.owner_pin in self.password:
             raise ValueError("owner_pin must not match or be contained in password")
-        if self.shop_type not in {"regular", "bakery"}:
-            raise ValueError("shop_type must be 'regular' or 'bakery'")
+        if self.shop_type not in SHOP_TYPES:
+            raise ValueError(
+                "shop_type must be one of " + ", ".join(sorted(SHOP_TYPES))
+            )
         return self
 
 
@@ -55,6 +58,10 @@ class TokenBundle(BaseModel):
     # so offline checks use the shop's actual values, not hardcoded defaults.
     debt_threshold: str = "500.00"
     expense_approval_threshold: str = "500.00"
+    # Days after a sale within which a return needs no owner sign-off
+    # (docs/19 §13.4). Travels with the thresholds for the same reason: the
+    # return sheet decides offline whether to demand a PIN.
+    return_window_days: int = 7
 
 
 class InviteRequest(BaseModel):

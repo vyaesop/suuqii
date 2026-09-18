@@ -251,7 +251,7 @@ async def test_adjust_creates_and_consumes_lots(db, shop, owner, product):
     assert lot.qty_remaining == Decimal("3")
 
 
-async def test_production_record_bakery_spoilage_deducts_supplies(db, owner_bakery):
+async def test_production_record_deducts_supplies_for_the_whole_batch(db, owner_bakery):
     db_, shop, owner, bread, flour = owner_bakery
     svc = _svc(db_, shop, owner)
     res = await svc.apply(_ev("production.record", {
@@ -268,11 +268,13 @@ async def test_production_record_bakery_spoilage_deducts_supplies(db, owner_bake
     assert lot.unit_cost == Decimal("20.00")
     assert lot.qty_remaining == Decimal("45")
 
-    # Spoiled units consumed ingredients that never reach a sale:
-    # 5 breads × 0.5 kg = 2.5 kg deducted.
+    # Since migration 0011 the whole bake draws its ingredients at production
+    # time, spoiled or not — the flour is in the dough before anyone knows
+    # which loaves burn, and sales no longer deduct ingredients at all
+    # (sale.create ignores legacy supply_deductions). 50 breads × 0.5 kg = 25 kg.
     fl = await db_.get(Supply, flour.id)
     await db_.refresh(fl)
-    assert fl.quantity_on_hand == Decimal("97.5")
+    assert fl.quantity_on_hand == Decimal("75.000")
 
     bread_row = await db_.get(Product, bread.id)
     await db_.refresh(bread_row)

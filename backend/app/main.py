@@ -19,6 +19,7 @@ from app.api.v1 import (
     sales,
     shifts,
     shops,
+    styles,
     supplies,
     sync,
 )
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(shifts.router, prefix=api)
     app.include_router(shops.router, prefix=api)
     app.include_router(supplies.router, prefix=api)
+    app.include_router(styles.router, prefix=api)
     app.include_router(handovers.router, prefix=api)
     app.include_router(exports.router, prefix=api)
     app.include_router(sync.router, prefix=api)

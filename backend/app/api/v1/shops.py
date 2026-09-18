@@ -1,8 +1,8 @@
 """Shop settings and multi-shop membership (docs/17-roles.md, docs/19-multi-shop.md).
 
 Only the thresholds and display fields are editable; shop_type is fixed at
-registration (switching regular↔bakery changes inventory semantics and is
-deliberately not a settings toggle) — an owner who runs both keeps two shops and
+registration (switching between regular, bakery and boutique changes inventory
+semantics and is deliberately not a settings toggle) — an owner who runs both keeps two shops and
 switches between them instead.
 """
 from datetime import UTC, datetime
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.capabilities import ADMIN, OWNER, can
 from app.core.deps import current_user, db_session
+from app.core.shop_features import SHOP_TYPE_PATTERN
 from app.models import AuditLog, Shop, ShopMember, User
 
 router = APIRouter(prefix="/shops", tags=["shops"])
@@ -35,6 +36,7 @@ class ShopSettingsOut(BaseModel):
     shop_type: str
     debt_threshold: str
     expense_approval_threshold: str
+    return_window_days: int
 
 
 class ShopSettingsPatch(BaseModel):
@@ -42,6 +44,14 @@ class ShopSettingsPatch(BaseModel):
     locale: str | None = Field(None, pattern="^(en|om)$")
     debt_threshold: Decimal | None = Field(None, ge=0, le=_MAX_THRESHOLD)
     expense_approval_threshold: Decimal | None = Field(None, ge=0, le=_MAX_THRESHOLD)
+    # 0 = every return needs the owner; 90 is the generous end of what a shop
+    # would honour (docs/19 §13.4).
+    return_window_days: int | None = Field(None, ge=0, le=90)
+
+
+_PATCHABLE = (
+    "name", "locale", "debt_threshold", "expense_approval_threshold", "return_window_days",
+)
 
 
 def _serialize(shop: Shop) -> ShopSettingsOut:
@@ -52,6 +62,7 @@ def _serialize(shop: Shop) -> ShopSettingsOut:
         shop_type=shop.shop_type,
         debt_threshold=str(shop.debt_threshold),
         expense_approval_threshold=str(shop.expense_approval_threshold),
+        return_window_days=shop.return_window_days,
     )
 
 
@@ -71,7 +82,7 @@ class MyShopsResponse(BaseModel):
 
 class CreateShopRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    shop_type: str = Field("regular", pattern="^(regular|bakery)$")
+    shop_type: str = Field("regular", pattern=SHOP_TYPE_PATTERN)
     locale: str = Field("en", pattern="^(en|am|om)$")
 
 
@@ -200,7 +211,7 @@ async def update_settings(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "shop not found")
 
     changes: dict[str, dict[str, str]] = {}
-    for field in ("name", "locale", "debt_threshold", "expense_approval_threshold"):
+    for field in _PATCHABLE:
         value = getattr(patch, field)
         if value is not None and value != getattr(shop, field):
             changes[field] = {"old": str(getattr(shop, field)), "new": str(value)}

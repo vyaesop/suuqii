@@ -277,12 +277,44 @@ async def test_mismatched_counts_are_disputed_and_audited(owner_bakery):
 
 async def test_baker_cannot_accept_their_own_handover(owner_bakery):
     """Without this the two counts collapse into one and the control is
-    worthless. Enforced server-side because the UI is not a boundary."""
+    worthless. Enforced server-side because the UI is not a boundary.
+
+    For a baker the *capability* gate fires first — ROLE_CAPS deliberately
+    withholds HANDOVER_ACCEPT from bakers (docs/18) — so the rejection code is
+    `forbidden_for_role`, never the handler's own self-accept check. The
+    owner case below is what exercises that check."""
     db, shop, _owner, bread, _flour = owner_bakery
     baker = await _mk_user(db, shop, "baker", "Baker", "+251900000041")
 
     handover_id = uuid4()
     svc = _svc(db, shop, baker)
+    await svc.apply(_ev("handover.create", {
+        "id": str(handover_id),
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "items": [{"product_id": str(bread.id), "qty_handed": "10"}],
+    }))
+    res = await svc.apply(_ev("handover.accept", {
+        "handover_id": str(handover_id),
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "items": [{"product_id": str(bread.id), "qty_received": "10"}],
+    }))
+    assert res.status == SyncResultStatus.REJECTED
+    assert res.code == "forbidden_for_role"
+
+    h = await db.get(Handover, handover_id)
+    await db.refresh(h)
+    assert h.status == STATUS_PENDING
+
+
+async def test_owner_cannot_accept_their_own_handover(owner_bakery):
+    """The owner is the only role holding both HANDOVER_CREATE and
+    HANDOVER_ACCEPT, so they are the one who can reach the handler's
+    self-accept check — a small shop where the owner bakes must still hand
+    over to someone else to count."""
+    db, shop, owner, bread, _flour = owner_bakery
+
+    handover_id = uuid4()
+    svc = _svc(db, shop, owner)
     await svc.apply(_ev("handover.create", {
         "id": str(handover_id),
         "occurred_at": datetime.now(UTC).isoformat(),

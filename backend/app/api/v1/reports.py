@@ -5,12 +5,13 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, case, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.capabilities import VIEW_REPORTS, can
 from app.core.config import settings
 from app.core.deps import current_user, db_session
+from app.core.shop_features import features_for
 from app.models import (
     Debt,
     Expense,
@@ -19,15 +20,85 @@ from app.models import (
     Product,
     Sale,
     SaleItem,
+    SaleReturn,
+    SaleReturnItem,
     Shop,
     StockLot,
+    Style,
     Supply,
     User,
 )
+from app.models.sale import SETTLED_STATUSES
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 _EXPENSE_CATEGORIES = ("rent", "transport", "utilities", "salary", "supplies", "other")
+_CENT = Decimal("0.01")
+
+
+def _money(value) -> str:
+    """Quantity (3 dp) × price (2 dp) comes back from Postgres at 5 dp;
+    money on the wire is always cents."""
+    return str(Decimal(value).quantize(_CENT))
+
+
+# Sales that count as revenue. Mirrors ShiftService.expected_cash: a sale
+# returned through sale.return stays in at its full total — even once every
+# line is back and it reads 'refunded' — and the money that went back out is
+# subtracted by _return_adjustments, in the period it actually left. Legacy
+# sale.refund sales (no sale_returns row) stay excluded, as they always were.
+_HAS_RETURNS = exists().where(SaleReturn.sale_id == Sale.id)
+_REVENUE_STATUS = or_(
+    Sale.status.in_(SETTLED_STATUSES),
+    and_(Sale.status == "refunded", _HAS_RETURNS),
+)
+
+
+async def _return_adjustments(
+    db: AsyncSession, shop_id: UUID, start: datetime, end: datetime | None = None, key=None,
+) -> dict:
+    """Returns in [start, end) → {group: [count, refund_total, resellable_cost]}.
+
+    `key` is an optional grouping expression (a Sale column or an expression
+    on SaleReturn); with no key the single group is keyed None. refund_total
+    comes off revenue. resellable_cost is the cost of units that went back on
+    the shelf and so comes back into gross profit; a damaged unit keeps its
+    cost as the loss it is (and shows up in the returns report instead).
+    """
+    cols = [key] if key is not None else []
+    window = [SaleReturn.shop_id == shop_id, SaleReturn.occurred_at >= start]
+    if end is not None:
+        window.append(SaleReturn.occurred_at < end)
+    refunds = (await db.execute(
+        select(
+            *cols,
+            func.count(SaleReturn.id),
+            func.coalesce(func.sum(SaleReturn.refund_amount), 0),
+        )
+        .select_from(SaleReturn)
+        .join(Sale, Sale.id == SaleReturn.sale_id)
+        .where(*window)
+        .group_by(*cols)
+    )).all()
+    costs = (await db.execute(
+        select(*cols, func.coalesce(func.sum(SaleReturnItem.quantity * SaleItem.unit_cost), 0))
+        .select_from(SaleReturnItem)
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
+        .join(Sale, Sale.id == SaleReturn.sale_id)
+        .join(SaleItem, SaleItem.id == SaleReturnItem.sale_item_id)
+        .where(*window, SaleReturnItem.condition == "resellable")
+        .group_by(*cols)
+    )).all()
+    out: dict = {}
+    for row in refunds:
+        out[row[0] if cols else None] = [int(row[-2]), Decimal(row[-1]), Decimal("0")]
+    for row in costs:
+        entry = out.setdefault(row[0] if cols else None, [0, Decimal("0"), Decimal("0")])
+        entry[2] = Decimal(row[-1]).quantize(_CENT)
+    return out
+
+
+_NO_RETURNS = (0, Decimal("0"), Decimal("0"))
 
 
 def _range_start(range_: str) -> datetime:
@@ -60,10 +131,16 @@ async def dashboard(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
     )).scalar_one()
+    # Money handed back through sale.return in the period comes off revenue;
+    # the cost of resellable returned units comes back into gross profit.
+    _, refund_total, resellable_cost = (
+        await _return_adjustments(db, user.shop_id, start)
+    ).get(None, _NO_RETURNS)
+    billed_revenue = Decimal(billed_revenue) - refund_total
 
     # Collected revenue = billed revenue minus debt still outstanding
     # (credit sales that have not yet been paid reduce collected revenue).
@@ -81,10 +158,11 @@ async def dashboard(
         select(func.coalesce(func.sum(Sale.total - Sale.cost_total), 0)).where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
     )).scalar_one()
+    gross_profit = Decimal(gross_profit) - refund_total + resellable_cost
 
     # ── Expenses — total + breakdown by category ──────────────────────────────
     expense_rows = (await db.execute(
@@ -109,11 +187,16 @@ async def dashboard(
         total_expenses += Decimal(row.total)
 
     # ── Spoilage / waste (valued at lot cost at spoilage time) ───────────────
+    # Damaged returns also write a spoilage consumption (tagged with the sale
+    # item they came back from), but their cost is already the loss inside
+    # gross_profit above — the refund went out and no cost came back — so
+    # they are left out here rather than counted against net profit twice.
     spoilage_cost = (await db.execute(
         select(func.coalesce(func.sum(LotConsumption.quantity * LotConsumption.unit_cost), 0))
         .where(
             LotConsumption.shop_id == user.shop_id,
             LotConsumption.movement == "spoilage",
+            LotConsumption.sale_item_id.is_(None),
             LotConsumption.consumed_at >= start,
         )
     )).scalar_one()
@@ -125,7 +208,7 @@ async def dashboard(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.payment_method == "credit",
             Sale.occurred_at >= start,
         )
@@ -133,9 +216,9 @@ async def dashboard(
 
     # ── Low stock ─────────────────────────────────────────────────────────────
     shop = await db.get(Shop, user.shop_id)
-    is_bakery = shop is not None and shop.shop_type == "bakery"
+    features = features_for(shop.shop_type if shop else None)
 
-    if is_bakery:
+    if features.has_supplies:
         low_stock_rows = (await db.execute(
             select(Supply).where(
                 Supply.shop_id == user.shop_id,
@@ -146,6 +229,38 @@ async def dashboard(
         low_stock_out = [
             {"id": str(s.id), "name": s.name, "stock": str(s.quantity_on_hand)}
             for s in low_stock_rows
+        ]
+    elif features.has_variants:
+        # A boutique does not run out of "jeans"; it runs out of size 32. The
+        # unit of low stock is therefore the style with a broken size run —
+        # one entry per style with ≥1 live variant at/below its threshold —
+        # so the count reads as "styles to buy for", not "sizes missing".
+        low_stock_rows = (await db.execute(
+            select(
+                Style.id,
+                Style.name,
+                func.coalesce(func.sum(Product.stock), 0).label("stock_total"),
+                func.count(Product.id).label("sizes_out"),
+            )
+            .join(Product, Product.style_id == Style.id)
+            .where(
+                Style.shop_id == user.shop_id,
+                Style.deleted_at.is_(None),
+                Product.deleted_at.is_(None),
+                Product.stock <= Product.low_stock_threshold,
+            )
+            .group_by(Style.id, Style.name)
+            .order_by(Style.name)
+            .limit(20)
+        )).all()
+        low_stock_out = [
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "stock": str(r.stock_total),
+                "sizes_out": int(r.sizes_out),
+            }
+            for r in low_stock_rows
         ]
     else:
         low_stock_rows = (await db.execute(
@@ -174,6 +289,9 @@ async def dashboard(
         "expenses": str(total_expenses),
         "expenses_by_category": expenses_by_category,
         "spoilage_cost": str(spoilage_cost),
+        # Cash/mobile money handed back through sale.return in the period
+        # (already netted out of billed_revenue and gross_profit).
+        "refund_total": str(refund_total),
         "net_profit": str(net_profit),
         "credit_sales": str(credit_sales),
         "outstanding_debt": str(all_outstanding),
@@ -203,7 +321,7 @@ async def sales_series(
         .where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
         .group_by(day)
@@ -222,16 +340,33 @@ async def sales_series(
     )).all()
     expenses_by_day = {r.d.date().isoformat(): str(r.amount) for r in expense_rows}
 
-    series = []
+    # Returns land on the day the money went back, which may be a day with
+    # no sales at all — such a day still appears, with negative revenue.
+    by_day: dict[str, dict] = {}
     for r in rows:
-        date_key = r.d.date().isoformat()
-        series.append({
+        by_day[r.d.date().isoformat()] = {
+            "revenue": Decimal(r.revenue), "profit": Decimal(r.profit), "count": int(r.sale_count),
+        }
+    adjustments = await _return_adjustments(
+        db, user.shop_id, start, key=func.date_trunc("day", SaleReturn.occurred_at),
+    )
+    for day, (_, refund, resellable_cost) in adjustments.items():
+        entry = by_day.setdefault(
+            day.date().isoformat(), {"revenue": Decimal("0"), "profit": Decimal("0"), "count": 0}
+        )
+        entry["revenue"] -= refund
+        entry["profit"] += resellable_cost - refund
+
+    series = [
+        {
             "date": date_key,
-            "revenue": str(r.revenue),
-            "profit": str(r.profit),
+            "revenue": str(entry["revenue"]),
+            "profit": str(entry["profit"]),
             "expenses": expenses_by_day.get(date_key, "0"),
-            "sale_count": int(r.sale_count),
-        })
+            "sale_count": entry["count"],
+        }
+        for date_key, entry in sorted(by_day.items())
+    ]
 
     return {"range": range_, "series": series}
 
@@ -265,7 +400,7 @@ async def top_products(
         .where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
         .group_by(SaleItem.product_id, SaleItem.product_name_snapshot)
@@ -273,10 +408,39 @@ async def top_products(
         .limit(limit)
     )).all()
 
+    # Returned units come off the line at the line's own price (this report
+    # is pre-cart-discount, so the credit ratio does not apply). A resellable
+    # unit gives its cost back; a damaged one does not.
+    returned = {
+        r.product_id: r for r in (await db.execute(
+            select(
+                SaleItem.product_id,
+                func.coalesce(func.sum(SaleReturnItem.quantity), 0).label("qty"),
+                func.coalesce(
+                    func.sum(SaleReturnItem.quantity * SaleItem.unit_price), 0
+                ).label("revenue"),
+                func.coalesce(func.sum(case(
+                    (
+                        SaleReturnItem.condition == "resellable",
+                        SaleReturnItem.quantity * (SaleItem.unit_price - SaleItem.unit_cost),
+                    ),
+                    else_=SaleReturnItem.quantity * SaleItem.unit_price,
+                )), 0).label("profit"),
+            )
+            .select_from(SaleReturnItem)
+            .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
+            .join(SaleItem, SaleItem.id == SaleReturnItem.sale_item_id)
+            .where(SaleReturn.shop_id == user.shop_id, SaleReturn.occurred_at >= start)
+            .group_by(SaleItem.product_id)
+        )).all()
+    }
+
     items = []
     for r in rows:
-        revenue = Decimal(r.revenue)
-        profit = Decimal(r.profit)
+        ret = returned.get(r.product_id)
+        qty = Decimal(r.qty) - (Decimal(ret.qty) if ret else Decimal("0"))
+        revenue = Decimal(r.revenue) - (Decimal(ret.revenue) if ret else Decimal("0"))
+        profit = Decimal(r.profit) - (Decimal(ret.profit) if ret else Decimal("0"))
         # Margin % is on line-item revenue before any cart-level discount.
         # Cart discounts live on sale.discount and are not apportioned to items,
         # so true margin may be slightly lower than reported here.
@@ -284,11 +448,13 @@ async def top_products(
         items.append({
             "product_id": str(r.product_id),
             "name": r.name,
-            "qty_sold": str(r.qty),
+            "qty_sold": str(qty),
             "revenue": str(revenue),
             "profit": str(profit),
             "margin_pct": str(margin_pct),
         })
+    # Returns may have reordered the top N.
+    items.sort(key=lambda i: Decimal(i["revenue"]), reverse=True)
 
     return {"range": range_, "items": items}
 
@@ -313,18 +479,23 @@ async def payment_mix(
         .where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
         .group_by(Sale.payment_method)
     )).all()
+    # A return is netted against how the *sale* was paid, not how the money
+    # was handed back — this is a revenue split, not a cash-drawer one.
+    adjustments = await _return_adjustments(db, user.shop_id, start, key=Sale.payment_method)
 
     return {
         "range": range_,
         "methods": [
             {
                 "method": r.payment_method,
-                "total": str(r.total),
+                "total": str(
+                    Decimal(r.total) - adjustments.get(r.payment_method, _NO_RETURNS)[1]
+                ),
                 "count": int(r.count),
             }
             for r in rows
@@ -432,7 +603,7 @@ async def inventory_valuation(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
 
     shop = await db.get(Shop, user.shop_id)
-    is_bakery = shop is not None and shop.shop_type == "bakery"
+    features = features_for(shop.shop_type if shop else None)
 
     product_rows = (await db.execute(
         select(
@@ -484,7 +655,7 @@ async def inventory_valuation(
         "products": products_out,
     }
 
-    if is_bakery:
+    if features.has_supplies:
         supply_rows = (await db.execute(
             select(
                 Supply.id,
@@ -619,12 +790,15 @@ async def cashier_performance(
         .where(
             Sale.shop_id == user.shop_id,
             Sale.deleted_at.is_(None),
-            Sale.status == "completed",
+            _REVENUE_STATUS,
             Sale.occurred_at >= start,
         )
         .group_by(Sale.user_id)
     )).all()
 
+    # Legacy full refunds: the whole sale total, against the sale's cashier.
+    # Sales returned through sale.return are excluded here and counted below
+    # from sale_returns, so neither path is counted twice.
     refund_rows = (await db.execute(
         select(
             Sale.user_id,
@@ -634,11 +808,18 @@ async def cashier_performance(
         .where(
             Sale.shop_id == user.shop_id,
             Sale.status == "refunded",
+            ~_HAS_RETURNS,
             Sale.occurred_at >= start,
         )
         .group_by(Sale.user_id)
     )).all()
     refunds_by_user = {str(r.user_id): r for r in refund_rows}
+    # Returns are attributed to the cashier who made the sale (whose revenue
+    # they reduce), not to whoever processed the return.
+    returns_by_user = {
+        str(k): v
+        for k, v in (await _return_adjustments(db, user.shop_id, start, key=Sale.user_id)).items()
+    }
 
     # Shift variance history — closed shifts only, in range
     # variance = declared_closing_cash - expected_closing_cash (generated column)
@@ -654,7 +835,9 @@ async def cashier_performance(
             "AND expected_closing_cash IS NOT NULL "
             "GROUP BY user_id"
         ),
-        {"shop_id": str(user.shop_id), "start": start.isoformat()},
+        # asyncpg binds by type: a UUID column wants a UUID and a timestamptz
+        # wants a datetime — string forms raise DataError at execute time.
+        {"shop_id": user.shop_id, "start": start},
     )).all()
     variance_by_user = {str(r.user_id): r for r in variance_rows}
 
@@ -662,13 +845,16 @@ async def cashier_performance(
     for r in sale_rows:
         uid = str(r.user_id)
         ref = refunds_by_user.get(uid)
+        ret_count, ret_refund, ret_cost = returns_by_user.get(uid, _NO_RETURNS)
         var = variance_by_user.get(uid)
-        revenue = Decimal(r.revenue)
-        gross_profit = Decimal(r.gross_profit)
+        revenue = Decimal(r.revenue) - ret_refund
+        gross_profit = Decimal(r.gross_profit) - ret_refund + ret_cost
         margin_pct = (
             (gross_profit / revenue * 100).quantize(Decimal("0.1"))
             if revenue else Decimal("0")
         )
+        refund_count = (int(ref.refund_count) if ref else 0) + ret_count
+        refund_total = (Decimal(ref.refund_total) if ref else Decimal("0")) + ret_refund
         cashiers.append({
             "user_id": uid,
             "sale_count": int(r.sale_count),
@@ -676,11 +862,11 @@ async def cashier_performance(
             "gross_profit": str(gross_profit),
             "margin_pct": str(margin_pct),
             "avg_transaction": str(Decimal(r.avg_transaction).quantize(Decimal("0.01"))),
-            "refund_count": int(ref.refund_count) if ref else 0,
-            "refund_total": str(ref.refund_total) if ref else "0",
+            "refund_count": refund_count,
+            "refund_total": str(refund_total),
             "refund_rate_pct": str(
-                (Decimal(ref.refund_count) / Decimal(r.sale_count) * 100).quantize(Decimal("0.1"))
-                if ref and r.sale_count else Decimal("0")
+                (Decimal(refund_count) / Decimal(r.sale_count) * 100).quantize(Decimal("0.1"))
+                if refund_count and r.sale_count else Decimal("0")
             ),
             "shift_count": int(var.shift_count) if var else 0,
             "avg_shift_variance": str(
@@ -845,3 +1031,157 @@ async def expiring_report(
         for s in supplies
     ]
     return {"lots": lot_items, "supplies": supply_items, "days": days}
+
+
+def _window(from_: datetime | None, to: datetime | None) -> tuple[datetime, datetime]:
+    """Explicit [from, to) range, defaulting to the last 30 days."""
+    end = to or datetime.now(UTC)
+    start = from_ or (end - timedelta(days=30))
+    return start, end
+
+
+@router.get("/returns")
+async def returns_report(
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """Returns in the period: how many, how much went back, what was lost to
+    damage, why, and by whom (docs/19 §13.4). Owner-only."""
+    if not can(user.role, VIEW_REPORTS):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+    start, end = _window(from_, to)
+    in_range = (
+        SaleReturn.shop_id == user.shop_id,
+        SaleReturn.occurred_at >= start,
+        SaleReturn.occurred_at < end,
+    )
+
+    totals = (await db.execute(
+        select(
+            func.count(SaleReturn.id).label("count"),
+            func.coalesce(func.sum(SaleReturn.refund_amount), 0).label("refund_total"),
+        ).where(*in_range)
+    )).one()
+
+    # Damaged goods are valued at what they cost, not what they sold for —
+    # that is the money actually lost.
+    damaged_value = (await db.execute(
+        select(func.coalesce(func.sum(SaleReturnItem.quantity * SaleItem.unit_cost), 0))
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
+        .join(SaleItem, SaleItem.id == SaleReturnItem.sale_item_id)
+        .where(*in_range, SaleReturnItem.condition == "damaged")
+    )).scalar_one()
+
+    by_reason_rows = (await db.execute(
+        select(SaleReturn.reason, func.count(SaleReturn.id))
+        .where(*in_range)
+        .group_by(SaleReturn.reason)
+    )).all()
+    by_user_rows = (await db.execute(
+        select(
+            SaleReturn.user_id,
+            func.count(SaleReturn.id).label("count"),
+            func.coalesce(func.sum(SaleReturn.refund_amount), 0).label("refund_total"),
+        )
+        .where(*in_range)
+        .group_by(SaleReturn.user_id)
+        .order_by(func.count(SaleReturn.id).desc())
+    )).all()
+
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "count": int(totals.count),
+        "refund_total": _money(totals.refund_total),
+        "damaged_value": _money(damaged_value),
+        "by_reason": {(r[0] or "unspecified"): int(r[1]) for r in by_reason_rows},
+        "by_user": [
+            {
+                "user_id": str(r.user_id),
+                "count": int(r.count),
+                "refund_total": _money(r.refund_total),
+            }
+            for r in by_user_rows
+        ],
+    }
+
+
+@router.get("/price-leakage")
+async def price_leakage(
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = Query(None),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(db_session),
+):
+    """What haggling is costing: Σ (list_price − unit_price) × qty over lines
+    sold under their tag price (docs/19 §13.4), per cashier and per style.
+
+    Only lines that declared a list_price count; a mark-down applied through
+    `style.update` changes the tag itself and so does not appear here — see
+    the `style.markdown` audit rows for those.
+    """
+    if not can(user.role, VIEW_REPORTS):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner only")
+    start, end = _window(from_, to)
+
+    gap = (SaleItem.list_price - SaleItem.unit_price) * SaleItem.quantity
+    base = (
+        select(Sale.user_id, SaleItem.product_id, gap.label("leakage"))
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(
+            Sale.shop_id == user.shop_id,
+            Sale.deleted_at.is_(None),
+            _REVENUE_STATUS,
+            Sale.occurred_at >= start,
+            Sale.occurred_at < end,
+            SaleItem.list_price.is_not(None),
+            SaleItem.list_price > SaleItem.unit_price,
+        )
+        .subquery()
+    )
+
+    totals = (await db.execute(
+        select(func.count().label("lines"), func.coalesce(func.sum(base.c.leakage), 0).label("total"))
+    )).one()
+    by_user_rows = (await db.execute(
+        select(base.c.user_id, func.count().label("lines"),
+               func.coalesce(func.sum(base.c.leakage), 0).label("leakage"))
+        .group_by(base.c.user_id)
+        .order_by(func.sum(base.c.leakage).desc())
+    )).all()
+    by_style_rows = (await db.execute(
+        select(
+            Product.style_id,
+            func.min(Style.name).label("name"),
+            func.count().label("lines"),
+            func.coalesce(func.sum(base.c.leakage), 0).label("leakage"),
+        )
+        .join(Product, Product.id == base.c.product_id)
+        .outerjoin(Style, Style.id == Product.style_id)
+        .group_by(Product.style_id)
+        .order_by(func.sum(base.c.leakage).desc())
+    )).all()
+
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "leakage_total": _money(totals.total),
+        "lines": int(totals.lines),
+        "by_user": [
+            {"user_id": str(r.user_id), "lines": int(r.lines), "leakage": _money(r.leakage)}
+            for r in by_user_rows
+        ],
+        "by_style": [
+            {
+                # Unstyled products are grouped under a null style so the
+                # totals still reconcile.
+                "style_id": str(r.style_id) if r.style_id else None,
+                "name": r.name,
+                "lines": int(r.lines),
+                "leakage": _money(r.leakage),
+            }
+            for r in by_style_rows
+        ],
+    }

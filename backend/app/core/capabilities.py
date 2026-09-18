@@ -90,6 +90,14 @@ SYNC_OP_CAPS: dict[str, str] = {
     "product.create": MANAGE_PRODUCTS,
     "product.update": MANAGE_PRODUCTS,
     "product.delete": MANAGE_PRODUCTS,
+    # Boutique styles are product definitions (docs/19 §7): same capability,
+    # same PIN gate, no new constant.
+    "style.create": MANAGE_PRODUCTS,
+    "style.update": MANAGE_PRODUCTS,
+    "style.add_variants": MANAGE_PRODUCTS,
+    "style.delete": MANAGE_PRODUCTS,
+    # A partial return is a refund by another name.
+    "sale.return": REFUND,
     "inventory.adjust": MANAGE_INVENTORY,
     "stock.receive": MANAGE_INVENTORY,
     "stock.spoil": MANAGE_INVENTORY,

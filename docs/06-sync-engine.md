@@ -84,6 +84,19 @@ update sync_meta.cursor
 | `sale.refund` | Reject if already refunded | Idempotency check by sale ID |
 | `debt.payment.create` | Sum, even if it overpays — flag in audit | Real-world: two people might collect on the same debt |
 | `shift.close` | Reject if already closed | One close per shift |
+| `style.create` | Idempotent on `id`; 1 style + N products in one event | A half-applied size matrix is worse than none |
+| `style.update` | LWW by `client_updated_at`; recomposes variant names/SKUs server-side | Same rule as `product.update`; untouched variants keep their own timestamp |
+| `style.add_variants` | Idempotent per variant `id`; `variant_exists` for a live duplicate (size, colour) | A different id for an existing size is a real collision |
+| `style.delete` | `style_has_stock` if any live variant has stock > 0 | Deleting definitions for shelf stock would make it unsellable |
+| `sale.return` | Idempotent on `id`; cumulative per-line `return_exceeds_sold`; reject if sale already `refunded` | One sale can be returned in several steps |
+
+Boutique ops (docs/19 §13.3): `style.*` require `MANAGE_PRODUCTS` and
+`sale.return` requires `REFUND`; all are in `SENSITIVE_OPS` (owner PIN for
+cashiers). `sale.create` items may carry `list_price`; in shops with
+`has_line_pricing` a line under its floor is rejected for a cashier without a
+challenge (`below_price_floor`) and audited (`sale.below_floor`) for an owner.
+Reconciler domains: `style.*` → `{styles, products}`, `sale.return` →
+`{products, lots}`.
 
 ### Stock as a special case
 

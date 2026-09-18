@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._pagination import decode_cursor, encode_cursor
@@ -26,7 +26,13 @@ async def list_products(
         Product.shop_id == user.shop_id, Product.deleted_at.is_(None)
     )
     if q:
-        stmt = stmt.where(Product.name.ilike(f"%{q}%"))
+        # A typed or scanned code should land on exactly that variant, so the
+        # SKU/barcode match is exact while the name match stays fuzzy.
+        stmt = stmt.where(or_(
+            Product.name.ilike(f"%{q}%"),
+            Product.sku == q,
+            Product.barcode == q,
+        ))
     if category:
         stmt = stmt.where(Product.category == category)
     if low_stock:
@@ -57,6 +63,12 @@ def _dump(p: Product, *, is_owner: bool = True) -> dict:
         "barcode": p.barcode,
         "image_url": p.image_url,
         "client_updated_at": p.client_updated_at.isoformat() if p.client_updated_at else None,
+        # Variant fields (docs/19 §13.4); all null for a plain product.
+        "style_id": str(p.style_id) if p.style_id else None,
+        "size": p.size,
+        "color": p.color,
+        "sku": p.sku,
+        "min_selling_price": str(p.min_selling_price) if p.min_selling_price is not None else None,
     }
     # Purchase price is financially sensitive; only owners see the real value.
     d["purchase_price"] = str(p.purchase_price) if is_owner else "0"

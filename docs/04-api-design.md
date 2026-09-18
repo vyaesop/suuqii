@@ -106,12 +106,36 @@ Pulls events the client doesn't have yet. Response includes events from *other d
 | `expense.create` | |
 | `shift.open` | |
 | `shift.close` | computes variance server-side, returns it |
+| `style.create` | boutique: one style + N variant products atomically (docs/19 §13.3); PIN for cashiers |
+| `style.update` | LWW by `client_updated_at`; recomposes variant names/SKUs; `apply_price_to_variants` = mark-down (audited) |
+| `style.add_variants` | idempotent per variant id; `variant_exists` on a live duplicate |
+| `style.delete` | soft-deletes style + variants; `style_has_stock` if any variant has stock |
+| `sale.return` | partial return / exchange per `sale_item_id`; per-lot reversal; PIN for cashiers (docs/19 §13.3) |
 
 ## Direct read endpoints (owner dashboard, hydration)
 
 ### `GET /v1/products`
 Query: `?q=&category=&low_stock=true&cursor=&limit=`
-Returns active products for this shop.
+Returns active products for this shop. `q` matches the name fuzzily and
+`sku`/`barcode` exactly. Dump includes `style_id, size, color, sku,
+min_selling_price` (null for plain products).
+
+### `GET /v1/styles` (boutique pull domain, docs/19 §13.4)
+Query: `?q=&category=&segment=&cursor=&limit=`; keyset on `(name, id)` like
+products. Items carry `variant_count`, `stock_total`, `sizes_out` (variants at
+or below their threshold). `default_purchase_price` is `"0"` without
+`VIEW_COSTS`.
+
+### `GET /v1/styles/{id}`
+Style fields plus `variants: [product dump]`.
+
+### `GET /v1/sales/{id}` (SELL)
+One sale with `items[]` (incl. `list_price`, `returned_quantity`) and
+`returns[]`. `profit` only with `VIEW_COSTS`. This is the cross-device fallback
+for the return sheet when the sale is not in the phone's local DB.
+
+### `GET /v1/sales/{id}/returns` (SELL)
+`{items: [return…]}` for one sale.
 
 ### `GET /v1/sales`
 Query: `?from=&to=&user_id=&payment_method=&cursor=&limit=`
@@ -140,6 +164,50 @@ Single endpoint feeding the owner dashboard. Aggregates from `sales_daily_mv`.
   "trend": [ { "day": "2026-05-15", "revenue": "..." }, ... ]
 }
 ```
+
+### `GET /v1/reports/returns?from=&to=` (VIEW_REPORTS)
+`{count, refund_total, damaged_value, by_reason:{…}, by_user:[{user_id,count,refund_total}]}`.
+Default window: last 30 days. `damaged_value` is at unit cost.
+
+### `GET /v1/reports/price-leakage?from=&to=` (VIEW_REPORTS)
+`{leakage_total, lines, by_user:[…], by_style:[{style_id,name,lines,leakage}]}` where
+leakage = Σ (list_price − unit_price) × qty over lines with `list_price > unit_price`.
+
+### `GET /v1/reports/dashboard` — boutique `low_stock`
+For `shop_type = boutique` each `low_stock` entry is a *style* with a broken
+size run (`{id, name, stock, sizes_out}`), not a product.
+
+### Returns netting in revenue / profit reports
+`dashboard`, `sales-series`, `top-products`, `payment-mix` and
+`cashier-performance` all account for `sale.return` the same way
+`ShiftService.expected_cash` does:
+- A sale returned through `sale.return` stays in revenue at its full total —
+  even once every line is back and its status reads `refunded` — and the money
+  handed back (`Σ sale_returns.refund_amount`, in the period the return
+  *occurred*) is subtracted from revenue. The dashboard exposes that figure as
+  `refund_total`.
+- Gross profit gets the cost of **resellable** returned units back (they are
+  stock again); a **damaged** unit keeps its cost as the loss it is. To count
+  that loss once, the dashboard's `spoilage_cost` line excludes the spoilage
+  consumptions written by damaged returns (`/reports/returns.damaged_value`
+  still shows them).
+- Legacy full `sale.refund` sales (no `sale_returns` row) stay excluded from
+  revenue exactly as before; `cashier-performance.refund_count/refund_total`
+  combine legacy refunds and returns, attributed to the sale's cashier.
+- Per-day (`sales-series`) and per-method (`payment-mix`) netting keys on the
+  return's day and the original sale's payment method respectively.
+
+### `GET/PATCH /v1/shops/settings`
+Adds `return_window_days` (int, 0–90, default 7). Also returned in the login /
+refresh `TokenBundle`.
+
+### `GET /v1/export/products.csv` / `POST /v1/export/products/import`
+Both **ADMIN (owner-only)**, like `sales.csv`: an import rewrites purchase
+prices and creates styles wholesale with no per-row PIN, which
+`MANAGE_PRODUCTS` alone (cashiers hold it) must not be able to do. Columns gain
+`style, brand, segment, size, color, sku, min_selling_price`. Import groups
+rows by `(style, brand)`, creates styles on the fly, composes variant names
+(docs/19 §13.2) and stores `sku` as given. Cashiers get 403.
 
 ## Rate limits
 
