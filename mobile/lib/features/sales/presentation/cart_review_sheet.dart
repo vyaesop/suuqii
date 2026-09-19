@@ -361,40 +361,80 @@ class _CartLineTile extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                InkWell(
-                  onTap: hasLinePricing
-                      ? () => _editPrice(context, ref, isOwner: isOwner)
-                      : null,
-                  borderRadius: BorderRadius.circular(4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        context.l10n.cartPricePerUnit(
-                          context.money(line.unitPrice),
-                          line.product.unit,
-                        ),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: hasLinePricing ? scheme.primary : null,
-                          decoration:
-                              hasLinePricing ? TextDecoration.underline : null,
-                        ),
+                // Haggling is the norm at the counter, so the price has to
+                // read as something you can change. An underlined number did
+                // not: cashiers never found it. This mirrors the "Add
+                // discount" row in the footer below — leading icon, label,
+                // value, chevron — because that control people do find.
+                if (hasLinePricing)
+                  InkWell(
+                    onTap: () => _editPrice(context, ref, isOwner: isOwner),
+                    borderRadius: BorderRadius.circular(SuuqRadius.sm),
+                    child: Padding(
+                      // Vertical padding takes the row to a 44px touch
+                      // target; the glyph and text stay small.
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.edit_outlined,
+                            size: 16,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            context.l10n.cartLinePriceLabel,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              context.l10n.cartPricePerUnit(
+                                context.money(line.unitPrice),
+                                line.product.unit,
+                              ),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.primary,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (line.hasLineDiscount) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              context.l10n.priceWas(
+                                context.money(line.listPrice),
+                              ),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                decoration: TextDecoration.lineThrough,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: scheme.primary,
+                          ),
+                        ],
                       ),
-                      if (line.hasLineDiscount) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          context.l10n.priceWas(
-                            context.money(line.listPrice),
-                          ),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            decoration: TextDecoration.lineThrough,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
+                  )
+                else
+                  Text(
+                    context.l10n.cartPricePerUnit(
+                      context.money(line.unitPrice),
+                      line.product.unit,
+                    ),
+                    style: theme.textTheme.bodySmall,
                   ),
-                ),
                 if (hasLinePricing && line.isBelowFloor)
                   Text(
                     isOwner

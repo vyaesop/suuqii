@@ -1440,6 +1440,7 @@
     "description": "Accessibility label for the - button on a cart line's quantity stepper."
   },
   "cartPricePerUnit": "{price} / {unit}",
+  "cartLinePriceLabel": "Price",
   "@cartPricePerUnit": {
     "description": "Unit price of a cart line, e.g. 'ETB 25 / pcs'.",
     "placeholders": {

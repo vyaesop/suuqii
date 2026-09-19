@@ -567,6 +567,7 @@
   "cartIncreaseQty": "ብዛት ጨምር",
   "cartDecreaseQty": "ብዛት ቀንስ",
   "cartPricePerUnit": "{price} / {unit}",
+  "cartLinePriceLabel": "ዋጋ",
 
   "receiptSaleRecorded": "ሽያጩ ተመዝግቧል",
   "receiptSubtotal": "ንዑስ ድምር",

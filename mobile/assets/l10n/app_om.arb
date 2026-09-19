@@ -567,6 +567,7 @@
   "cartIncreaseQty": "Baay'ina dabali",
   "cartDecreaseQty": "Baay'ina hir'isi",
   "cartPricePerUnit": "{price} / {unit}",
+  "cartLinePriceLabel": "Gatii",
 
   "receiptSaleRecorded": "Gurgurtaan galmaa'e",
   "receiptSubtotal": "Ida'ama",
