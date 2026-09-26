@@ -46,6 +46,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   String? _category;
   bool _kickedRefresh = false;
 
+  /// Set for the whole checkout flow, sheet to receipt. A second tap on
+  /// Checkout while the first sale is still being written (the closing
+  /// sheet's barrier lets taps through during its exit animation) would
+  /// otherwise open another checkout for the same cart and book it twice.
+  bool _checkingOut = false;
+
   @override
   void initState() {
     super.initState();
@@ -113,7 +119,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     return _PosFrame(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final showCartDock = constraints.maxWidth >= 1100;
+          final showCartDock = constraints.maxWidth >= _kCartDockMinWidth;
           final catalog = Column(
             children: [
               _SearchField(
@@ -304,6 +310,16 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 
   Future<void> _checkout() async {
+    if (_checkingOut) return;
+    _checkingOut = true;
+    try {
+      await _runCheckout();
+    } finally {
+      _checkingOut = false;
+    }
+  }
+
+  Future<void> _runCheckout() async {
     final messenger = ScaffoldMessenger.of(context);
     final l = context.l10n;
     final snapshot = ref.read(cartControllerProvider);
@@ -380,7 +396,6 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                 );
         saleId = outcome.exchangeSaleId!;
         ref.read(exchangeModeProvider.notifier).clear();
-        messenger.showSnackBar(SnackBar(content: Text(l.exchangeRecorded)));
       } else {
         saleId = await ref.read(cartControllerProvider.notifier).checkout(
               paymentMethod: result.paymentMethod,
@@ -412,6 +427,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           exchangeSettlement: settlement,
         ),
       );
+      // After the receipt, not before: shown earlier it sat on top of the
+      // receipt's buttons (sheets open under the shell's snackbars).
+      if (exchange != null) {
+        messenger.showSnackBar(SnackBar(content: Text(l.exchangeRecorded)));
+      }
     } catch (error) {
       messenger.showSnackBar(
         SnackBar(
@@ -737,19 +757,11 @@ class _ProductTile extends ConsumerWidget {
   void _toggleSelection(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final currentQty = ref.read(cartControllerProvider).qtyFor(product.id);
-    final messenger = ScaffoldMessenger.of(context);
 
     if (currentQty > Decimal.zero) {
       HapticFeedback.selectionClick();
       ref.read(cartControllerProvider.notifier).remove(product.id);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(l.posRemovedFromCart(product.name)),
-            duration: const Duration(milliseconds: 900),
-          ),
-        );
+      _showPosNotice(context, l.posRemovedFromCart(product.name));
       return;
     }
 
@@ -765,31 +777,23 @@ class _ProductTile extends ConsumerWidget {
         overStockWarning = true;
       } else if (product.stock <= Decimal.zero) {
         HapticFeedback.heavyImpact();
-        messenger
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(l.posOutOfStock(product.name)),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+        _showPosNotice(
+          context,
+          l.posOutOfStock(product.name),
+          duration: const Duration(seconds: 2),
+        );
         return;
       } else {
         HapticFeedback.mediumImpact();
-        messenger
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                l.posOnlyQtyOfNameInStock(
-                  _formatQty(product.stock),
-                  product.unit,
-                  product.name,
-                ),
-              ),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+        _showPosNotice(
+          context,
+          l.posOnlyQtyOfNameInStock(
+            _formatQty(product.stock),
+            product.unit,
+            product.name,
+          ),
+          duration: const Duration(seconds: 2),
+        );
         return;
       }
     }
@@ -801,24 +805,22 @@ class _ProductTile extends ConsumerWidget {
     }
     ref.read(cartControllerProvider.notifier).addProduct(product);
 
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          // The over-stock warning wins over "added to cart": the counter has
-          // to know the shelf and the app disagree, even though the sale stands.
-          content: Text(
-            overStockWarning
-                ? l.posBakeryStockWarning(
-                    product.name,
-                    _formatQty(product.stock),
-                  )
-                : _lowStockMessage(l, product, nextQty) ??
-                    l.posAddedToCart(product.name),
-          ),
-          duration: Duration(milliseconds: overStockWarning ? 2200 : 1000),
-        ),
+    // Only warnings get a notice: the highlighted tile and its qty badge
+    // already say "added", and a notice per tap kept one over the cart bar.
+    // The over-stock warning wins: the counter has to know the shelf and the
+    // app disagree, even though the sale stands.
+    final warning = overStockWarning
+        ? l.posBakeryStockWarning(product.name, _formatQty(product.stock))
+        : _lowStockMessage(l, product, nextQty);
+    if (warning != null) {
+      _showPosNotice(
+        context,
+        warning,
+        duration: Duration(milliseconds: overStockWarning ? 2200 : 1500),
       );
+    } else {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
   }
 
   Future<void> _promptCustomQty(BuildContext context, WidgetRef ref) async {
@@ -869,37 +871,31 @@ class _ProductTile extends ConsumerWidget {
     if (result > product.stock) {
       if (!context.mounted) return;
       // Bakery: warn but honour the quantity — see _toggleSelection.
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            allowsOversell
-                ? context.l10n.posBakeryStockWarning(
-                    product.name,
-                    _formatQty(product.stock),
-                  )
-                : context.l10n.posOnlyQtyInStock(
-                    _formatQty(product.stock),
-                    product.unit,
-                  ),
-          ),
-        ),
+      _showPosNotice(
+        context,
+        allowsOversell
+            ? context.l10n.posBakeryStockWarning(
+                product.name,
+                _formatQty(product.stock),
+              )
+            : context.l10n.posOnlyQtyInStock(
+                _formatQty(product.stock),
+                product.unit,
+              ),
+        duration: const Duration(milliseconds: 2200),
       );
       if (!allowsOversell) return;
+      ref.read(cartControllerProvider.notifier).setQty(product.id, result);
+      return;
     }
 
     ref.read(cartControllerProvider.notifier).setQty(product.id, result);
     if (context.mounted) {
       final l = context.l10n;
-      final message =
-          _lowStockMessage(l, product, result) ?? l.posUpdatedInCart(product.name);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(message),
-            duration: const Duration(milliseconds: 1000),
-          ),
-        );
+      _showPosNotice(
+        context,
+        _lowStockMessage(l, product, result) ?? l.posUpdatedInCart(product.name),
+      );
     }
   }
 }
@@ -1567,54 +1563,40 @@ class _RecentTile extends ConsumerWidget {
           if (qty > Decimal.zero) {
             HapticFeedback.selectionClick();
             ref.read(cartControllerProvider.notifier).remove(product.id);
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(
-                SnackBar(
-                  content: Text(l.posRemovedFromCart(product.name)),
-                  duration: const Duration(milliseconds: 900),
-                ),
-              );
+            _showPosNotice(context, l.posRemovedFromCart(product.name));
             return;
           }
 
           final nextQty = qty + Decimal.one;
           final overStock = nextQty > product.stock;
           if (overStock && !allowsOversell) {
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(
-              SnackBar(
-                content: Text(
-                  l.posOnlyQtyOfNameInStock(
-                    _formatQty(product.stock),
-                    product.unit,
-                    product.name,
-                  ),
-                ),
+            _showPosNotice(
+              context,
+              l.posOnlyQtyOfNameInStock(
+                _formatQty(product.stock),
+                product.unit,
+                product.name,
               ),
+              duration: const Duration(seconds: 2),
             );
             return;
           }
 
           HapticFeedback.selectionClick();
           ref.read(cartControllerProvider.notifier).addProduct(product);
-          // Bakery: warn but allow — see _ProductTile._toggleSelection.
-          final message = overStock
+          // Bakery: warn but allow — see _ProductTile._toggleSelection. As
+          // there, a plain "added" gets no notice.
+          final warning = overStock
               ? l.posBakeryStockWarning(
                   product.name,
                   _formatQty(product.stock),
                 )
-              : _lowStockMessage(l, product, nextQty) ??
-                  l.posAddedToCart(product.name);
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              SnackBar(
-                content: Text(message),
-                duration: const Duration(milliseconds: 1000),
-              ),
-            );
+              : _lowStockMessage(l, product, nextQty);
+          if (warning != null) {
+            _showPosNotice(context, warning);
+          } else {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          }
         },
         borderRadius: BorderRadius.circular(SuuqRadius.md),
         child: Container(
@@ -1863,6 +1845,35 @@ class _PosLoadingState extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Cart bar height (16 + 56 + 8) plus a gap: where POS notices float.
+const double _kCartBarClearance = 88;
+
+/// Width at which the POS swaps the bottom cart bar for the side dock.
+const double _kCartDockMinWidth = 1100;
+
+/// POS feedback, floated clear of the cart bar. Snackbars paint on the shell
+/// Scaffold over the POS body, and at the default position one sits right on
+/// the Checkout button and swallows the cashier's next tap.
+void _showPosNotice(
+  BuildContext context,
+  String message, {
+  Duration duration = const Duration(milliseconds: 1500),
+}) {
+  final hasCartBar = MediaQuery.sizeOf(context).width < _kCartDockMinWidth;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: duration,
+        behavior: SnackBarBehavior.floating,
+        margin: hasCartBar
+            ? const EdgeInsets.fromLTRB(15, 5, 15, _kCartBarClearance)
+            : null,
+      ),
+    );
 }
 
 String _formatQty(Decimal value) {

@@ -125,8 +125,17 @@ class _AuthInterceptor extends Interceptor {
     final status = err.response?.statusCode;
     final path = err.requestOptions.path;
     final isAuthEndpoint = _isAuthEndpoint(path);
+    // The owner-PIN check answers a wrong PIN with 401 too. That is not an
+    // expired session: refreshing and replaying it would submit the same
+    // wrong PIN twice and burn two of the owner's lockout attempts per typo.
+    // An expired token on that call still refreshes as usual.
+    final data = err.response?.data;
+    final isWrongPin = path.contains('/auth/owner-pin') &&
+        data is Map &&
+        '${data['detail']}'.startsWith('wrong pin');
     if (status != 401 ||
         isAuthEndpoint ||
+        isWrongPin ||
         err.requestOptions.extra['retried'] == true) {
       return handler.next(err);
     }

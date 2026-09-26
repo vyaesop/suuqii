@@ -144,14 +144,11 @@ class VariantPickerSheet extends ConsumerWidget {
                     onLongPress: () {
                       HapticFeedback.mediumImpact();
                       ref.read(cartControllerProvider.notifier).addProduct(v);
-                      ScaffoldMessenger.of(context)
-                        ..hideCurrentSnackBar()
-                        ..showSnackBar(
-                          SnackBar(
-                            content: Text(l.posAddedToCart(v.name)),
-                            duration: const Duration(milliseconds: 900),
-                          ),
-                        );
+                      SuuqSheet.showMessage(
+                        context,
+                        l.posAddedToCart(v.name),
+                        error: false,
+                      );
                     },
                   ),
               ],

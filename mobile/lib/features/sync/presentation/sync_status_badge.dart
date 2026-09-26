@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -6,6 +8,7 @@ import 'package:suuqii/app/theme/tokens.dart';
 import 'package:suuqii/core/connectivity/connectivity_provider.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/core/storage/app_database.dart';
+import 'package:suuqii/features/sync/data/sync_worker.dart';
 
 part 'sync_status_badge.g.dart';
 
@@ -181,6 +184,23 @@ class SyncStatusBadge extends ConsumerWidget {
                 onPressed: () => Navigator.pop(ctx),
                 child: Text(ctx.l10n.commonClose),
               ),
+              // Resend what is safe to resend (see requeueDeadLettered):
+              // events stranded by an outage, an old build or a server bug
+              // that has since been fixed would otherwise never sync.
+              if (events.isNotEmpty)
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    final requeued = await ref
+                        .read(appDatabaseProvider)
+                        .syncQueueDao
+                        .requeueDeadLettered();
+                    if (requeued > 0) {
+                      unawaited(ref.read(syncWorkerProvider).kick());
+                    }
+                  },
+                  child: Text(ctx.l10n.commonRetry),
+                ),
             ],
           );
         },

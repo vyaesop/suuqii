@@ -29,6 +29,16 @@ class ConflictError(DomainError):
         self.server_payload = server_payload or {}
 
 
+class DependencyMissingError(ConflictError):
+    """The event refers to a row another event has not delivered yet (the
+    sale an exchange settles, the debt a payment lands on). Same wire shape as
+    the FK-violation path — `conflict` + `integrity_error` — which the mobile
+    queue keeps pending and retries once the dependency lands, instead of
+    dead-lettering a payment the customer already made."""
+
+    code = "integrity_error"
+
+
 class OwnerPinRequired(DomainError):  # noqa: N818 — established public name
     code = "owner_pin_required"
     status = 403

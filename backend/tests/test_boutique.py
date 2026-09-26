@@ -580,7 +580,11 @@ async def test_sale_return_validates_items_and_references(db, boutique_shop, bou
     assert (await svc.apply(bad_cond)).code == "invalid_payload"
 
     bad_exchange = _return(sale_ev, [(0, "1", "resellable")], exchange=str(uuid4()))
-    assert (await svc.apply(bad_exchange)).code == "not_found"
+    # A missing exchange sale is "not synced yet", not "invalid": the return
+    # stays pending on the device until its replacement sale lands.
+    res = await svc.apply(bad_exchange)
+    assert res.status == SyncResultStatus.CONFLICT
+    assert res.code == "integrity_error"
     foreign_exchange = _return(sale_ev, [(0, "1", "resellable")], exchange=other_sale.payload["id"])
     assert (await svc.apply(foreign_exchange)).code == "not_found"
 

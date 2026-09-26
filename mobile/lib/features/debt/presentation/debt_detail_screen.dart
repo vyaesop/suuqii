@@ -509,10 +509,10 @@ class _CollectSheetState extends State<_CollectSheet> {
           FilledButton(
             onPressed: () {
               final d = Decimal.tryParse(_amount.text.trim());
-              if (d == null || d <= Decimal.zero) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l.debtEnterValidAmount)),
-                );
+              // Never more than is owed: an overpayment would inflate the
+              // shift's expected cash and never show as a balance.
+              if (d == null || d <= Decimal.zero || d > widget.max) {
+                SuuqSheet.showMessage(context, l.debtEnterValidAmount);
                 return;
               }
               Navigator.pop(

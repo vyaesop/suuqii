@@ -185,13 +185,12 @@ class _ReturnSheetState extends State<ReturnSheet> {
 
   bool _validateCommon() {
     final l = context.l10n;
-    final messenger = ScaffoldMessenger.of(context);
     if (_lines.isEmpty) {
-      messenger.showSnackBar(SnackBar(content: Text(l.returnNoItems)));
+      SuuqSheet.showMessage(context, l.returnNoItems);
       return false;
     }
     if (_reason == null) {
-      messenger.showSnackBar(SnackBar(content: Text(l.returnReasonRequired)));
+      SuuqSheet.showMessage(context, l.returnReasonRequired);
       return false;
     }
     return true;
@@ -202,12 +201,9 @@ class _ReturnSheetState extends State<ReturnSheet> {
     final credit = _credit;
     final amount = Decimal.tryParse(_refund.text.trim().replaceAll(',', '.'));
     if (amount == null || amount < Decimal.zero || amount > credit) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.l10n.returnRefundInvalid(context.money(credit)),
-          ),
-        ),
+      SuuqSheet.showMessage(
+        context,
+        context.l10n.returnRefundInvalid(context.money(credit)),
       );
       return;
     }

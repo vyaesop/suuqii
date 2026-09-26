@@ -10,6 +10,7 @@ import 'package:suuqii/features/auth/presentation/controllers/auth_controller.da
 import 'package:suuqii/features/expenses/data/expenses_repository.dart';
 import 'package:suuqii/features/expenses/domain/entities/expense.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
+import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 /// Localized display name for a machine expense category value.
 String _categoryLabel(AppLocalizations l, String category) =>
@@ -172,94 +173,83 @@ class _AddSheetState extends State<_AddSheet> {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                l.expenseAddTitle,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _title,
-                decoration: InputDecoration(labelText: l.expenseTitleLabel),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _amount,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: l.expenseAmountLabel,
-                  prefixText: 'ETB  ',
-                ),
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _category,
-                decoration: InputDecoration(labelText: l.expenseCategoryLabel),
-                items: expenseCategories
-                    .map(
-                      (c) => DropdownMenuItem(
-                        value: c,
-                        child: Text(_categoryLabel(l, c)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => _category = v ?? _category),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _description,
-                decoration: InputDecoration(
-                  labelText: l.expenseDescriptionOptional,
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: () {
-                  if (_title.text.trim().isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l.expenseTitleRequired)),
-                    );
-                    return;
-                  }
-                  final amt = Decimal.tryParse(_amount.text.trim());
-                  if (amt == null || amt <= Decimal.zero) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l.expenseInvalidAmount)),
-                    );
-                    return;
-                  }
-                  Navigator.pop(
-                    context,
-                    (
-                      title: _title.text.trim(),
-                      amount: amt,
-                      category: _category,
-                      description: _description.text.trim().isEmpty
-                          ? null
-                          : _description.text.trim(),
-                    ),
-                  );
-                },
-                child: Text(l.commonSave),
-              ),
-            ],
+    return SuuqSheet(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            l.expenseAddTitle,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-        ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _title,
+            decoration: InputDecoration(labelText: l.expenseTitleLabel),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: l.expenseAmountLabel,
+              prefixText: 'ETB  ',
+            ),
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _category,
+            decoration: InputDecoration(labelText: l.expenseCategoryLabel),
+            items: expenseCategories
+                .map(
+                  (c) => DropdownMenuItem(
+                    value: c,
+                    child: Text(_categoryLabel(l, c)),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => _category = v ?? _category),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _description,
+            decoration: InputDecoration(
+              labelText: l.expenseDescriptionOptional,
+            ),
+            maxLines: 2,
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: () {
+              if (_title.text.trim().isEmpty) {
+                SuuqSheet.showMessage(context, l.expenseTitleRequired);
+                return;
+              }
+              final amt = Decimal.tryParse(_amount.text.trim());
+              if (amt == null || amt <= Decimal.zero) {
+                SuuqSheet.showMessage(context, l.expenseInvalidAmount);
+                return;
+              }
+              Navigator.pop(
+                context,
+                (
+                  title: _title.text.trim(),
+                  amount: amt,
+                  category: _category,
+                  description: _description.text.trim().isEmpty
+                      ? null
+                      : _description.text.trim(),
+                ),
+              );
+            },
+            child: Text(l.commonSave),
+          ),
+        ],
       ),
     );
   }

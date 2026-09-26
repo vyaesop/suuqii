@@ -162,9 +162,7 @@ class _StyleReceiveSheetState extends State<_StyleReceiveSheet> {
                     ),
               ];
               if (lines.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l.receiveSheetNothing)),
-                );
+                SuuqSheet.showMessage(context, l.receiveSheetNothing);
                 return;
               }
               final cost = Decimal.tryParse(_cost.text.trim()) ?? Decimal.zero;

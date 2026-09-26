@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:suuqii/core/l10n/l10n.dart';
 import 'package:suuqii/features/auth/data/auth_remote_data_source.dart';
 import 'package:suuqii/features/auth/presentation/providers.dart';
+import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 /// Bottom sheet that prompts for the owner PIN, calls the backend, and
 /// returns the challenge token. Returns null on cancel or wrong PIN.
@@ -50,63 +51,52 @@ class _OwnerPinSheetState extends ConsumerState<_OwnerPinSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                context.l10n.ownerPinRequired,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(context.l10n.ownerPinExplain),
-              if (widget.step != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  context.l10n.ownerPinStepOf(widget.step!, widget.steps),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-              const SizedBox(height: 20),
-              TextField(
-                controller: _pin,
-                keyboardType: TextInputType.number,
-                obscureText: true,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                maxLength: 8,
-                autofocus: true,
-                style: const TextStyle(fontSize: 24, letterSpacing: 6),
-                textAlign: TextAlign.center,
-                decoration: InputDecoration(
-                  labelText: context.l10n.ownerPinLabel,
-                  errorText: _error,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _busy ? null : _submit,
-                child: Text(context.l10n.ownerPinAuthorize),
-              ),
-            ],
+    // SuuqSheet scrolls under the keyboard, so "Authorize" stays reachable
+    // on a small phone; the keyboard's done key submits as well.
+    return SuuqSheet(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            context.l10n.ownerPinRequired,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(context.l10n.ownerPinExplain),
+          if (widget.step != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              context.l10n.ownerPinStepOf(widget.step!, widget.steps),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 20),
+          TextField(
+            controller: _pin,
+            keyboardType: TextInputType.number,
+            obscureText: true,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            maxLength: 8,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) {
+              if (!_busy) _submit();
+            },
+            style: const TextStyle(fontSize: 24, letterSpacing: 6),
+            textAlign: TextAlign.center,
+            decoration: InputDecoration(
+              labelText: context.l10n.ownerPinLabel,
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: Text(context.l10n.ownerPinAuthorize),
+          ),
+        ],
       ),
     );
   }

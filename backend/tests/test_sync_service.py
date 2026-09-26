@@ -4,7 +4,7 @@ These pin the batch semantics the offline clients depend on: an event that
 is rejected must leave no partial writes, and a single bad event must never
 take down the rest of the batch.
 """
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -217,3 +217,92 @@ async def test_naive_timestamp_coerced_to_utc(db, shop, owner, product):
     assert (await svc.apply(ev)).status == SyncResultStatus.APPLIED
     sale = (await db.execute(select(Sale))).scalar_one()
     assert sale.occurred_at == datetime(2026, 7, 11, 10, 0, tzinfo=UTC)
+
+
+# --- credit due dates and the owner-challenge lifecycle ---------------------
+
+
+async def test_credit_sale_with_due_date_applies(db, shop, owner, product):
+    """`customer.due_date` arrives as "YYYY-MM-DD"; handed to the DATE column
+    as a string it failed in the driver and every credit sale with a due date
+    came back `internal_error`."""
+    svc = _svc(db, shop, owner)
+    ev = _sale_event(
+        product, payment="credit",
+        customer={"name": "Abebe", "phone": "+251911000111", "due_date": "2026-10-01"},
+    )
+    res = await svc.apply(ev)
+    assert res.status == SyncResultStatus.APPLIED, (res.code, res.detail)
+    debt = (await db.execute(select(Debt))).scalar_one()
+    assert debt.due_date == date(2026, 10, 1)
+
+
+async def test_credit_sale_without_due_date_applies(db, shop, owner, product):
+    """Regression: with no relationship() between Debt and Sale the unit of
+    work wrote the debt before the sale (debts_sale_id_fkey) and *every*
+    credit sale came back integrity_error, due date or not."""
+    res = await _svc(db, shop, owner).apply(
+        _sale_event(product, payment="credit", customer={"name": "Abebe"}),
+    )
+    assert res.status == SyncResultStatus.APPLIED, (res.code, res.detail)
+    debt = (await db.execute(select(Debt))).scalar_one()
+    assert debt.due_date is None
+    assert debt.amount_owed == Decimal("200.00")
+
+
+def _adjust_event(product_id, token=None, occurred_at=None):
+    payload = {"product_id": str(product_id), "quantity_delta": "5"}
+    if token:
+        payload["owner_challenge"] = token
+    return SyncEventIn(
+        client_event_id=uuid4(), op="inventory.adjust",
+        occurred_at=occurred_at or datetime.now(UTC), payload=payload,
+    )
+
+
+async def test_owner_challenge_survives_a_failed_attempt(db, shop, cashier, owner, product):
+    """The approval is spent when the event applies, not when it is checked:
+    a retry after a transient failure must not come back owner_pin_required."""
+    from app.core.security import issue_owner_challenge
+
+    token = issue_owner_challenge(user_id=owner.id, shop_id=shop.id)
+    svc = _svc(db, shop, cashier)
+    # A product this device has not synced yet: FK violation, retry later.
+    first = await svc.apply(_adjust_event(uuid4(), token))
+    assert first.status == SyncResultStatus.CONFLICT
+    assert first.code == "integrity_error"
+    # The same approval carries the retried work...
+    second = await svc.apply(_adjust_event(product.id, token))
+    assert second.status == SyncResultStatus.APPLIED, (second.code, second.detail)
+    # ...and is then spent.
+    third = await svc.apply(_adjust_event(product.id, token))
+    assert third.status == SyncResultStatus.REJECTED
+    assert third.code == "owner_pin_required"
+
+
+async def test_owner_challenge_valid_at_action_time_outlives_its_ttl(
+    db, shop, cashier, owner, product,
+):
+    """Offline queue: the PIN is entered when the action happens; the push may
+    reach the server long after the token's 5-minute TTL."""
+    import jwt
+
+    from app.core.config import settings
+
+    now = datetime.now(UTC)
+    issued = now - timedelta(hours=2)
+    token = jwt.encode({
+        "sub": str(owner.id), "shop_id": str(shop.id), "purpose": "owner_pin",
+        "nonce": uuid4().hex, "iat": int(issued.timestamp()),
+        "exp": int((issued + timedelta(minutes=5)).timestamp()),
+    }, settings.jwt_secret, algorithm="HS256")
+    svc = _svc(db, shop, cashier)
+    # An action taken after the token died is not covered by it.
+    late = await svc.apply(_adjust_event(product.id, token, occurred_at=now))
+    assert late.status == SyncResultStatus.REJECTED
+    assert late.code == "owner_pin_required"
+    # One taken while it was alive is, however late the push.
+    in_time = await svc.apply(
+        _adjust_event(product.id, token, occurred_at=issued + timedelta(minutes=2)),
+    )
+    assert in_time.status == SyncResultStatus.APPLIED, (in_time.code, in_time.detail)

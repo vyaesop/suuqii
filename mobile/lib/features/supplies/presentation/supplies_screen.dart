@@ -12,8 +12,18 @@ import 'package:suuqii/features/supplies/data/supplies_repository.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/expiry_badge.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
+import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
-const _supplyUnits = ['piece', 'kg', 'quintal', 'g', 'liter', 'ml', 'cup', 'pack'];
+const _supplyUnits = [
+  'piece',
+  'kg',
+  'quintal',
+  'g',
+  'liter',
+  'ml',
+  'cup',
+  'pack',
+];
 
 /// Display label for a machine unit value (the value itself is persisted and
 /// must stay in English). Falls back to the raw value for unknown units.
@@ -190,7 +200,11 @@ class _LowStockBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.warning_amber_rounded, color: scheme.onErrorContainer, size: 20),
+          Icon(
+            Icons.warning_amber_rounded,
+            color: scheme.onErrorContainer,
+            size: 20,
+          ),
           const SizedBox(width: SuuqSpacing.sm),
           Expanded(
             child: Text(
@@ -224,7 +238,8 @@ class _SupplyTile extends StatelessWidget {
     return ListTile(
       onTap: onTap,
       leading: CircleAvatar(
-        backgroundColor: isLow ? scheme.errorContainer : scheme.primaryContainer,
+        backgroundColor:
+            isLow ? scheme.errorContainer : scheme.primaryContainer,
         child: Icon(
           Icons.egg_alt_outlined,
           size: 20,
@@ -348,119 +363,111 @@ class _SupplyFormSheetState extends State<_SupplyFormSheet> {
     final l = context.l10n;
     final theme = Theme.of(context);
     final isEdit = widget.supply != null;
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(SuuqSpacing.lg),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return SuuqSheet(
+      padding: const EdgeInsets.all(SuuqSpacing.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isEdit ? l.suppliesEditTitle : l.suppliesNewTitle,
+            style: theme.textTheme.titleLarge,
+          ),
+          const SizedBox(height: SuuqSpacing.md),
+          TextField(
+            controller: _name,
+            decoration: InputDecoration(labelText: l.suppliesNameLabel),
+            textCapitalization: TextCapitalization.sentences,
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+          DropdownButtonFormField<String>(
+            initialValue: _unit,
+            decoration: InputDecoration(labelText: l.suppliesUnitLabel),
+            items: _supplyUnits
+                .map(
+                  (u) => DropdownMenuItem(
+                    value: u,
+                    child: Text(_unitDisplayLabel(l, u)),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => _unit = v ?? _unit),
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+          Row(
             children: [
-              Text(
-                isEdit ? l.suppliesEditTitle : l.suppliesNewTitle,
-                style: theme.textTheme.titleLarge,
-              ),
-              const SizedBox(height: SuuqSpacing.md),
-              TextField(
-                controller: _name,
-                decoration: InputDecoration(labelText: l.suppliesNameLabel),
-                textCapitalization: TextCapitalization.sentences,
-              ),
-              const SizedBox(height: SuuqSpacing.sm),
-              DropdownButtonFormField<String>(
-                initialValue: _unit,
-                decoration: InputDecoration(labelText: l.suppliesUnitLabel),
-                items: _supplyUnits
-                    .map(
-                      (u) => DropdownMenuItem(
-                        value: u,
-                        child: Text(_unitDisplayLabel(l, u)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => _unit = v ?? _unit),
-              ),
-              const SizedBox(height: SuuqSpacing.sm),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _qty,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: l.suppliesOnHandLabel,
-                        suffixText: _unit,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: SuuqSpacing.sm),
-                  Expanded(
-                    child: TextField(
-                      controller: _reorder,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: l.suppliesAlertBelowLabel,
-                        suffixText: _unit,
-                        helperText: l.suppliesAlertBelowHelper,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: SuuqSpacing.sm),
-              TextField(
-                controller: _cost,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: l.suppliesCostPerUnitLabel(_unit),
-                  prefixText: 'ETB  ',
-                ),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: SuuqSpacing.sm),
-              InkWell(
-                onTap: _pickExpiry,
-                borderRadius: BorderRadius.circular(SuuqRadius.sm),
-                child: InputDecorator(
+              Expanded(
+                child: TextField(
+                  controller: _qty,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                    labelText: l.stockReceiveExpiryLabel,
-                    suffixIcon: _expiry == null
-                        ? const Icon(Icons.event_rounded)
-                        : IconButton(
-                            icon: const Icon(Icons.clear_rounded, size: 18),
-                            onPressed: () => setState(() => _expiry = null),
-                          ),
-                  ),
-                  child: Text(
-                    _expiry == null
-                        ? l.stockReceiveNoExpiry
-                        : context.dateShort(_expiry!),
+                    labelText: l.suppliesOnHandLabel,
+                    suffixText: _unit,
                   ),
                 ),
               ),
-              const SizedBox(height: SuuqSpacing.lg),
-              FilledButton(
-                onPressed: _submit,
-                child: Text(
-                  isEdit ? l.commonSaveChanges : l.suppliesAddButton,
+              const SizedBox(width: SuuqSpacing.sm),
+              Expanded(
+                child: TextField(
+                  controller: _reorder,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: l.suppliesAlertBelowLabel,
+                    suffixText: _unit,
+                    helperText: l.suppliesAlertBelowHelper,
+                  ),
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: SuuqSpacing.sm),
+          TextField(
+            controller: _cost,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: l.suppliesCostPerUnitLabel(_unit),
+              prefixText: 'ETB  ',
+            ),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: SuuqSpacing.sm),
+          InkWell(
+            onTap: _pickExpiry,
+            borderRadius: BorderRadius.circular(SuuqRadius.sm),
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: l.stockReceiveExpiryLabel,
+                suffixIcon: _expiry == null
+                    ? const Icon(Icons.event_rounded)
+                    : IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () => setState(() => _expiry = null),
+                      ),
+              ),
+              child: Text(
+                _expiry == null
+                    ? l.stockReceiveNoExpiry
+                    : context.dateShort(_expiry!),
+              ),
+            ),
+          ),
+          const SizedBox(height: SuuqSpacing.lg),
+          FilledButton(
+            onPressed: _submit,
+            child: Text(
+              isEdit ? l.commonSaveChanges : l.suppliesAddButton,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   void _submit() {
     if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.suppliesNameRequired)),
-      );
+      SuuqSheet.showMessage(context, context.l10n.suppliesNameRequired);
       return;
     }
     final qty = Decimal.tryParse(_qty.text.trim()) ?? Decimal.zero;

@@ -25,16 +25,28 @@ SyncWorker syncWorker(SyncWorkerRef ref) => SyncWorker(
 
 /// How a failed push should be handled.
 enum SyncFailureKind {
-  /// Transient (network error, 5xx, 429): bump attempts and back off.
+  /// The server answered with a 5xx: bump attempts and back off.
   retryable,
 
-  /// 401 after the interceptor already tried to refresh: auth is temporarily
-  /// broken. Back off without burning the events' retry budget — never
-  /// dead-letter sales because auth was down.
+  /// The server was never reached (no response: DNS, timeout, captive portal,
+  /// no data balance) or asked us to slow down (429). Back off without
+  /// burning the events' retry budget — a phone that shows Wi-Fi but has no
+  /// internet for an afternoon must not dead-letter the day's sales.
+  unreachable,
+
+  /// 401 after the interceptor already tried to refresh, or 403 (membership
+  /// or device access): the request is fine, the session is not. Back off
+  /// without burning the retry budget — never dead-letter sales because auth
+  /// was down.
   authBroken,
 
-  /// Other 4xx (400/403/404/409/422…): the server will never accept this
-  /// request as-is. Dead-letter so the queue keeps draining.
+  /// 426: this build is too old for the server. Stop pushing and keep every
+  /// event pending; the router is already showing the update screen, and the
+  /// updated build pushes them.
+  updateRequired,
+
+  /// Other 4xx (400/404/409/422…): the server will never accept this request
+  /// as-is. Split the batch to find the event at fault, dead-letter only it.
   permanent,
 }
 
@@ -72,6 +84,7 @@ class SyncWorker {
 
   bool _running = false;
   int _authFailures = 0;
+  int _unreachableFailures = 0;
   Completer<void>? _wake;
 
   /// Snapshot domains invalidated during the current kick; re-mirrored once
@@ -79,10 +92,14 @@ class SyncWorker {
   final Set<SyncDomain> _staleDomains = {};
 
   static SyncFailureKind classifyFailure(int? statusCode) {
-    if (statusCode == 401) return SyncFailureKind.authBroken;
-    if (statusCode == null || statusCode >= 500 || statusCode == 429) {
-      return SyncFailureKind.retryable;
+    if (statusCode == null || statusCode == 429) {
+      return SyncFailureKind.unreachable;
     }
+    if (statusCode == 401 || statusCode == 403) {
+      return SyncFailureKind.authBroken;
+    }
+    if (statusCode == 426) return SyncFailureKind.updateRequired;
+    if (statusCode >= 500) return SyncFailureKind.retryable;
     return SyncFailureKind.permanent;
   }
 
@@ -115,53 +132,7 @@ class SyncWorker {
         final batch = await db.syncQueueDao.takePending();
         if (batch.isEmpty) break;
 
-        try {
-          final device = await deviceId();
-          final response = await dio.post<Map<String, dynamic>>(
-            '/v1/sync/push',
-            data: {
-              'device_id': device,
-              'events': batch
-                  .map(
-                    (e) => {
-                      'client_event_id': e.clientEventId,
-                      'op': e.op,
-                      'occurred_at': e.occurredAt.toIso8601String(),
-                      'payload': jsonDecode(e.payload),
-                    },
-                  )
-                  .toList(),
-            },
-          );
-          if (response.statusCode != 200) {
-            // Unexpected non-error status; treat as transient.
-            await _handleRetryable(batch, 'http ${response.statusCode}');
-            continue;
-          }
-          _authFailures = 0;
-          final results = (response.data!['results'] as List<dynamic>)
-              .cast<Map<String, dynamic>>();
-          await _applyResults(results, batch);
-        } on DioException catch (e) {
-          final status = e.response?.statusCode;
-          switch (classifyFailure(status)) {
-            case SyncFailureKind.authBroken:
-              _authFailures = math.min(_authFailures + 1, 8);
-              await _backoff(_authFailures);
-            case SyncFailureKind.retryable:
-              await _handleRetryable(
-                batch,
-                status == null ? (e.message ?? 'network') : 'http $status',
-              );
-            case SyncFailureKind.permanent:
-              // Dead-letter and continue with the next pending events.
-              final error = _describeRejection(e, status);
-              for (final ev in batch) {
-                await db.syncQueueDao.markFailed(ev.id, error);
-                await _reconcileDiscarded(ev);
-              }
-          }
-        }
+        if (!await _push(batch)) break;
       }
       // Queue drained (or empty): replicate what other devices did since the
       // last cycle, then re-mirror every snapshot this cycle invalidated.
@@ -170,6 +141,75 @@ class SyncWorker {
     } finally {
       _running = false;
     }
+  }
+
+  /// Pushes [batch]. Returns false when the cycle must stop with the queue
+  /// left as it is (this build is too old for the server).
+  Future<bool> _push(List<SyncEventRow> batch) async {
+    try {
+      final response = await _post(batch);
+      if (response.statusCode != 200) {
+        // Unexpected non-error status; treat as transient.
+        await _handleRetryable(batch, 'http ${response.statusCode}');
+        return true;
+      }
+      _authFailures = 0;
+      _unreachableFailures = 0;
+      final results = (response.data!['results'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      await _applyResults(results, batch);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      switch (classifyFailure(status)) {
+        case SyncFailureKind.updateRequired:
+          return false;
+        case SyncFailureKind.authBroken:
+          _authFailures = math.min(_authFailures + 1, 8);
+          await _backoff(_authFailures);
+        case SyncFailureKind.unreachable:
+          _unreachableFailures = math.min(_unreachableFailures + 1, 8);
+          await _backoff(_unreachableFailures);
+        case SyncFailureKind.retryable:
+          await _handleRetryable(batch, 'http $status');
+        case SyncFailureKind.permanent:
+          // The whole request was refused (e.g. 422 from one malformed
+          // event). Halve until the event at fault is alone, so one bad
+          // event never takes the other 49 sales in its batch with it.
+          if (batch.length > 1) {
+            final mid = batch.length ~/ 2;
+            if (!await _push(batch.sublist(0, mid))) return false;
+            return _push(batch.sublist(mid));
+          }
+          final ev = batch.single;
+          await db.syncQueueDao.markFailed(ev.id, _describeRejection(e, status));
+          await _reconcileDiscarded(ev);
+      }
+    }
+    return true;
+  }
+
+  Future<Response<Map<String, dynamic>>> _post(List<SyncEventRow> batch) async {
+    final device = await deviceId();
+    return dio.post<Map<String, dynamic>>(
+      '/v1/sync/push',
+      data: {
+        'device_id': device,
+        'events': batch
+            .map(
+              (e) => {
+                'client_event_id': e.clientEventId,
+                'op': e.op,
+                // UTC with an explicit offset: Drift hands the timestamp back
+                // in local time, and an offset-less ISO string is read by the
+                // server in *its* zone, skewing client_occurred_at by the
+                // device's UTC offset (3h in Ethiopia).
+                'occurred_at': e.occurredAt.toUtc().toIso8601String(),
+                'payload': jsonDecode(e.payload),
+              },
+            )
+            .toList(),
+      },
+    );
   }
 
   /// Bump attempts; dead-letter events that exhausted [maxAttempts] and only

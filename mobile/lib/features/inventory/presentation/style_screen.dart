@@ -327,40 +327,49 @@ class StyleScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) {
         final dl = ctx.l10n;
-        return AlertDialog(
-          title: Text(dl.styleMarkDownTitle),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: dl.styleMarkDownNewPrice,
-              prefixText: 'ETB  ',
-              helperText:
-                  dl.styleMarkDownCurrent(ctx.money(style.defaultSellingPrice)),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(dl.commonCancel),
-            ),
-            FilledButton(
-              onPressed: () {
-                final value = Decimal.tryParse(
-                  controller.text.trim().replaceAll(',', '.'),
-                );
-                if (value == null || value < Decimal.zero) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    SnackBar(content: Text(dl.styleMarkDownInvalid)),
-                  );
-                  return;
-                }
-                Navigator.pop(ctx, value);
+        // Validation shows on the field: a snackbar would paint on the shell
+        // Scaffold behind this dialog's barrier, where nobody sees it.
+        String? error;
+        return StatefulBuilder(
+          builder: (ctx, setState) => AlertDialog(
+            title: Text(dl.styleMarkDownTitle),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) {
+                if (error != null) setState(() => error = null);
               },
-              child: Text(dl.posSetButton),
+              decoration: InputDecoration(
+                labelText: dl.styleMarkDownNewPrice,
+                prefixText: 'ETB  ',
+                helperText: dl.styleMarkDownCurrent(
+                  ctx.money(style.defaultSellingPrice),
+                ),
+                errorText: error,
+              ),
             ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(dl.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final value = Decimal.tryParse(
+                    controller.text.trim().replaceAll(',', '.'),
+                  );
+                  if (value == null || value < Decimal.zero) {
+                    setState(() => error = dl.styleMarkDownInvalid);
+                    return;
+                  }
+                  Navigator.pop(ctx, value);
+                },
+                child: Text(dl.posSetButton),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -555,7 +564,8 @@ class _StyleBody extends StatelessWidget {
           // The buying grid for this style (docs/19 §14.1) — owner-only,
           // like every other report.
           OutlinedButton.icon(
-            onPressed: () => context.push('/reports/size-curve?style=${style.id}'),
+            onPressed: () =>
+                context.push('/reports/size-curve?style=${style.id}'),
             icon: const Icon(Icons.insights_rounded),
             label: Text(l.sizeCurveTitle),
           ),

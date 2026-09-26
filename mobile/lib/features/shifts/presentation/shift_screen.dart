@@ -14,6 +14,10 @@ import 'package:suuqii/shared/widgets/empty_state.dart';
 import 'package:suuqii/shared/widgets/section_card.dart';
 import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
+/// Guards [_ActiveShiftView._closeShift] against re-entry (the view is
+/// stateless and rebuilt while the close is in flight).
+bool _closingShift = false;
+
 class ShiftScreen extends ConsumerWidget {
   const ShiftScreen({super.key});
 
@@ -275,8 +279,23 @@ class _ActiveShiftView extends ConsumerWidget {
   }
 
   Future<void> _closeShift(BuildContext context, WidgetRef ref) async {
+    // A double tap would open two close sheets (the breakdown await below
+    // leaves a gap) and could close the shift twice.
+    if (_closingShift) return;
+    _closingShift = true;
+    try {
+      await _runCloseShift(context, ref);
+    } finally {
+      _closingShift = false;
+    }
+  }
+
+  Future<void> _runCloseShift(BuildContext context, WidgetRef ref) async {
     final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
+    // Closing swaps this view for the open-shift one, often before
+    // `repo.close` returns; the summary dialog must not depend on it.
+    final rootContext = Navigator.of(context, rootNavigator: true).context;
     final repo = ref.read(shiftsRepositoryProvider);
 
     // Compute the live breakdown so the cashier sees expected cash before
@@ -296,11 +315,14 @@ class _ActiveShiftView extends ConsumerWidget {
         declaredCash: result.declared,
         note: result.note,
       );
-      if (!context.mounted) return;
+      if (!rootContext.mounted) return;
       unawaited(
         showDialog<void>(
-          context: context,
-          builder: (_) {
+          context: rootContext,
+          // Everything below uses the dialog's own context: the view's
+          // context is gone by the time "Done" is tapped, and it belonged to
+          // the shell navigator, not the root one the dialog is on.
+          builder: (dialogContext) {
             final variance = r.shift.variance ?? Decimal.zero;
             final isShort = variance < Decimal.zero;
             final isOver = variance > Decimal.zero;
@@ -316,16 +338,16 @@ class _ActiveShiftView extends ConsumerWidget {
                     const Divider(),
                     InfoRow(
                       label: l.shiftDeclaredLabel,
-                      value: context.money(result.declared),
+                      value: dialogContext.money(result.declared),
                     ),
                     InfoRow(
                       label: l.shiftVariance,
-                      value: context.money(variance),
+                      value: dialogContext.money(variance),
                       emphasize: true,
                       intent: isShort
-                          ? Theme.of(context).colorScheme.error
+                          ? Theme.of(dialogContext).colorScheme.error
                           : isOver
-                              ? Theme.of(context).colorScheme.primary
+                              ? Theme.of(dialogContext).colorScheme.primary
                               : null,
                     ),
                   ],
@@ -333,7 +355,7 @@ class _ActiveShiftView extends ConsumerWidget {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogContext),
                   child: Text(l.commonDone),
                 ),
               ],
@@ -409,9 +431,7 @@ class _CloseSheetState extends State<_CloseSheet> {
             onPressed: () {
               final dec = Decimal.tryParse(_amount.text.trim());
               if (dec == null || dec < Decimal.zero) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l.shiftEnterValidAmount)),
-                );
+                SuuqSheet.showMessage(context, l.shiftEnterValidAmount);
                 return;
               }
               Navigator.pop(

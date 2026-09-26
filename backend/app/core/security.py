@@ -65,15 +65,23 @@ def issue_owner_challenge(*, user_id: UUID, shop_id: UUID) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-def decode_token(token: str) -> dict[str, Any]:
-    """Try current then previous secret to support rotation windows."""
+def decode_token(token: str, *, verify_exp: bool = True) -> dict[str, Any]:
+    """Try current then previous secret to support rotation windows.
+
+    `verify_exp=False` still checks the signature; the caller then judges
+    `exp` itself (the sync path accepts an owner challenge that was valid when
+    the queued action happened).
+    """
     secrets = [settings.jwt_secret]
     if settings.jwt_secret_previous:
         secrets.append(settings.jwt_secret_previous)
     last_err: Exception | None = None
     for s in secrets:
         try:
-            return jwt.decode(token, s, algorithms=["HS256"], leeway=60)
+            return jwt.decode(
+                token, s, algorithms=["HS256"], leeway=60,
+                options={"verify_exp": verify_exp},
+            )
         except jwt.PyJWTError as e:
             last_err = e
     raise last_err  # type: ignore[misc]

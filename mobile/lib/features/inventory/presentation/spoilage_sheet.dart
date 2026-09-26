@@ -172,9 +172,7 @@ class _SpoilageSheetState extends ConsumerState<SpoilageSheet> {
             onPressed: () {
               final n = Decimal.tryParse(_qty.text.trim());
               if (n == null || n <= Decimal.zero) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l.stockAdjustEnterPositive)),
-                );
+                SuuqSheet.showMessage(context, l.stockAdjustEnterPositive);
                 return;
               }
               Navigator.pop(

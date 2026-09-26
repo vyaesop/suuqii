@@ -168,7 +168,9 @@ void main() {
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Coffee added to cart'), findsOneWidget);
+    // No "added" snackbar: it used to sit over the cart bar's Checkout
+    // button. The tile badge and the cart bar are the confirmation.
+    expect(find.byType(SnackBar), findsNothing);
     expect(find.text('ETB 25'), findsWidgets);
     // Proper ICU plural now renders "1 item" (was "1 items").
     expect(find.text('1 item across 1 line'), findsOneWidget);
@@ -222,9 +224,7 @@ void main() {
 
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();
-    // Let the "added to cart" snackbar expire so it cannot cover the bar.
-    await tester.pump(const Duration(milliseconds: 1200));
-    await tester.pumpAndSettle();
+    // No wait: nothing may cover the cart bar right after adding.
 
     // Primary button: direct to checkout (product -> Checkout -> Confirm).
     await tester.tap(find.widgetWithText(FilledButton, 'Checkout'));
@@ -255,9 +255,7 @@ void main() {
 
     await tester.tap(find.text('Coffee'));
     await tester.pumpAndSettle();
-    // Let the "added to cart" snackbar expire so it cannot cover the bar.
-    await tester.pump(const Duration(milliseconds: 1200));
-    await tester.pumpAndSettle();
+    // No wait: nothing may cover the cart bar right after adding.
 
     await tester.tap(find.text('1 item across 1 line'));
     await tester.pumpAndSettle();
@@ -392,7 +390,7 @@ void main() {
 
       // One tap adds the variant directly (no picker in between). Stock 2 →
       // 1 crosses the threshold, so the POS shows the low-stock warning
-      // rather than "added to cart"; the cart bar is the stable signal.
+      // (plain adds get no notice); the cart bar is the stable signal.
       await tester.tap(find.text('Slim jeans · 32 · Black'));
       await tester.pumpAndSettle();
       expect(find.text('1 item across 1 line'), findsOneWidget);

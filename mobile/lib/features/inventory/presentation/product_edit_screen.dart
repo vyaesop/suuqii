@@ -25,6 +25,7 @@ import 'package:suuqii/features/inventory/presentation/widgets/variant_header.da
 import 'package:suuqii/features/supplies/data/supplies_repository.dart';
 import 'package:suuqii/features/supplies/domain/entities/supply.dart';
 import 'package:suuqii/shared/widgets/owner_pin_dialog.dart';
+import 'package:suuqii/shared/widgets/sheet_handle.dart';
 
 const _units = <String>['piece', 'kg', 'quintal', 'liter', 'pack', 'm'];
 
@@ -122,9 +123,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
 
   Future<void> _ensureLoaded() async {
     if (_loaded) return;
-    final p = await ref
-        .read(productsRepositoryProvider)
-        .byId(widget.productId!);
+    final p =
+        await ref.read(productsRepositoryProvider).byId(widget.productId!);
     if (!mounted || p == null) return;
     final auth = ref.read(authControllerProvider).valueOrNull;
     final isOwner = auth is Authenticated && auth.isOwner;
@@ -160,21 +160,23 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       for (final item in existingRecipe) {
         if (item.supplyName == null) continue; // supply deleted, skip
         final supplyUnit = item.supplyUnit ?? 'piece';
-        _recipeLines.add((
-          supply: Supply(
-            id: item.supplyId,
-            shopId: item.shopId,
-            name: item.supplyName!,
-            unit: supplyUnit,
-            quantityOnHand: Decimal.zero,
-            reorderThreshold: Decimal.zero,
-            costPerUnit: item.supplyCostPerUnit ?? Decimal.zero,
+        _recipeLines.add(
+          (
+            supply: Supply(
+              id: item.supplyId,
+              shopId: item.shopId,
+              name: item.supplyName!,
+              unit: supplyUnit,
+              quantityOnHand: Decimal.zero,
+              reorderThreshold: Decimal.zero,
+              costPerUnit: item.supplyCostPerUnit ?? Decimal.zero,
+            ),
+            qty: TextEditingController(
+              text: item.quantity.toStringAsFixed(2),
+            ),
+            unit: item.recipeUnit ?? supplyUnit,
           ),
-          qty: TextEditingController(
-            text: item.quantity.toStringAsFixed(2),
-          ),
-          unit: item.recipeUnit ?? supplyUnit,
-        ),);
+        );
       }
     }
 
@@ -218,7 +220,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(
-            SuuqSpacing.lg, SuuqSpacing.sm, SuuqSpacing.lg, 100,
+            SuuqSpacing.lg,
+            SuuqSpacing.sm,
+            SuuqSpacing.lg,
+            100,
           ),
           child: Form(
             key: _form,
@@ -250,10 +255,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                       const SizedBox(height: SuuqSpacing.sm),
                       CategoryField(
                         controller: _category,
-                        categories: ref
-                                .watch(watchCategoriesProvider)
-                                .valueOrNull ??
-                            const [],
+                        categories:
+                            ref.watch(watchCategoriesProvider).valueOrNull ??
+                                const [],
                       ),
                     ],
                     if (!features.locksUnit) ...[
@@ -289,8 +293,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                           Expanded(
                             child: TextFormField(
                               controller: _purchase,
-                              keyboardType: const TextInputType
-                                  .numberWithOptions(decimal: true),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
                               decoration: InputDecoration(
                                 labelText: l.productPurchaseLabel,
                                 prefixText: 'ETB  ',
@@ -303,8 +309,9 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _selling,
-                            keyboardType: const TextInputType
-                                .numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: InputDecoration(
                               labelText: l.productSellingPriceLabel,
                               prefixText: 'ETB  ',
@@ -521,11 +528,13 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     // (e.g. kg supply → default to g so the user enters 100 not 0.1).
     final defaultUnit = compatibleUnits(picked.unit).first;
     setState(() {
-      _recipeLines.add((
-        supply: picked,
-        qty: TextEditingController(text: ''),
-        unit: defaultUnit,
-      ),);
+      _recipeLines.add(
+        (
+          supply: picked,
+          qty: TextEditingController(text: ''),
+          unit: defaultUnit,
+        ),
+      );
     });
   }
 
@@ -561,6 +570,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
     final unit = features.locksUnit ? features.defaultUnit : _unit;
     final l = context.l10n;
     final messenger = ScaffoldMessenger.of(context);
+    // Busy from the first await, not from the write: a second tap during the
+    // SKU lookup used to run the whole save twice.
+    if (_busy) return;
+    setState(() => _busy = true);
 
     // A duplicate SKU comes back from the server as `sku_collision`, which
     // rejects the whole event; catch it here while the field is still on
@@ -571,7 +584,10 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
               excludingProductId: widget.productId,
             )) {
       if (!mounted) return;
-      setState(() => _skuTakenError = l.errSkuCollision);
+      setState(() {
+        _skuTakenError = l.errSkuCollision;
+        _busy = false;
+      });
       _form.currentState!.validate();
       return;
     }
@@ -588,10 +604,12 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
       // The SKU lookup above is async, so the tree may be gone by now.
       if (!mounted) return;
       challenge = await requestOwnerChallenge(context, ref);
-      if (challenge == null) return;
+      if (challenge == null) {
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
     }
 
-    setState(() => _busy = true);
     try {
       final repo = ref.read(productsRepositoryProvider);
       String productId;
@@ -641,7 +659,8 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
                 recipeUnit: line.unit,
               );
             })
-            .whereType<({String supplyId, Decimal quantity, String recipeUnit})>()
+            .whereType<
+                ({String supplyId, Decimal quantity, String recipeUnit})>()
             .toList();
         await ref.read(recipesRepositoryProvider).setRecipe(
               productId: productId,
@@ -885,7 +904,8 @@ class _RecipeLine extends StatelessWidget {
               const SizedBox(width: 4),
               // Unit selector — compact dropdown showing compatible units.
               DropdownButton<String>(
-                value: units.contains(selectedUnit) ? selectedUnit : units.first,
+                value:
+                    units.contains(selectedUnit) ? selectedUnit : units.first,
                 items: units
                     .map(
                       (u) => DropdownMenuItem(
@@ -923,14 +943,18 @@ class _SupplyPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    return SuuqSheet(
+      padding: const EdgeInsets.only(bottom: SuuqSpacing.sm),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
-              SuuqSpacing.lg, SuuqSpacing.md, SuuqSpacing.lg, 0,
+              SuuqSpacing.lg,
+              SuuqSpacing.sm,
+              SuuqSpacing.lg,
+              0,
             ),
             child: Text(
               context.l10n.productRecipePickIngredient,
@@ -950,7 +974,6 @@ class _SupplyPickerSheet extends StatelessWidget {
               onTap: () => Navigator.pop(context, s),
             ),
           ),
-          const SizedBox(height: SuuqSpacing.sm),
         ],
       ),
     );

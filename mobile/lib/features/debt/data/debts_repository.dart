@@ -88,6 +88,11 @@ class DebtsRepository {
     }
     final debt = await db.debtsDao.getById(debtId);
     if (debt == null) throw StateError('Debt not found');
+    // The collect sheet caps at the balance; this is the backstop for any
+    // other caller — a payment above the balance is a data error, not cash.
+    if (amount > debt.amountOwed - debt.amountPaid) {
+      throw StateError('Payment exceeds outstanding balance');
+    }
 
     final paymentId = const Uuid().v4();
     final now = DateTime.now().toUtc();

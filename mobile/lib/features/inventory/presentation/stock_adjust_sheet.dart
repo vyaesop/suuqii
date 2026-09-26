@@ -241,9 +241,7 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
     final l = context.l10n;
     final n = Decimal.tryParse(_qty.text.trim());
     if (n == null || n <= Decimal.zero) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.stockAdjustEnterPositive)),
-      );
+      SuuqSheet.showMessage(context, l.stockAdjustEnterPositive);
       return;
     }
     if (_movement != 'receive') {
@@ -252,9 +250,7 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
     }
     final cost = Decimal.tryParse(_cost.text.trim()) ?? Decimal.zero;
     if (cost < Decimal.zero) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.stockAdjustEnterPositive)),
-      );
+      SuuqSheet.showMessage(context, l.stockAdjustEnterPositive);
       return;
     }
     final spoiledText = _spoiled.text.trim();
@@ -262,9 +258,7 @@ class _StockAdjustSheetState extends State<StockAdjustSheet> {
     if (spoiledText.isNotEmpty) {
       spoiled = Decimal.tryParse(spoiledText);
       if (spoiled == null || spoiled < Decimal.zero || spoiled > n) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.stockReceiveSpoiledInvalid)),
-        );
+        SuuqSheet.showMessage(context, l.stockReceiveSpoiledInvalid);
         return;
       }
     }

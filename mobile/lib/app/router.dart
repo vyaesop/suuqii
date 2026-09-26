@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:suuqii/app/home_shell.dart';
+import 'package:suuqii/app/sheet_snackbar_observer.dart';
 import 'package:suuqii/app/update_required_screen.dart';
 import 'package:suuqii/core/http/update_required.dart';
 import 'package:suuqii/features/audit/presentation/audit_screen.dart';
@@ -110,6 +111,7 @@ GoRouter router(RouterRef ref) {
   return GoRouter(
     initialLocation: '/pos',
     refreshListenable: refreshNotifier,
+    observers: [SheetSnackBarObserver()],
     redirect: (ctx, state) {
       final loc = state.matchedLocation;
 
@@ -153,6 +155,8 @@ GoRouter router(RouterRef ref) {
         builder: (_, __) => const AcceptInviteScreen(),
       ),
       ShellRoute(
+        // Sheets opened from tab screens land on this navigator.
+        observers: [SheetSnackBarObserver()],
         builder: (_, __, child) => HomeShell(child: child),
         routes: [
           GoRoute(path: '/pos', builder: (_, __) => const PosScreen()),

@@ -134,9 +134,7 @@ class _ProductionSheetState extends State<ProductionSheet> {
     final l = context.l10n;
     final produced = Decimal.tryParse(_produced.text.trim());
     if (produced == null || produced <= Decimal.zero) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.stockAdjustEnterPositive)),
-      );
+      SuuqSheet.showMessage(context, l.stockAdjustEnterPositive);
       return;
     }
     Decimal? spoiled;
@@ -144,9 +142,7 @@ class _ProductionSheetState extends State<ProductionSheet> {
     if (spoiledText.isNotEmpty) {
       spoiled = Decimal.tryParse(spoiledText);
       if (spoiled == null || spoiled < Decimal.zero || spoiled > produced) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.productionSpoiledInvalid)),
-        );
+        SuuqSheet.showMessage(context, l.productionSpoiledInvalid);
         return;
       }
     }

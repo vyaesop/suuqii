@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -307,16 +309,10 @@ class ReceiptSheet extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.copy_rounded, size: 18),
-                  onPressed: () {
-                    final text = _buildShareText(context);
-                    Clipboard.setData(ClipboardData(text: text));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l.receiptCopied)),
-                    );
-                  },
-                  label: Text(l.receiptCopy),
+                child: _CopyButton(
+                  onCopy: () => Clipboard.setData(
+                    ClipboardData(text: _buildShareText(context)),
+                  ),
                 ),
               ),
               const SizedBox(width: SuuqSpacing.sm),
@@ -417,6 +413,56 @@ class ReceiptSheet extends StatelessWidget {
         PaymentMethod.mobileMoney => l.receiptPaidMobile,
         PaymentMethod.credit => l.receiptOnCredit,
       };
+}
+
+/// Confirms the copy on the button itself. A snackbar would paint over this
+/// sheet's "New sale" button (the POS sheet sits under the shell Scaffold's
+/// snackbars) and swallow the cashier's next tap.
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.onCopy});
+
+  final Future<void> Function() onCopy;
+
+  @override
+  State<_CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<_CopyButton> {
+  bool _copied = false;
+  Timer? _reset;
+
+  @override
+  void dispose() {
+    _reset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await widget.onCopy();
+    if (!mounted) return;
+    unawaited(HapticFeedback.selectionClick());
+    setState(() => _copied = true);
+    _reset?.cancel();
+    _reset = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    return Semantics(
+      liveRegion: _copied,
+      child: OutlinedButton.icon(
+        icon: Icon(
+          _copied ? Icons.check_rounded : Icons.copy_rounded,
+          size: 18,
+        ),
+        onPressed: _copy,
+        label: Text(_copied ? l.receiptCopied : l.receiptCopy),
+      ),
+    );
+  }
 }
 
 class _MetaRow extends StatelessWidget {

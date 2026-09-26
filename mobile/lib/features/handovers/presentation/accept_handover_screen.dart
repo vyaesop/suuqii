@@ -161,9 +161,7 @@ class _CountSheetState extends ConsumerState<_CountSheet> {
     final l = context.l10n;
     final counts = _collect();
     if (counts == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.handoverErrorCountEveryLine)),
-      );
+      SuuqSheet.showMessage(context, l.handoverErrorCountEveryLine);
       return;
     }
     setState(() => _submitting = true);

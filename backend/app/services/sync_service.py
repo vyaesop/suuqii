@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.capabilities import can, capability_for_op, needs_owner_pin
-from app.core.errors import ConflictError, DomainError, OwnerPinRequired
+from app.core.errors import ConflictError, DependencyMissingError, DomainError, OwnerPinRequired
 from app.core.security import decode_token
 from app.core.shop_features import features_for
 from app.core.units import convert_unit
@@ -129,17 +129,24 @@ _NONCE_CLEANUP_INTERVAL = 300  # purge expired entries every 5 min
 _last_nonce_cleanup: float = 0.0
 
 
-def _consume_nonce(nonce: str, exp: float) -> bool:
-    """Mark nonce as used. Returns False if already consumed or expired."""
+# How long after a challenge expires an offline event that was *authorised
+# while it was valid* is still accepted. The PIN is entered online at the time
+# of the action; the event may then sit in the device queue through an outage.
+_CHALLENGE_QUEUE_GRACE_S = 7 * 24 * 3600
+
+
+def _nonce_available(nonce: str) -> bool:
+    """Whether this nonce has not been consumed yet (purges stale entries)."""
     global _last_nonce_cleanup, _used_nonces  # noqa: PLW0603
     now = time.time()
     if now - _last_nonce_cleanup > _NONCE_CLEANUP_INTERVAL:
         _used_nonces = {n: e for n, e in _used_nonces.items() if e > now}
         _last_nonce_cleanup = now
-    if nonce in _used_nonces or exp <= now:
-        return False
-    _used_nonces[nonce] = exp
-    return True
+    return nonce not in _used_nonces
+
+
+def _consume_nonce(nonce: str, keep_until: float) -> None:
+    _used_nonces[nonce] = keep_until
 
 
 class SyncService:
@@ -156,16 +163,35 @@ class SyncService:
         self.shop_id = shop_id
         self.user = user
         self.device_id = device_id
+        # Nonces validated for the event being applied; consumed only once its
+        # savepoint has been flushed (see `apply`).
+        self._event_nonces: list[tuple[str, float]] = []
+        self._event_occurred_at: datetime | None = None
         # Consume the batch-level nonce once at construction so the token
         # cannot be replayed across different sync requests.
         self._batch_challenge_id: UUID | None = self._authorize_challenge(owner_challenge)
+        self._commit_event_nonces()
 
     def _authorize_challenge(self, token: str | None) -> UUID | None:
-        """Validate token and consume its nonce. Returns owner user_id or None."""
+        """Validate token and reserve its nonce for this event. Returns the
+        approving owner's user_id or None.
+
+        The nonce is *consumed* only after the event's savepoint flushes. Two
+        cases used to burn it for nothing: a handler that read the token and
+        then failed on a missing dependency (the retry was rejected as
+        `below_price_floor` although the owner had approved it), and a whole
+        request that failed after the token was checked.
+
+        Expiry is judged against when the action happened, not when the push
+        arrived: the PIN is entered online at the time of the sale or return,
+        and the event may then wait in the offline queue past the 5-minute
+        token TTL. A token that was valid at `occurred_at` is accepted within
+        `_CHALLENGE_QUEUE_GRACE_S`.
+        """
         if not token:
             return None
         try:
-            payload = decode_token(token)
+            payload = decode_token(token, verify_exp=False)
         except Exception:  # noqa: BLE001
             return None
         if payload.get("purpose") != "owner_pin":
@@ -175,10 +201,27 @@ class SyncService:
         if payload.get("shop_id") != str(self.shop_id):
             return None
         nonce = payload.get("nonce", "")
+        iat = float(payload.get("iat", 0))
         exp = float(payload.get("exp", 0))
-        if not _consume_nonce(nonce, exp):
+        now = time.time()
+        if exp <= now:
+            occurred = self._event_occurred_at
+            valid_at_action = (
+                occurred is not None
+                and iat - 60 <= occurred.timestamp() <= exp + 60
+                and now <= exp + _CHALLENGE_QUEUE_GRACE_S
+            )
+            if not valid_at_action:
+                return None
+        if not _nonce_available(nonce) or any(n == nonce for n, _ in self._event_nonces):
             return None
+        self._event_nonces.append((nonce, max(exp, now) + _CHALLENGE_QUEUE_GRACE_S))
         return UUID(payload["sub"])
+
+    def _commit_event_nonces(self) -> None:
+        for nonce, keep_until in self._event_nonces:
+            _consume_nonce(nonce, keep_until)
+        self._event_nonces.clear()
 
     def _resolve_challenge(self, payload: dict[str, Any]) -> UUID | None:
         """Resolve a per-event or batch-level challenge token."""
@@ -191,6 +234,10 @@ class SyncService:
         existing = await self._existing_event(event.client_event_id)
         if existing is not None:
             return SyncResultOut(client_event_id=event.client_event_id, status=SyncResultStatus.DUPLICATE)
+
+        self._event_nonces.clear()
+        occurred = event.occurred_at
+        self._event_occurred_at = occurred.replace(tzinfo=UTC) if occurred.tzinfo is None else occurred
 
         # Capability gate runs before the PIN gate: "may this role do this at
         # all" is a stronger question than "does it need approval". An op with
@@ -243,6 +290,9 @@ class SyncService:
                     applied_at=datetime.now(UTC),
                 ))
                 await self.db.flush()
+            # Only now is the owner's approval spent: a retry of a failed
+            # event above is a *new* application and gets to reuse it.
+            self._commit_event_nonces()
         except OwnerPinRequired as e:
             return SyncResultOut(client_event_id=event.client_event_id,
                                  status=SyncResultStatus.REJECTED, code=e.code, detail=str(e))
@@ -398,6 +448,16 @@ class SyncService:
     def _parse_expiry(p: dict[str, Any]) -> date | None:
         raw = p.get("expiry_date")
         return date.fromisoformat(raw) if raw else None
+
+    @staticmethod
+    def _parse_due_date(raw: Any) -> date | None:
+        """Credit due date from the payload. asyncpg refuses a plain string
+        for a DATE column, and the resulting driver error used to land in the
+        catch-all as `internal_error`, rejecting every credit sale with a due
+        date. Accepts "YYYY-MM-DD" and, defensively, a full ISO timestamp."""
+        if not raw:
+            return None
+        return date.fromisoformat(str(raw)[:10])
 
     async def _stock_receive(self, p: dict[str, Any]) -> None:
         """Receive a batch: creates a stock lot. Optional spoiled_quantity is
@@ -948,6 +1008,12 @@ class SyncService:
         sale.cost_total = lot_cost_total.quantize(_CENT, rounding=ROUND_HALF_UP)
 
         if p["payment_method"] == "credit":
+            # The debt references the sale by id only (no relationship()), so
+            # the unit of work has nothing to order the two INSERTs by and
+            # could write the debt first: `debts_sale_id_fkey` violation,
+            # every credit sale rejected as integrity_error. Put the sale in
+            # the database before the debt is even built.
+            await self.db.flush()
             cust = p.get("customer", {})
             sale_total = total
             customer_phone = cust.get("phone")
@@ -986,7 +1052,7 @@ class SyncService:
                 customer_phone=customer_phone,
                 amount_owed=sale_total,
                 amount_paid=Decimal("0"),
-                due_date=cust.get("due_date"),
+                due_date=self._parse_due_date(cust.get("due_date")),
                 status="open",
             ))
 
@@ -1141,7 +1207,12 @@ class SyncService:
         exchange_sale_id = UUID(p["exchange_sale_id"]) if p.get("exchange_sale_id") else None
         if exchange_sale_id is not None:
             exchange = await self.db.get(Sale, exchange_sale_id)
-            if exchange is None or exchange.shop_id != self.shop_id:
+            if exchange is None:
+                # The replacement sale is queued ahead of the return on the
+                # same device; if its push failed transiently, the return
+                # must wait for it, not die.
+                raise DependencyMissingError("exchange sale not yet synced")
+            if exchange.shop_id != self.shop_id:
                 raise DomainError("exchange sale not found", code="not_found", status=404)
 
         refund_method = p.get("refund_method")
@@ -1893,7 +1964,9 @@ class SyncService:
         debt_id = UUID(p["debt_id"])
         debt = await self.db.get(Debt, debt_id)
         if not debt:
-            raise DomainError("debt not found", code="not_found", status=404)
+            # The credit sale that opened this debt may still be on its way
+            # (it is queued ahead of the payment); keep the payment pending.
+            raise DependencyMissingError("debt not yet synced")
         amount = Decimal(p["amount"])
         remaining_before = debt.amount_owed - debt.amount_paid
         self.db.add(DebtPayment(

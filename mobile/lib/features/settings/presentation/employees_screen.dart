@@ -433,8 +433,10 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                     icon: const Icon(Icons.copy_rounded, size: 18),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: _code!));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(l.employeesCodeCopied)),
+                      SuuqSheet.showMessage(
+                        context,
+                        l.employeesCodeCopied,
+                        error: false,
                       );
                     },
                     label: Text(l.employeesCopyCode),

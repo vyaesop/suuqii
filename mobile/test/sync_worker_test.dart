@@ -128,19 +128,27 @@ Response<Map<String, dynamic>> _appliedResponse(Object? data) {
 
 void main() {
   group('classifyFailure', () {
-    test('network errors and 5xx/429 are retryable', () {
-      expect(SyncWorker.classifyFailure(null), SyncFailureKind.retryable);
+    test('5xx is retryable', () {
       expect(SyncWorker.classifyFailure(500), SyncFailureKind.retryable);
       expect(SyncWorker.classifyFailure(503), SyncFailureKind.retryable);
-      expect(SyncWorker.classifyFailure(429), SyncFailureKind.retryable);
     });
 
-    test('401 means auth is broken, never dead-letter', () {
+    test('no response and 429 never burn the retry budget', () {
+      expect(SyncWorker.classifyFailure(null), SyncFailureKind.unreachable);
+      expect(SyncWorker.classifyFailure(429), SyncFailureKind.unreachable);
+    });
+
+    test('401 and 403 mean auth is broken, never dead-letter', () {
       expect(SyncWorker.classifyFailure(401), SyncFailureKind.authBroken);
+      expect(SyncWorker.classifyFailure(403), SyncFailureKind.authBroken);
+    });
+
+    test('426 pauses the queue', () {
+      expect(SyncWorker.classifyFailure(426), SyncFailureKind.updateRequired);
     });
 
     test('other 4xx are permanent', () {
-      for (final status in [400, 403, 404, 409, 422]) {
+      for (final status in [400, 404, 409, 422]) {
         expect(
           SyncWorker.classifyFailure(status),
           SyncFailureKind.permanent,
@@ -197,8 +205,9 @@ void main() {
       );
       await worker(dio).kick().timeout(const Duration(seconds: 5));
 
-      // Only one push: the batch is dead-lettered, not retried forever.
-      expect(dio.calls, 1);
+      // The batch is halved until each event is alone, then dead-lettered —
+      // not retried forever.
+      expect(dio.calls, 3);
       expect(await db.syncQueueDao.pendingCount(), 0);
       final rows = await db.select(db.syncEventsTable).get();
       for (final row in rows) {
@@ -206,6 +215,92 @@ void main() {
         expect(row.lastError, contains('http 422'));
         expect(row.lastError, contains('bad payload'));
       }
+    });
+
+    test('a 422 dead-letters only the malformed event, not its batch',
+        () async {
+      for (final id in ['s1', 's2', 'bad', 's4']) {
+        await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': id});
+      }
+      final dio = _FakeDio((call, data) async {
+        final events = ((data! as Map<String, dynamic>)['events'] as List)
+            .cast<Map<String, dynamic>>();
+        if (events.any((e) => (e['payload'] as Map)['id'] == 'bad')) {
+          throw _httpError(422, body: {'detail': 'bad payload'});
+        }
+        return _appliedResponse(data);
+      });
+      await worker(dio).kick().timeout(const Duration(seconds: 5));
+
+      final rows = await db.select(db.syncEventsTable).get();
+      final byId = {
+        for (final r in rows)
+          (r.payload.contains('"bad"') ? 'bad' : r.clientEventId): r.status,
+      };
+      expect(byId['bad'], 'failed');
+      expect(byId.values.where((s) => s == 'synced'), hasLength(3));
+    });
+
+    test('426 leaves every event pending and stops pushing', () async {
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's1'});
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's2'});
+
+      final dio = _FakeDio((call, data) => throw _httpError(426));
+      await worker(dio).kick().timeout(const Duration(seconds: 5));
+
+      expect(dio.calls, 1);
+      expect(await db.syncQueueDao.pendingCount(), 2);
+      final rows = await db.select(db.syncEventsTable).get();
+      expect(rows.every((r) => r.attempts == 0), isTrue);
+    });
+
+    test('an unreachable server backs off without burning retry budget',
+        () async {
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's1'});
+      // One attempt away from the cap: a budget-burning failure would
+      // dead-letter it right here.
+      await db.customStatement(
+        'UPDATE sync_events SET attempts = ${SyncWorker.maxAttempts - 1}',
+      );
+
+      final dio = _FakeDio((call, data) async {
+        if (call == 1) {
+          throw DioException(
+            requestOptions: RequestOptions(path: '/v1/sync/push'),
+            type: DioExceptionType.connectionTimeout,
+          );
+        }
+        return _appliedResponse(data);
+      });
+      final w = worker(dio);
+      unawaited(Future<void>.delayed(const Duration(milliseconds: 200), w.kick));
+      await w.kick().timeout(const Duration(seconds: 10));
+
+      expect(dio.calls, 2);
+      final row = await db.select(db.syncEventsTable).getSingle();
+      expect(row.status, 'synced');
+    });
+
+    test('requeueDeadLettered resends stranded events but not returns',
+        () async {
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's1'});
+      await db.syncQueueDao.enqueue(op: 'sale.create', payload: {'id': 's2'});
+      await db.syncQueueDao.enqueue(op: 'sale.return', payload: {'id': 'r1'});
+      await db.syncQueueDao.enqueue(op: 'product.update', payload: {'id': 'p'});
+      final rows = await db.select(db.syncEventsTable).get();
+      await db.syncQueueDao.markFailed(rows[0].id, 'gave up');
+      await db.syncQueueDao.markRejected(rows[1].id, 'internal_error', null);
+      await db.syncQueueDao.markFailed(rows[2].id, 'gave up');
+      await db.syncQueueDao.markConflict(rows[3].id, 'stale', null);
+
+      expect(await db.syncQueueDao.requeueDeadLettered(), 2);
+      final after = {
+        for (final r in await db.select(db.syncEventsTable).get()) r.op + r.payload: r.status,
+      };
+      expect(after['sale.create{"id":"s1"}'], 'pending');
+      expect(after['sale.create{"id":"s2"}'], 'pending');
+      expect(after['sale.return{"id":"r1"}'], 'failed');
+      expect(after['product.update{"id":"p"}'], 'conflict');
     });
 
     test('retryable failure dead-letters after max attempts', () async {

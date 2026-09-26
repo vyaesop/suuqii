@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -466,6 +466,30 @@ async def accept_invite(request: Request, req: AcceptInviteRequest) -> TokenBund
         return bundle
 
 
+async def _shop_owners_with_pin(db: AsyncSession, shop_id: UUID) -> list[User]:
+    """Active owners of [shop_id] who have set a PIN.
+
+    Home-shop owners are found on `users`; owners who added this shop later
+    are found through `shop_members`. [db] must be a session without the RLS
+    user context: `shop_members` rows are only visible to their own user, and
+    the caller here is usually the cashier asking for approval.
+    """
+    member_owner_ids = select(ShopMember.user_id).where(
+        ShopMember.shop_id == shop_id, ShopMember.role == "owner"
+    )
+    return list((await db.execute(
+        select(User).where(
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            User.owner_pin_hash.is_not(None),
+            or_(
+                and_(User.shop_id == shop_id, User.role == "owner"),
+                User.id.in_(member_owner_ids),
+            ),
+        ).order_by(User.created_at.asc())
+    )).scalars().all())
+
+
 @router.post("/owner-pin/verify")
 @limiter.limit("5/minute")
 async def verify_owner_pin(
@@ -473,34 +497,51 @@ async def verify_owner_pin(
     req: OwnerPinVerifyRequest,
     response: Response,
     user: User = Depends(current_user),
-    db: AsyncSession = Depends(db_session),
 ):
-    if user.role != "owner" or not user.owner_pin_hash:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "owner pin not set")
+    # The owner types their PIN on whatever device needs approval — usually a
+    # cashier's (docs/07-authentication.md §E). So the PIN is checked against
+    # the active shop's owner, not the caller, and the lockout counts on the
+    # owner's row: a cashier must not get a fresh 5 guesses per device.
+    shop_id = user.shop_id
+    async with AsyncSessionLocal() as db:
+        owners = await _shop_owners_with_pin(db, shop_id)
+        if not owners:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "owner pin not set")
 
-    seconds_left = _pin_seconds_left(user)
-    if seconds_left is not None:
-        response.headers["Retry-After"] = str(seconds_left)
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            f"too many attempts — try again in {seconds_left // 60}m {seconds_left % 60}s",
-        )
-
-    if not verify_password(req.pin, user.owner_pin_hash):
-        remaining = await _record_pin_failure(db, user)
-        if remaining == 0:
-            response.headers["Retry-After"] = str(OWNER_PIN_LOCK_MINUTES * 60)
+        unlocked = [o for o in owners if _pin_seconds_left(o) is None]
+        if not unlocked:
+            seconds_left = min(_pin_seconds_left(o) or 0 for o in owners)
+            response.headers["Retry-After"] = str(seconds_left)
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
-                f"too many wrong PINs — locked for {OWNER_PIN_LOCK_MINUTES} min",
+                f"too many attempts — try again in {seconds_left // 60}m {seconds_left % 60}s",
             )
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            f"wrong pin — {remaining} attempt{'s' if remaining != 1 else ''} left",
-        )
 
-    await _reset_pin_attempts(db, user)
-    return {"ok": True, "challenge_token": issue_owner_challenge(user_id=user.id, shop_id=user.shop_id)}
+        approver = next(
+            (o for o in unlocked if verify_password(req.pin, o.owner_pin_hash or "")),
+            None,
+        )
+        if approver is None:
+            # Charge every owner the guess could have matched, so a shop with
+            # two owners does not double the brute-force budget.
+            remaining = min([await _record_pin_failure(db, o) for o in unlocked])
+            if remaining == 0:
+                response.headers["Retry-After"] = str(OWNER_PIN_LOCK_MINUTES * 60)
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    f"too many wrong PINs — locked for {OWNER_PIN_LOCK_MINUTES} min",
+                )
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                f"wrong pin — {remaining} attempt{'s' if remaining != 1 else ''} left",
+            )
+
+        await _reset_pin_attempts(db, approver)
+        # `sub` is the approving owner, so audit trails name who said yes.
+        return {
+            "ok": True,
+            "challenge_token": issue_owner_challenge(user_id=approver.id, shop_id=shop_id),
+        }
 
 
 @router.get("/users", response_model=ShopUsersResponse)

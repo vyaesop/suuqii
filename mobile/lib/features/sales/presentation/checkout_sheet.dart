@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:suuqii/app/theme/tokens.dart';
@@ -50,12 +51,18 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
   bool _loadingOutstanding = false;
   Timer? _phoneDebounce;
 
+  /// Why "Confirm" refused, shown right above it. Not a snackbar: this sheet
+  /// sits under the shell Scaffold's snackbars, which would cover the very
+  /// button the cashier has to tap again.
+  String? _error;
+
   @override
   void initState() {
     super.initState();
     _customerPhone.addListener(_onPhoneChanged);
     // Recompute change-due live while the cashier types the tendered cash.
     _tendered.addListener(_onTenderedChanged);
+    _customerName.addListener(_clearError);
     // Exact-cash fast path: pre-fill the tendered amount with the exact
     // total, fully selected so any typing replaces it. A minimum cash sale
     // needs zero extra input — "Confirm" works immediately.
@@ -75,7 +82,16 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
   }
 
   void _onTenderedChanged() {
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _error = null);
+  }
+
+  void _clearError() {
+    if (_error != null && mounted) setState(() => _error = null);
+  }
+
+  void _refuse(String message) {
+    HapticFeedback.mediumImpact();
+    setState(() => _error = message);
   }
 
   void _prefillExact(Decimal total) {
@@ -219,6 +235,7 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
             allowCredit: exchange == null,
             onChanged: (method) => setState(() {
               _method = method;
+              _error = null;
               // Coming (back) to cash with nothing typed: restore the
               // exact-total prefill so "Confirm" needs no extra input.
               if (method == PaymentMethod.cash &&
@@ -285,6 +302,36 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
                       ),
           ),
           const SizedBox(height: SuuqSpacing.xl),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 150),
+            child: _error == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.only(bottom: SuuqSpacing.sm),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline_rounded,
+                            size: 20,
+                            color: theme.colorScheme.error,
+                          ),
+                          const SizedBox(width: SuuqSpacing.xs),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.error,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
           SizedBox(
             height: 64,
             child: FilledButton.icon(
@@ -301,31 +348,17 @@ class _CheckoutSheetState extends ConsumerState<CheckoutSheet> {
               onPressed: () {
                 if (isCash && !nothingToCollect) {
                   if (tendered == null || tendered <= Decimal.zero) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(l.checkoutEnterCashReceived),
-                      ),
-                    );
+                    _refuse(l.checkoutEnterCashReceived);
                     return;
                   }
                   if (tendered < total) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          l.checkoutShortBy(context.money(total - tendered)),
-                        ),
-                      ),
-                    );
+                    _refuse(l.checkoutShortBy(context.money(total - tendered)));
                     return;
                   }
                 }
 
                 if (isCredit && _customerName.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(l.checkoutCustomerNameRequired),
-                    ),
-                  );
+                  _refuse(l.checkoutCustomerNameRequired);
                   return;
                 }
 

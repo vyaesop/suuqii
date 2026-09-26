@@ -104,6 +104,35 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase>
         ),
       );
 
+  /// Puts dead-lettered events that are safe to resend back in the queue with
+  /// a fresh retry budget. Returns how many were requeued.
+  ///
+  /// - `failed`: the server never accepted the request (offline too long, an
+  ///   old build, a since-fixed server error). Resending is always safe —
+  ///   every handler is idempotent on the event and entity ids.
+  /// - `rejected` `sale.create`: the local sale is deliberately kept on
+  ///   rejection (the cash was taken), so a resend after the cause is fixed
+  ///   (owner PIN, a server bug) books it without diverging.
+  ///
+  /// `sale.return` is excluded: a discarded return is deleted locally, so a
+  /// resend would book a refund this device no longer shows. Conflicts are
+  /// excluded: the server kept a newer state on purpose.
+  Future<int> requeueDeadLettered() {
+    return (update(syncEventsTable)
+          ..where(
+            (t) =>
+                t.op.equals('sale.return').not() &
+                (t.status.equals('failed') |
+                    (t.status.equals('rejected') & t.op.equals('sale.create'))),
+          ))
+        .write(
+      const SyncEventsTableCompanion(
+        status: Value('pending'),
+        attempts: Value(0),
+      ),
+    );
+  }
+
   Future<void> bumpAttempts(List<int> ids, String error) async {
     if (ids.isEmpty) return;
     final placeholders = List.filled(ids.length, '?').join(',');
